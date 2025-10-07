@@ -55,32 +55,31 @@ export class AblyService {
                     console.log("AblyService: ✅ Connected!");
                     this.connectionStatusCallback(ConnectionStatus.CONNECTED);
 
-                    // Entra in presenza solo una volta
+                    // Entra in presenza solo una volta per connessione
                     if (!this.presenceEntered && this.ably) {
+                        this.presenceEntered = true; // Imposta subito per evitare chiamate multiple
                         const channel = this.ably.channels.get(`private:${userId}`);
                         channel.presence.enter(
-                            JSON.stringify({ deviceCode }),
-                            (err) => {
-                                if (err) {
-                                    console.error(
-                                        "AblyService: ❌ Presence error:",
-                                        err.message
-                                    );
-                                } else {
-                                    console.log(
-                                        "AblyService: 🤝 Presence entered once:",
-                                        deviceCode
-                                    );
-                                    this.presenceEntered = true;
-                                }
-                            }
-                        );
+                            JSON.stringify({ deviceCode })
+                        ).then(() => {
+                            console.log(
+                                "AblyService: 🤝 Presence entered once:",
+                                deviceCode
+                            );
+                        }).catch((err: any) => {
+                            console.error(
+                                "AblyService: ❌ Presence error:",
+                                err.message
+                            );
+                            this.presenceEntered = false; // Reset se errore
+                        });
                     }
                     break;
 
                 case "failed":
                 case "disconnected":
                     this.isConnected = false;
+                    this.presenceEntered = false; // Reset quando disconnesso
                     console.error(
                         "AblyService: 🚫 Connection issue:",
                         stateChange.reason?.message

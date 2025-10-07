@@ -129,6 +129,10 @@ class PolarBleSdk {
         event: "onPpiDataReceived",
         callback: (data: PolarPpiData) => void
     ): void;
+    addEventListener(
+        event: "onPpiStreamError",
+        callback: (error: { error: string }) => void
+    ): void;
     addEventListener(event: PolarEventType, callback: (data: any) => void): void {
         const subscription = this.eventEmitter.addListener(event, callback);
         this.listeners.set(event, subscription);
