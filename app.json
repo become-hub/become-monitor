@@ -9,7 +9,13 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "Questa app ha bisogno del Bluetooth per comunicare con dispositivi BLE",
+        "NSBluetoothPeripheralUsageDescription": "Questa app ha bisogno del Bluetooth per comunicare con dispositivi BLE",
+        "NSLocationWhenInUseUsageDescription": "Questa app ha bisogno della posizione per scansionare dispositivi BLE nelle vicinanze"
+      },
+      "bundleIdentifier": "com.gabriele.muscogiuri.becomemonitor"
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +25,16 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ],
+      "package": "com.gabriele.muscogiuri.becomemonitor"
     },
     "web": {
       "output": "static",
@@ -37,6 +52,17 @@
           "dark": {
             "backgroundColor": "#000000"
           }
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": [
+            "peripheral",
+            "central"
+          ],
+          "bluetoothAlwaysPermission": "Questa app ha bisogno del Bluetooth per comunicare con dispositivi BLE"
         }
       ]
     ],
