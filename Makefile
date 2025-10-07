@@ -1,4 +1,4 @@
-.PHONY: prebuild clean-prebuild help
+.PHONY: prebuild clean-prebuild android ios help
 
 # Prebuild dell'app con clean per rigenerare completamente le cartelle native
 prebuild:
@@ -12,10 +12,28 @@ clean-prebuild:
 	rm -rf android ios
 	@echo "✅ Cartelle native rimosse!"
 
+# Avvia l'app su Android
+android:
+	@echo "🤖 Avvio app su Android..."
+	@echo "☕ Configurazione Java 17 e Android SDK..."
+	export JAVA_HOME=/opt/homebrew/opt/openjdk@17 && \
+	export ANDROID_HOME=$$HOME/Library/Android/sdk && \
+	export PATH=$$PATH:$$ANDROID_HOME/platform-tools:$$ANDROID_HOME/cmdline-tools/latest/bin && \
+	npx expo run:android
+	@echo "✅ App avviata su Android!"
+
+# Avvia l'app su iOS
+ios:
+	@echo "🍎 Avvio app su iOS..."
+	npx expo run:ios
+	@echo "✅ App avviata su iOS!"
+
 # Mostra l'help
 help:
 	@echo "📋 Comandi disponibili:"
 	@echo "  make prebuild        - Esegue npx expo prebuild --clean"
 	@echo "  make clean-prebuild  - Rimuove le cartelle android/ e ios/"
+	@echo "  make android         - Avvia l'app su Android (con Java 17)"
+	@echo "  make ios             - Avvia l'app su iOS (expo run:ios)"
 	@echo "  make help            - Mostra questo messaggio"
 
