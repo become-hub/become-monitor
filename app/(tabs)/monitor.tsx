@@ -10,7 +10,12 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import { AblyService, ConnectionStatus } from "@/services/ably-service";
 import { AuthService } from "@/services/auth-service";
 import { calculateRMSSD, computeLfHf } from "@/services/hrv-calculator";
-import { Buffer } from "buffer";
+import {
+  PolarDeviceInfo,
+  PolarHrData,
+  PolarPpiData,
+  polarSdk,
+} from "@/services/polar-ble-sdk";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -22,13 +27,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { BleManager, Device, State } from "react-native-ble-plx";
-
-const bleManager = new BleManager();
-
-// UUIDs standard per Heart Rate Service (Polar usa questi)
-const HEART_RATE_SERVICE_UUID = "0000180D-0000-1000-8000-00805F9B34FB";
-const HEART_RATE_CHARACTERISTIC_UUID = "00002A37-0000-1000-8000-00805F9B34FB";
 
 // Dimensione finestra per HRV
 const WINDOW_SIZE = 30; // ultimi 30 battiti (~30s)
@@ -36,10 +34,13 @@ const WINDOW_SIZE = 30; // ultimi 30 battiti (~30s)
 export default function MonitorScreen() {
   const colorScheme = useColorScheme();
 
-  // Bluetooth
-  const [bluetoothState, setBluetoothState] = useState<State>(State.Unknown);
+  // Bluetooth & Polar
+  const [bluetoothPowered, setBluetoothPowered] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
-  const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
+  const [connectedDeviceId, setConnectedDeviceId] = useState<string | null>(
+    null
+  );
+  const [connectedDeviceName, setConnectedDeviceName] = useState<string>("");
 
   // Auth & Ably
   const authService = useRef(new AuthService());
@@ -62,17 +63,9 @@ export default function MonitorScreen() {
 
   // Finestra PPI per calcolo HRV
   const ppiWindow = useRef<number[]>([]);
-  const pollInterval = useRef<NodeJS.Timeout | null>(null);
+  const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    // Monitora stato Bluetooth
-    const subscription = bleManager.onStateChange((state) => {
-      setBluetoothState(state);
-      if (state === State.PoweredOn) {
-        console.log("Monitor: Bluetooth pronto!");
-      }
-    }, true);
-
     // Inizializza Ably service
     ablyService.current = new AblyService(
       "https://production-api25.become-hub.com/services/ably",
@@ -82,9 +75,113 @@ export default function MonitorScreen() {
       }
     );
 
+    // Controlla stato Bluetooth iniziale
+    polarSdk.checkBluetoothState().then((powered) => {
+      console.log(
+        `Monitor: 📱 Stato Bluetooth iniziale: ${powered ? "ON" : "OFF"}`
+      );
+      setBluetoothPowered(powered);
+    });
+
+    // Setup Polar SDK event listeners
+    polarSdk.addEventListener("onBluetoothStateChanged", (state) => {
+      console.log(`Monitor: Bluetooth ${state.powered ? "ON" : "OFF"}`);
+      setBluetoothPowered(state.powered);
+    });
+
+    polarSdk.addEventListener("onDeviceFound", (device: PolarDeviceInfo) => {
+      console.log(`Monitor: 📡 Trovato: ${device.name} (${device.deviceId})`);
+      // Connetti automaticamente al primo Polar trovato
+      polarSdk.stopScan();
+      setIsScanning(false);
+      polarSdk.connectToDevice(device.deviceId);
+    });
+
+    polarSdk.addEventListener(
+      "onDeviceConnected",
+      (device: PolarDeviceInfo) => {
+        console.log(`Monitor: ✅ Connesso a ${device.name}!`);
+        setConnectedDeviceId(device.deviceId);
+        setConnectedDeviceName(device.name);
+        // Avvia autenticazione e streaming
+        launchAuthAndStream(device.deviceId);
+      }
+    );
+
+    polarSdk.addEventListener(
+      "onDeviceDisconnected",
+      (device: PolarDeviceInfo) => {
+        console.log("Monitor: ⚠️ Dispositivo disconnesso");
+        setConnectedDeviceId(null);
+        setConnectedDeviceName("");
+        if (pollInterval.current) {
+          clearInterval(pollInterval.current);
+        }
+        ablyService.current?.close();
+      }
+    );
+
+    polarSdk.addEventListener("onHeartRateReceived", (data: PolarHrData) => {
+      console.log(`Monitor: 💓 HR=${data.hr} BPM`);
+      setHeartRate(data.hr);
+
+      // Se non ci sono dati PPI, calcola RR approssimato da BPM come fallback
+      if (data.hr > 0) {
+        const approximateRR = Math.round(60000 / data.hr);
+
+        ppiWindow.current.push(approximateRR);
+        if (ppiWindow.current.length > WINDOW_SIZE) {
+          ppiWindow.current.shift();
+        }
+
+        // Calcola HRV quando la finestra è piena
+        if (ppiWindow.current.length === WINDOW_SIZE) {
+          const rmssd = calculateRMSSD(ppiWindow.current);
+          setHrv(Math.round(rmssd));
+
+          const { lf, hf } = computeLfHf(ppiWindow.current);
+          setLfPower(Math.round(lf));
+          setHfPower(Math.round(hf));
+
+          console.log(
+            `Monitor: 📊 HRV (da HR)=${Math.round(rmssd)}ms, LF=${Math.round(
+              lf
+            )}, HF=${Math.round(hf)}`
+          );
+
+          // Invia ad Ably
+          if (authToken && ablyStatus === ConnectionStatus.CONNECTED) {
+            ablyService.current?.sendHeartRate(
+              deviceCode,
+              userId,
+              data.hr,
+              Math.round(rmssd),
+              Math.round(lf),
+              Math.round(hf)
+            );
+          }
+        }
+      }
+    });
+
+    polarSdk.addEventListener("onPpiDataReceived", (data: PolarPpiData) => {
+      console.log(
+        `Monitor: 📊 PPI Data ricevuto - ${data.samples.length} samples`
+      );
+      handlePpiData(data);
+    });
+
+    polarSdk.addEventListener("onPpiStreamError", (error: any) => {
+      console.log("Monitor: ⚠️ PPI Stream Error:", error.error);
+      console.log("Monitor: 🔄 Modalità fallback attiva (HRV da HR)");
+    });
+
     return () => {
-      subscription.remove();
-      bleManager.stopDeviceScan();
+      polarSdk.stopScan();
+      if (connectedDeviceId) {
+        polarSdk.disconnectFromDevice(connectedDeviceId);
+      }
+      polarSdk.removeAllListeners();
       if (pollInterval.current) {
         clearInterval(pollInterval.current);
       }
@@ -126,7 +223,7 @@ export default function MonitorScreen() {
   };
 
   const startScan = async () => {
-    if (bluetoothState !== State.PoweredOn) {
+    if (!bluetoothPowered) {
       Alert.alert("Bluetooth disabilitato", "Abilita il Bluetooth");
       return;
     }
@@ -137,75 +234,36 @@ export default function MonitorScreen() {
     setIsScanning(true);
     console.log("Monitor: 🔍 Avvio scansione Polar...");
 
-    bleManager.startDeviceScan(null, null, (error, device) => {
-      if (error) {
-        console.error("Monitor: Errore scansione:", error);
-        setIsScanning(false);
-        return;
-      }
-
-      // Cerca dispositivi Polar (o dispositivi con servizio HR)
-      if (
-        device &&
-        device.name &&
-        (device.name.toLowerCase().includes("polar") ||
-          device.name.toLowerCase().includes("h10") ||
-          device.name.toLowerCase().includes("h9"))
-      ) {
-        console.log(
-          `Monitor: 📡 Trovato dispositivo Polar: ${device.name} (${device.id})`
-        );
-        bleManager.stopDeviceScan();
-        setIsScanning(false);
-        connectToDevice(device);
-      }
-    });
-
-    // Timeout scansione
-    setTimeout(() => {
-      if (isScanning) {
-        bleManager.stopDeviceScan();
-        setIsScanning(false);
-        console.log("Monitor: ⏱️ Timeout scansione");
-      }
-    }, 15000);
-  };
-
-  const connectToDevice = async (device: Device) => {
     try {
-      console.log(`Monitor: 🔗 Connessione a ${device.name}...`);
+      await polarSdk.startScan();
 
-      const connected = await device.connect();
-      const deviceWithServices =
-        await connected.discoverAllServicesAndCharacteristics();
-
-      setConnectedDevice(deviceWithServices);
-      console.log(`Monitor: ✅ Connesso a ${device.name}!`);
-
-      // Imposta listener disconnessione
-      device.onDisconnected((error) => {
-        console.log("Monitor: ⚠️ Dispositivo disconnesso");
-        setConnectedDevice(null);
-        if (pollInterval.current) {
-          clearInterval(pollInterval.current);
+      // Timeout scansione
+      setTimeout(async () => {
+        if (isScanning) {
+          await polarSdk.stopScan();
+          setIsScanning(false);
+          console.log("Monitor: ⏱️ Timeout scansione");
         }
-        ablyService.current?.close();
-      });
-
-      // Avvia autenticazione e streaming
-      launchAuthAndStream(deviceWithServices);
+      }, 15000);
     } catch (error: any) {
-      console.error("Monitor: Errore connessione:", error.message);
-      Alert.alert("Errore", `Impossibile connettersi: ${error.message}`);
+      console.error("Monitor: Errore scansione:", error);
+      setIsScanning(false);
+      Alert.alert(
+        "Errore",
+        `Impossibile avviare la scansione: ${error.message}`
+      );
     }
   };
 
-  const launchAuthAndStream = async (device: Device) => {
+  const launchAuthAndStream = async (deviceId: string) => {
     try {
       // Step 1: Autenticazione dispositivo
+      let currentDeviceToken = deviceToken;
+
       if (authToken === "" || Math.floor(Date.now() / 1000) > expiresAt) {
         const authResponse = await authService.current.startDeviceAuth();
         if (authResponse) {
+          currentDeviceToken = authResponse.deviceToken;
           setAuthCode(authResponse.code);
           setDeviceToken(authResponse.deviceToken);
           setExpiresAt(authResponse.expiresAt);
@@ -213,41 +271,70 @@ export default function MonitorScreen() {
             "Monitor: 🔑 Codice di autenticazione:",
             authResponse.code
           );
+          console.log(
+            "Monitor: 🎫 Device token salvato:",
+            authResponse.deviceToken
+          );
         }
       }
 
       // Step 2: Polling per conferma autenticazione
       pollInterval.current = setInterval(async () => {
-        if (deviceToken) {
+        console.log("🔄 POLLING ATTIVO - deviceToken:", currentDeviceToken);
+        if (currentDeviceToken) {
           const pollResponse = await authService.current.pollDeviceAuth(
-            deviceToken
+            currentDeviceToken
           );
-          if (pollResponse && pollResponse.authenticated) {
+          console.log("📥 POLL RESPONSE RAW:", pollResponse);
+
+          if (pollResponse) {
             console.log(
-              "Monitor: 🟢 Autenticato! User ID:",
-              pollResponse.userId
-            );
-            setAuthToken(pollResponse.session);
-            setUserId(parseInt(pollResponse.userId));
-            setDeviceCode(pollResponse.deviceCode);
-
-            // Connetti ad Ably
-            ablyService.current?.connectWithToken(
-              pollResponse.session,
-              parseInt(pollResponse.userId),
-              pollResponse.deviceCode
+              "Monitor: 📥 Poll response:",
+              JSON.stringify(pollResponse)
             );
 
-            // Ferma il polling
-            if (pollInterval.current) {
-              clearInterval(pollInterval.current);
+            if (pollResponse.authenticated) {
+              console.log(
+                "Monitor: 🟢 Autenticato! User ID:",
+                pollResponse.userId
+              );
+              console.log("🔥 AUTENTICAZIONE COMPLETATA - Avvio setup...");
+
+              setAuthToken(pollResponse.session);
+              setUserId(parseInt(pollResponse.userId));
+              setDeviceCode(pollResponse.deviceCode);
+
+              // Connetti ad Ably
+              console.log("🔵 Connessione Ably...");
+              ablyService.current?.connectWithToken(
+                pollResponse.session,
+                parseInt(pollResponse.userId),
+                pollResponse.deviceCode
+              );
+
+              // Ferma il polling
+              if (pollInterval.current) {
+                clearInterval(pollInterval.current);
+                console.log("⏸️ Polling fermato");
+              }
+
+              // Avvia streaming PPI con Polar SDK
+              console.log("💓 Avvio streaming PPI...");
+              try {
+                await polarSdk.startPpiStreaming(deviceId);
+                console.log("✅ PPI streaming avviato con successo!");
+              } catch (error: any) {
+                console.log("⚠️ PPI non disponibile:", error.message);
+                console.log("🔄 Usando modalità fallback: HRV calcolato da HR");
+              }
+            } else {
+              console.log("⏳ POLLING - authenticated: false");
             }
-
-            // Avvia monitoraggio HR
-            startHeartRateMonitoring(device);
           } else {
-            console.log("Monitor: ⏳ In attesa di autenticazione...");
+            console.log("⏳ POLLING - no response");
           }
+        } else {
+          console.log("⚠️ POLLING - deviceToken è vuoto!");
         }
       }, 5000);
     } catch (error) {
@@ -255,113 +342,66 @@ export default function MonitorScreen() {
     }
   };
 
-  const startHeartRateMonitoring = async (device: Device) => {
-    try {
-      console.log("Monitor: 📊 Avvio monitoraggio HR...");
+  const handlePpiData = (data: PolarPpiData) => {
+    console.log(`Monitor: 🔬 Elaborazione ${data.samples.length} campioni PPI`);
 
-      // Monitora la caratteristica Heart Rate
-      device.monitorCharacteristicForService(
-        HEART_RATE_SERVICE_UUID,
-        HEART_RATE_CHARACTERISTIC_UUID,
-        (error, characteristic) => {
-          if (error) {
-            console.error("Monitor: Errore HR monitoring:", error);
-            return;
-          }
+    data.samples.forEach((sample) => {
+      const ppiMs = sample.ppi;
 
-          if (characteristic?.value) {
-            const hrData = parseHeartRateData(characteristic.value);
-            setHeartRate(hrData.bpm);
+      // Filtra valori implausibili
+      if (ppiMs < 300 || ppiMs > 2000) {
+        console.log(`Monitor: ⚠️ Filtrato PPI fuori range: ${ppiMs}ms`);
+        return;
+      }
 
-            // Calcola RR interval (approssimato da BPM se non disponibile)
-            // I dispositivi Polar H10 inviano RR intervals nel payload
-            if (hrData.rrIntervals.length > 0) {
-              hrData.rrIntervals.forEach((rr) => {
-                // Filtra valori implausibili
-                if (rr < 300 || rr > 2000) return;
+      // Aggiungi alla finestra
+      ppiWindow.current.push(ppiMs);
+      if (ppiWindow.current.length > WINDOW_SIZE) {
+        ppiWindow.current.shift();
+      }
 
-                // Aggiungi alla finestra PPI
-                ppiWindow.current.push(rr);
-                if (ppiWindow.current.length > WINDOW_SIZE) {
-                  ppiWindow.current.shift();
-                }
-
-                // Calcola HRV quando la finestra è piena
-                if (ppiWindow.current.length === WINDOW_SIZE) {
-                  const rmssd = calculateRMSSD(ppiWindow.current);
-                  setHrv(Math.round(rmssd));
-
-                  // Calcola LF/HF
-                  const { lf, hf } = computeLfHf(ppiWindow.current);
-                  setLfPower(Math.round(lf));
-                  setHfPower(Math.round(hf));
-
-                  // Invia ad Ably
-                  if (authToken && ablyStatus === ConnectionStatus.CONNECTED) {
-                    ablyService.current?.sendHeartRate(
-                      deviceCode,
-                      userId,
-                      hrData.bpm,
-                      Math.round(rmssd),
-                      Math.round(lf),
-                      Math.round(hf)
-                    );
-                  }
-                }
-              });
-            }
-          }
-        }
+      console.log(
+        `Monitor: 📈 Finestra PPI: ${ppiWindow.current.length}/${WINDOW_SIZE} campioni`
       );
 
-      console.log("Monitor: ✅ Monitoraggio HR attivo!");
-    } catch (error: any) {
-      console.error("Monitor: Errore avvio monitoring:", error.message);
-    }
-  };
+      // Calcola HRV quando la finestra è piena
+      if (ppiWindow.current.length === WINDOW_SIZE) {
+        const rmssd = calculateRMSSD(ppiWindow.current);
+        setHrv(Math.round(rmssd));
 
-  const parseHeartRateData = (
-    base64Value: string
-  ): { bpm: number; rrIntervals: number[] } => {
-    // Decodifica base64
-    const buffer = Buffer.from(base64Value, "base64");
+        // Calcola LF/HF
+        const { lf, hf } = computeLfHf(ppiWindow.current);
+        setLfPower(Math.round(lf));
+        setHfPower(Math.round(hf));
 
-    // Flags byte
-    const flags = buffer[0];
-    const is16Bit = (flags & 0x01) !== 0;
-    const hasRR = (flags & 0x10) !== 0;
+        console.log(
+          `Monitor: 📊 HRV=${Math.round(rmssd)}ms, LF=${Math.round(
+            lf
+          )}, HF=${Math.round(hf)}`
+        );
 
-    // Heart Rate Value
-    let bpm = 0;
-    let offset = 1;
-
-    if (is16Bit) {
-      bpm = buffer.readUInt16LE(offset);
-      offset += 2;
-    } else {
-      bpm = buffer.readUInt8(offset);
-      offset += 1;
-    }
-
-    // RR Intervals (se presenti)
-    const rrIntervals: number[] = [];
-    if (hasRR) {
-      while (offset < buffer.length) {
-        const rrValue = buffer.readUInt16LE(offset);
-        // Converti in millisecondi (1/1024 sec -> ms)
-        rrIntervals.push((rrValue / 1024) * 1000);
-        offset += 2;
+        // Invia ad Ably
+        if (authToken && ablyStatus === ConnectionStatus.CONNECTED) {
+          ablyService.current?.sendHeartRate(
+            deviceCode,
+            userId,
+            heartRate,
+            Math.round(rmssd),
+            Math.round(lf),
+            Math.round(hf)
+          );
+          console.log(`Monitor: 📤 Inviato HRV ad Ably`);
+        }
       }
-    }
-
-    return { bpm, rrIntervals };
+    });
   };
 
   const disconnectDevice = async () => {
-    if (connectedDevice) {
+    if (connectedDeviceId) {
       try {
-        await bleManager.cancelDeviceConnection(connectedDevice.id);
-        setConnectedDevice(null);
+        await polarSdk.disconnectFromDevice(connectedDeviceId);
+        setConnectedDeviceId(null);
+        setConnectedDeviceName("");
         if (pollInterval.current) {
           clearInterval(pollInterval.current);
         }
@@ -374,14 +414,7 @@ export default function MonitorScreen() {
   };
 
   const getBluetoothStateText = () => {
-    switch (bluetoothState) {
-      case State.PoweredOn:
-        return "🟢 Acceso";
-      case State.PoweredOff:
-        return "🔴 Spento";
-      default:
-        return "⚪ Sconosciuto";
-    }
+    return bluetoothPowered ? "🟢 Acceso" : "🔴 Spento";
   };
 
   const getAblyStatusText = () => {
@@ -422,19 +455,23 @@ export default function MonitorScreen() {
               {getAblyStatusText()}
             </ThemedText>
           </View>
-          {authCode && !authToken && (
+          {authCode && (
             <View style={styles.authCodeContainer}>
               <ThemedText style={styles.authCodeLabel}>
-                Inserisci questo codice sul PC:
+                {authToken
+                  ? "✅ Autenticato con successo!"
+                  : "Inserisci questo codice sul PC:"}
               </ThemedText>
-              <ThemedText style={styles.authCode}>{authCode}</ThemedText>
+              {!authToken && (
+                <ThemedText style={styles.authCode}>{authCode}</ThemedText>
+              )}
             </View>
           )}
-          {connectedDevice && (
+          {connectedDeviceId && (
             <View style={styles.statusRow}>
               <ThemedText style={styles.statusLabel}>Dispositivo:</ThemedText>
               <ThemedText style={styles.statusValue}>
-                ✅ {connectedDevice.name}
+                ✅ {connectedDeviceName}
               </ThemedText>
             </View>
           )}
@@ -445,6 +482,12 @@ export default function MonitorScreen() {
           <ThemedText type="subtitle" style={styles.sectionTitle}>
             Metriche Cardiache
           </ThemedText>
+
+          {connectedDeviceId && heartRate === 0 && (
+            <ThemedText style={styles.waitingText}>
+              ⏳ In attesa di dati dal dispositivo...
+            </ThemedText>
+          )}
 
           <View style={styles.metricsGrid}>
             <View
@@ -470,7 +513,13 @@ export default function MonitorScreen() {
               <ThemedText style={styles.metricValue}>
                 {hrv > 0 ? hrv : "—"}
               </ThemedText>
-              <ThemedText style={styles.metricUnit}>ms</ThemedText>
+              <ThemedText style={styles.metricUnit}>
+                {hrv > 0
+                  ? "ms"
+                  : ppiWindow.current.length > 0
+                  ? `${ppiWindow.current.length}/${WINDOW_SIZE}`
+                  : "ms"}
+              </ThemedText>
             </View>
 
             <View
@@ -503,7 +552,7 @@ export default function MonitorScreen() {
 
         {/* Controlli */}
         <ThemedView style={styles.controlsSection}>
-          {!connectedDevice ? (
+          {!connectedDeviceId ? (
             <TouchableOpacity
               style={[
                 styles.button,
@@ -511,7 +560,7 @@ export default function MonitorScreen() {
                 { backgroundColor: Colors[colorScheme ?? "light"].tint },
               ]}
               onPress={startScan}
-              disabled={isScanning || bluetoothState !== State.PoweredOn}
+              disabled={isScanning || !bluetoothPowered}
             >
               {isScanning ? (
                 <>
@@ -532,7 +581,7 @@ export default function MonitorScreen() {
               onPress={disconnectDevice}
             >
               <ThemedText style={styles.buttonText}>
-                Disconnetti {connectedDevice.name}
+                Disconnetti {connectedDeviceName}
               </ThemedText>
             </TouchableOpacity>
           )}
@@ -616,6 +665,12 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     marginBottom: 15,
+  },
+  waitingText: {
+    fontSize: 14,
+    opacity: 0.7,
+    marginBottom: 10,
+    textAlign: "center",
   },
   metricsGrid: {
     flexDirection: "row",

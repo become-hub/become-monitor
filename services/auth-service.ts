@@ -49,7 +49,7 @@ export class AuthService {
     async pollDeviceAuth(deviceToken: string): Promise<DevicePollResponse | null> {
         try {
             const response = await fetch(
-                `${this.serverUrl}/auth/device/pool?deviceToken=${deviceToken}`
+                `${this.serverUrl}/auth/device/poll?deviceToken=${deviceToken}`
             );
 
             const bodyString = await response.text();

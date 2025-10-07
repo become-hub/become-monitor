@@ -1,4 +1,4 @@
-.PHONY: prebuild clean-prebuild android ios help
+.PHONY: prebuild clean-prebuild android ios logs help
 
 # Prebuild dell'app con clean per rigenerare completamente le cartelle native
 prebuild:
@@ -28,6 +28,11 @@ ios:
 	npx expo run:ios
 	@echo "✅ App avviata su iOS!"
 
+# Mostra i log Android in tempo reale
+logs:
+	@echo "📋 Mostrando log Android (Ctrl+C per uscire)..."
+	@adb logcat -s ReactNativeJS:V
+
 # Mostra l'help
 help:
 	@echo "📋 Comandi disponibili:"
@@ -35,5 +40,6 @@ help:
 	@echo "  make clean-prebuild  - Rimuove le cartelle android/ e ios/"
 	@echo "  make android         - Avvia l'app su Android (con Java 17)"
 	@echo "  make ios             - Avvia l'app su iOS (expo run:ios)"
+	@echo "  make logs            - Mostra i log Android in tempo reale"
 	@echo "  make help            - Mostra questo messaggio"
 
