@@ -4,19 +4,22 @@ import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
+  CheckCircle,
   Download,
   Info,
   Monitor,
   Moon,
   Sun,
   Trash2,
+  XCircle,
 } from "lucide-react-native";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   ScrollView,
   StyleSheet,
   Switch,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -27,6 +30,18 @@ export default function SettingsScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [autoConnect, setAutoConnect] = useState(true);
   const [dataSync, setDataSync] = useState(true);
+  const [localDebugMode, setLocalDebugMode] = useState(debugMode);
+  const [password, setPassword] = useState("");
+  const [showPasswordInput, setShowPasswordInput] = useState(false);
+  const [notification, setNotification] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+
+  // Sincronizza localDebugMode con debugMode quando cambia
+  useEffect(() => {
+    setLocalDebugMode(debugMode);
+  }, [debugMode]);
 
   const getCurrentDatePassword = () => {
     const now = new Date();
@@ -38,32 +53,9 @@ export default function SettingsScreen() {
 
   const handleDebugModeToggle = (value: boolean) => {
     if (value) {
-      // Se stanno attivando il debug mode, richiedi la password
-      Alert.prompt(
-        "Debug Mode",
-        "Inserisci la password per attivare la modalità debug:",
-        [
-          {
-            text: "Annulla",
-            style: "cancel",
-            onPress: () => setDebugMode(false),
-          },
-          {
-            text: "Conferma",
-            onPress: (inputPassword: string | undefined) => {
-              const correctPassword = getCurrentDatePassword();
-              if (inputPassword === correctPassword) {
-                setDebugMode(true);
-                Alert.alert("Successo", "Debug mode attivato");
-              } else {
-                Alert.alert("Errore", "Password non corretta");
-                setDebugMode(false);
-              }
-            },
-          },
-        ],
-        "plain-text"
-      );
+      // Se stanno attivando il debug mode, mostra il campo password
+      setLocalDebugMode(true); // Imposta lo switch a "on" temporaneamente
+      setShowPasswordInput(true);
     } else {
       // Se stanno disattivando, chiedi conferma
       Alert.alert(
@@ -76,11 +68,45 @@ export default function SettingsScreen() {
           },
           {
             text: "Disattiva",
-            onPress: () => setDebugMode(false),
+            onPress: () => {
+              setDebugMode(false);
+              setShowPasswordInput(false);
+              setPassword("");
+            },
           },
         ]
       );
     }
+  };
+
+  const handlePasswordSubmit = () => {
+    const correctPassword = getCurrentDatePassword();
+    if (password === correctPassword) {
+      setDebugMode(true);
+      setLocalDebugMode(true);
+      setShowPasswordInput(false);
+      setPassword("");
+
+      // Mostra notifica di successo
+      setNotification({ type: "success", message: "Debug mode attivato" });
+
+      // Auto-close SOLO dopo 5 secondi per il successo
+      setTimeout(() => {
+        setNotification(null);
+      }, 5000);
+    } else {
+      setPassword("");
+      setLocalDebugMode(false); // Ripristina lo switch
+
+      // Mostra notifica di errore (NON si chiude automaticamente)
+      setNotification({ type: "error", message: "Password non corretta" });
+    }
+  };
+
+  const handlePasswordCancel = () => {
+    setShowPasswordInput(false);
+    setPassword("");
+    setLocalDebugMode(false); // Ripristina lo switch
   };
 
   const handleClearData = () => {
@@ -134,6 +160,34 @@ export default function SettingsScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      {/* Notifica */}
+      {notification && (
+        <View
+          style={[
+            styles.notification,
+            notification.type === "success"
+              ? styles.notificationSuccess
+              : styles.notificationError,
+          ]}
+        >
+          {notification.type === "success" ? (
+            <CheckCircle size={24} color="#fff" />
+          ) : (
+            <XCircle size={24} color="#fff" />
+          )}
+          <ThemedText style={styles.notificationText}>
+            {notification.message}
+          </ThemedText>
+          {/* Pulsante di chiusura per tutte le notifiche */}
+          <TouchableOpacity
+            onPress={() => setNotification(null)}
+            style={styles.notificationCloseButton}
+          >
+            <XCircle size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      )}
+
       <ScrollView style={styles.scrollView}>
         {/* Header */}
         <ThemedView style={styles.header}>
@@ -323,15 +377,62 @@ export default function SettingsScreen() {
               </ThemedText>
             </View>
             <Switch
-              value={debugMode}
+              value={localDebugMode}
               onValueChange={handleDebugModeToggle}
               trackColor={{
                 false: "#767577",
                 true: Colors[theme].tint,
               }}
-              thumbColor={debugMode ? "#fff" : "#f4f3f4"}
+              thumbColor={localDebugMode ? "#fff" : "#f4f3f4"}
             />
           </ThemedView>
+
+          {/* Password Input per Debug Mode */}
+          {showPasswordInput && (
+            <ThemedView style={styles.passwordContainer}>
+              <ThemedText style={styles.passwordLabel}>
+                Inserisci la password per attivare il debug mode:
+              </ThemedText>
+              <TextInput
+                style={[
+                  styles.passwordInput,
+                  {
+                    borderColor: Colors[theme].tint,
+                    color: theme === "dark" ? "#fff" : "#000",
+                  },
+                ]}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Password"
+                placeholderTextColor={theme === "dark" ? "#999" : "#666"}
+                secureTextEntry
+                autoFocus
+              />
+              <View style={styles.passwordButtons}>
+                <TouchableOpacity
+                  style={[styles.passwordButton, styles.cancelButton]}
+                  onPress={handlePasswordCancel}
+                >
+                  <ThemedText style={styles.passwordButtonText}>
+                    Annulla
+                  </ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.passwordButton,
+                    { backgroundColor: Colors[theme].tint },
+                  ]}
+                  onPress={handlePasswordSubmit}
+                >
+                  <ThemedText
+                    style={[styles.passwordButtonText, { color: "#fff" }]}
+                  >
+                    Conferma
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            </ThemedView>
+          )}
         </ThemedView>
 
         {/* Data Management */}
@@ -535,5 +636,76 @@ const styles = StyleSheet.create({
     opacity: 0.7,
     marginBottom: 16,
     fontStyle: "italic",
+  },
+  passwordContainer: {
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.1)",
+  },
+  passwordLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    marginBottom: 12,
+  },
+  passwordInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    marginBottom: 12,
+    backgroundColor: "transparent",
+  },
+  passwordButtons: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  passwordButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  cancelButton: {
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.2)",
+  },
+  passwordButtonText: {
+    fontSize: 16,
+    fontWeight: "500",
+  },
+  notification: {
+    position: "absolute",
+    top: 60,
+    left: 20,
+    right: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    borderRadius: 12,
+    zIndex: 1000,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  notificationSuccess: {
+    backgroundColor: "#10B981", // Verde
+  },
+  notificationError: {
+    backgroundColor: "#EF4444", // Rosso
+  },
+  notificationText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "500",
+    marginLeft: 12,
+    flex: 1,
+  },
+  notificationCloseButton: {
+    padding: 4,
+    marginLeft: 8,
   },
 });

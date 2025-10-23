@@ -9,6 +9,7 @@ export interface StoredAuthData {
     authToken: string;
     userId: number;
     deviceCode: string;
+    deviceToken: string; // Token per validazione
     expiresAt: number;
     deviceName?: string;
     deviceId?: string;

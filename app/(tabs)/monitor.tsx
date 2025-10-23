@@ -20,7 +20,14 @@ import { StorageService, StoredAuthData } from "@/services/storage-service";
 import { useScanStore } from "@/stores/scan-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUserStore } from "@/stores/user-store";
-import { Activity, Heart, Trash2, Zap } from "lucide-react-native";
+import {
+  Activity,
+  CheckCircle,
+  Heart,
+  Search,
+  Trash2,
+  Zap,
+} from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -49,6 +56,7 @@ export default function MonitorScreen() {
     setDeviceFound,
     setScanStartTime,
     setConnectedDeviceId: setConnectedDeviceIdInStore,
+    resetScanState,
   } = useScanStore();
 
   // User store
@@ -63,6 +71,7 @@ export default function MonitorScreen() {
     setAuthToken,
     setAuthCode,
     setAppId,
+    resetUserState,
   } = useUserStore();
 
   // Settings store
@@ -81,13 +90,6 @@ export default function MonitorScreen() {
   const ablyService = useRef<AblyService | null>(null);
   const userIdRef = useRef(0);
 
-  // Log ogni volta che userId cambia
-  useEffect(() => {
-    console.log(
-      `Monitor: 🔍 userId changed to: ${userId} (type: ${typeof userId})`
-    );
-    userIdRef.current = userId;
-  }, [userId]);
   const [ablyStatus, setAblyStatus] = useState<ConnectionStatus>(
     ConnectionStatus.DISCONNECTED
   );
@@ -97,6 +99,28 @@ export default function MonitorScreen() {
   const [hrv, setHrv] = useState(0);
   const [lfPower, setLfPower] = useState(0);
   const [hfPower, setHfPower] = useState(0);
+
+  // Stato locale per nascondere il messaggio di successo
+  const [showSuccessMessage, setShowSuccessMessage] = useState(true);
+
+  // Log ogni volta che userId cambia
+  useEffect(() => {
+    console.log(
+      `Monitor: 🔍 userId changed to: ${userId} (type: ${typeof userId})`
+    );
+    userIdRef.current = userId;
+  }, [userId]);
+
+  // Timer per nascondere il messaggio di successo dopo 5 secondi
+  useEffect(() => {
+    if (authToken) {
+      const timer = setTimeout(() => {
+        setShowSuccessMessage(false);
+      }, 5000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [authToken]);
 
   // Finestra PPI per calcolo HRV
   const ppiWindow = useRef<number[]>([]);
@@ -309,6 +333,9 @@ export default function MonitorScreen() {
         }
         stopBiometricSending();
         ablyService.current?.close();
+
+        // Reset stato del dispositivo
+        resetDeviceState();
       }
     );
 
@@ -730,10 +757,14 @@ export default function MonitorScreen() {
                 );
               }
 
+              // Recupera il deviceToken per salvarlo insieme agli altri dati
+              const currentDeviceToken = await StorageService.getDeviceToken();
+
               const authData: StoredAuthData = {
                 authToken: pollResponse.session,
                 userId: parseInt(pollResponse.userId),
                 deviceCode: pollResponse.deviceCode,
+                deviceToken: currentDeviceToken || "", // Token per validazione futura
                 expiresAt: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 ore
                 deviceName: connectedDeviceName,
                 deviceId: connectedDeviceId || undefined,
@@ -904,6 +935,10 @@ export default function MonitorScreen() {
                 }
                 stopBiometricSending();
                 ablyService.current?.close();
+
+                // Reset stato del dispositivo
+                resetDeviceState();
+
                 console.log("Monitor: 🔌 Dispositivo disconnesso");
               } catch (error: any) {
                 console.error("Monitor: Errore disconnessione:", error.message);
@@ -975,6 +1010,26 @@ export default function MonitorScreen() {
       biometricInterval.current = null;
       console.log("Monitor: ⏹️ Fermato invio periodico dati biometrici");
     }
+  };
+
+  const resetDeviceState = () => {
+    // Reset degli store
+    resetScanState();
+    resetUserState();
+
+    // Reset metriche cardiache
+    setHeartRate(0);
+    setHrv(0);
+    setLfPower(0);
+    setHfPower(0);
+
+    // Reset messaggio di successo
+    setShowSuccessMessage(true);
+
+    // Reset finestra PPI
+    ppiWindow.current = [];
+
+    console.log("Monitor: 🔄 Stato del dispositivo resettato");
   };
 
   const getBluetoothStateText = () => {
@@ -1052,16 +1107,22 @@ export default function MonitorScreen() {
             <ThemedText style={styles.statusLabel}>App ID:</ThemedText>
             <ThemedText style={styles.statusValue}>{appId || "N/A"}</ThemedText>
           </View>
-          {authCode && (
+          {!authToken && connectedDeviceId && (
             <View style={styles.authCodeContainer}>
               <ThemedText style={styles.authCodeLabel}>
-                {authToken
-                  ? "Autenticato con successo!"
-                  : "Inserisci questo codice sul PC:"}
+                Inserisci questo codice sul PC:
               </ThemedText>
-              {!authToken && (
-                <ThemedText style={styles.authCode}>{authCode}</ThemedText>
-              )}
+              <ThemedText style={styles.authCode}>{authCode}</ThemedText>
+            </View>
+          )}
+          {authToken && showSuccessMessage && (
+            <View style={styles.successAuthContainer}>
+              <View style={styles.successAuthContent}>
+                <CheckCircle size={20} color="#4CAF50" />
+                <ThemedText style={styles.successAuthLabel}>
+                  Autenticato con successo!
+                </ThemedText>
+              </View>
             </View>
           )}
         </ThemedView>
@@ -1087,7 +1148,7 @@ export default function MonitorScreen() {
               </View>
               <ThemedText style={styles.metricLabel}>Heart Rate</ThemedText>
               <ThemedText style={styles.metricValue}>
-                {heartRate > 0 ? heartRate : "—"}
+                {connectedDeviceId && heartRate > 0 ? heartRate : "—"}
               </ThemedText>
               <ThemedText style={styles.metricUnit}>BPM</ThemedText>
             </View>
@@ -1100,12 +1161,12 @@ export default function MonitorScreen() {
               </View>
               <ThemedText style={styles.metricLabel}>HRV (RMSSD)</ThemedText>
               <ThemedText style={styles.metricValue}>
-                {hrv > 0 ? hrv : "—"}
+                {connectedDeviceId && hrv > 0 ? hrv : "—"}
               </ThemedText>
               <ThemedText style={styles.metricUnit}>
-                {hrv > 0
+                {connectedDeviceId && hrv > 0
                   ? "ms"
-                  : ppiWindow.current.length > 0
+                  : connectedDeviceId && ppiWindow.current.length > 0
                   ? `${ppiWindow.current.length}/${WINDOW_SIZE}`
                   : "ms"}
               </ThemedText>
@@ -1119,7 +1180,7 @@ export default function MonitorScreen() {
               </View>
               <ThemedText style={styles.metricLabel}>LF Power</ThemedText>
               <ThemedText style={styles.metricValue}>
-                {lfPower > 0 ? lfPower : "—"}
+                {connectedDeviceId && lfPower > 0 ? lfPower : "—"}
               </ThemedText>
               <ThemedText style={styles.metricUnit}>ms²</ThemedText>
             </View>
@@ -1132,7 +1193,7 @@ export default function MonitorScreen() {
               </View>
               <ThemedText style={styles.metricLabel}>HF Power</ThemedText>
               <ThemedText style={styles.metricValue}>
-                {hfPower > 0 ? hfPower : "—"}
+                {connectedDeviceId && hfPower > 0 ? hfPower : "—"}
               </ThemedText>
               <ThemedText style={styles.metricUnit}>ms²</ThemedText>
             </View>
@@ -1170,9 +1231,12 @@ export default function MonitorScreen() {
                       </ThemedText>
                     </>
                   ) : (
-                    <ThemedText style={styles.buttonText}>
-                      Cerca Dispositivo Polar
-                    </ThemedText>
+                    <View style={styles.buttonContent}>
+                      <Search size={20} color="#fff" />
+                      <ThemedText style={styles.buttonText}>
+                        Cerca Dispositivo Polar
+                      </ThemedText>
+                    </View>
                   )}
                 </TouchableOpacity>
               )}
@@ -1277,6 +1341,24 @@ const styles = StyleSheet.create({
     textAlign: "center",
     color: "#FF9800",
     letterSpacing: 4,
+  },
+  successAuthContainer: {
+    marginTop: 15,
+    padding: 15,
+    backgroundColor: "rgba(76, 175, 80, 0.1)",
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "#4CAF50",
+  },
+  successAuthContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  successAuthLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#4CAF50",
   },
   metricsSection: {
     padding: 20,

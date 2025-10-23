@@ -112,6 +112,37 @@ export class AuthService {
     }
 
     /**
+     * Valida il token con il server per verificare che sia ancora attivo
+     */
+    async validateToken(deviceToken: string): Promise<boolean> {
+        try {
+            console.log("AuthService: Validating token with server...");
+
+            // Usa lo stesso endpoint del polling per validare il token
+            const response = await fetch(
+                `${this.serverUrl}/auth/device/pool?deviceToken=${deviceToken}`
+            );
+
+            if (!response.ok) {
+                console.log("AuthService: Token validation failed, response not ok");
+                return false;
+            }
+
+            const bodyString = await response.text();
+            const data = JSON.parse(bodyString);
+
+            // Il token è valido se authenticated è true
+            const isValid = data.authenticated === true;
+            console.log(`AuthService: Token validation result: ${isValid}`);
+
+            return isValid;
+        } catch (error) {
+            console.error("AuthService: Error validating token", error);
+            return false;
+        }
+    }
+
+    /**
      * Avvia il flusso di autenticazione con controllo token salvato
      */
     async startAuthFlow(): Promise<{
@@ -122,15 +153,26 @@ export class AuthService {
         // Prima controlla se abbiamo dati salvati validi
         const storedData = await this.getStoredAuthData();
         if (storedData) {
-            console.log("AuthService: Found valid stored auth data");
-            return {
-                needsAuth: false,
-                storedData
-            };
+            console.log("AuthService: Found stored auth data, validating with server...");
+
+            // Valida il token con il server usando il deviceToken
+            const isValid = await this.validateToken(storedData.deviceToken);
+
+            if (isValid) {
+                console.log("AuthService: Token is valid, using stored auth data");
+                return {
+                    needsAuth: false,
+                    storedData
+                };
+            } else {
+                console.log("AuthService: Token is invalid, clearing stored data and starting new auth flow");
+                // Token non valido, cancella i dati salvati
+                await this.clearAuthData();
+            }
         }
 
-        // Se non ci sono dati salvati, avvia nuovo flusso di autenticazione
-        console.log("AuthService: No stored auth data, starting new auth flow");
+        // Se non ci sono dati salvati o il token non è valido, avvia nuovo flusso di autenticazione
+        console.log("AuthService: Starting new auth flow");
         const authResponse = await this.startDeviceAuth();
 
         return {
