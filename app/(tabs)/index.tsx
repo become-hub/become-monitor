@@ -1,5 +1,6 @@
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
+import { BookOpen } from "lucide-react-native";
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
@@ -15,17 +16,28 @@ export default function HomeScreen() {
     router.push("/(tabs)/monitor");
   };
 
+  const handleDocsPress = () => {
+    router.push("/(tabs)/docs");
+  };
+
   return (
     <ThemedView style={styles.container}>
       <ScrollView style={styles.scrollView}>
         {/* Header */}
         <ThemedView style={styles.header}>
-          <ThemedText type="title" style={styles.title}>
-            Benvenuto in Become Monitor
+          <View style={styles.logoContainer}>
+            <Image
+              source={require("@/assets/images/icon.png")}
+              style={styles.becomeLogo}
+              contentFit="contain"
+            />
+          </View>
+          <ThemedText type="title" style={styles.deviceTitle}>
+            Scegli il tuo device
           </ThemedText>
-          <ThemedText style={styles.subtitle}>
-            Piattaforma di monitoraggio biometrico per esperienze VR immersive
-            con dispositivi Polar 360.
+          <ThemedText style={styles.deviceDescription}>
+            Connetti il tuo dispositivo Polar 360 per iniziare a monitorare le
+            tue prestazioni nelle app Become Hub
           </ThemedText>
         </ThemedView>
 
@@ -83,6 +95,16 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           </ThemedView>
+
+          {/* Link alla documentazione */}
+          <TouchableOpacity style={styles.docsLink} onPress={handleDocsPress}>
+            <BookOpen size={16} color={Colors[theme].tint} />
+            <ThemedText
+              style={[styles.docsLinkText, { color: Colors[theme].tint }]}
+            >
+              Scopri come connettere il dispositivo la prima volta
+            </ThemedText>
+          </TouchableOpacity>
         </ThemedView>
       </ScrollView>
     </ThemedView>
@@ -100,17 +122,25 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 60,
   },
-  title: {
-    marginBottom: 10,
+  logoContainer: {
+    marginBottom: 20,
   },
-  subtitle: {
+  becomeLogo: {
+    width: 120,
+    height: 120,
+  },
+  deviceTitle: {
+    marginBottom: 8,
+  },
+  deviceDescription: {
     fontSize: 16,
-    opacity: 0.8,
-    lineHeight: 24,
+    opacity: 0.7,
+    lineHeight: 22,
+    marginBottom: 24,
   },
   section: {
     padding: 20,
-    paddingTop: 10,
+    paddingTop: 0,
   },
   card: {
     padding: 24,
@@ -171,5 +201,17 @@ const styles = StyleSheet.create({
   cardButtonText: {
     fontSize: 16,
     fontWeight: "600",
+  },
+  docsLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 16,
+    paddingVertical: 8,
+  },
+  docsLinkText: {
+    fontSize: 14,
+    fontWeight: "500",
   },
 });
