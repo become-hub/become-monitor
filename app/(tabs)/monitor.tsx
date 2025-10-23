@@ -51,6 +51,15 @@ export default function MonitorScreen() {
   const [deviceCode, setDeviceCode] = useState("");
   const [authToken, setAuthToken] = useState("");
   const [userId, setUserId] = useState(0);
+  const userIdRef = useRef(0);
+
+  // Log ogni volta che userId cambia
+  useEffect(() => {
+    console.log(
+      `Monitor: 🔍 userId changed to: ${userId} (type: ${typeof userId})`
+    );
+    userIdRef.current = userId;
+  }, [userId]);
   const [ablyStatus, setAblyStatus] = useState<ConnectionStatus>(
     ConnectionStatus.DISCONNECTED
   );
@@ -297,11 +306,25 @@ export default function MonitorScreen() {
           // Invia ad Ably
           if (authToken && ablyStatus === ConnectionStatus.CONNECTED) {
             console.log(
-              `Monitor: 🔍 Debug - userId: ${userId}, deviceCode: ${deviceCode}`
+              `Monitor: 🔍 Debug - userId: ${userId} (type: ${typeof userId}), userIdRef: ${
+                userIdRef.current
+              }, deviceCode: ${deviceCode}`
+            );
+            console.log(
+              `Monitor: 🔍 Current state - authToken: ${
+                authToken ? "present" : "missing"
+              }, ablyStatus: ${ablyStatus}`
+            );
+            console.log(
+              `Monitor: 🔍 Ably connection status: ${
+                ablyStatus === ConnectionStatus.CONNECTED
+                  ? "CONNECTED"
+                  : "NOT CONNECTED"
+              }`
             );
             ablyService.current?.sendHeartRate(
               deviceCode,
-              userId,
+              userIdRef.current,
               data.hr,
               Math.round(rmssd),
               Math.round(lf),
@@ -470,8 +493,15 @@ export default function MonitorScreen() {
         // Usa i dati salvati
         console.log("Monitor: 🔄 Utilizzo dati di autenticazione salvati");
         const storedData = authFlow.storedData;
+        console.log(
+          "Monitor: 🔍 Stored data:",
+          JSON.stringify(storedData, null, 2)
+        );
 
         setAuthToken(storedData.authToken);
+        console.log(
+          `Monitor: 🔍 Setting userId from stored data: ${storedData.userId}`
+        );
         setUserId(storedData.userId);
         setDeviceCode(storedData.deviceCode);
 
@@ -592,6 +622,9 @@ export default function MonitorScreen() {
               await authService.current.saveAuthData(authData);
 
               setAuthToken(pollResponse.session);
+              console.log(
+                `Monitor: 🔍 Setting userId from poll response: ${pollResponse.userId}`
+              );
               setUserId(parseInt(pollResponse.userId));
               setDeviceCode(pollResponse.deviceCode);
 
@@ -677,11 +710,11 @@ export default function MonitorScreen() {
         // Invia ad Ably
         if (authToken && ablyStatus === ConnectionStatus.CONNECTED) {
           console.log(
-            `Monitor: 🔍 Debug PPI - userId: ${userId}, deviceCode: ${deviceCode}`
+            `Monitor: 🔍 Debug PPI - userId: ${userId}, userIdRef: ${userIdRef.current}, deviceCode: ${deviceCode}`
           );
           ablyService.current?.sendHeartRate(
             deviceCode,
-            userId,
+            userIdRef.current,
             heartRate,
             Math.round(rmssd),
             Math.round(lf),
@@ -690,7 +723,7 @@ export default function MonitorScreen() {
 
           // Invia evento completo con tutti i dati biometrici calcolati
           ablyService.current?.sendMessage(
-            userId,
+            userIdRef.current,
             "heart_rate_complete",
             {
               deviceId: connectedDeviceId,
@@ -730,6 +763,75 @@ export default function MonitorScreen() {
       } catch (error: any) {
         console.error("Monitor: Errore disconnessione:", error.message);
       }
+    }
+  };
+
+  const reconnectAbly = async () => {
+    console.log("Monitor: 🔄 Riconnessione Ably...");
+
+    try {
+      if (authToken && userIdRef.current && deviceCode) {
+        console.log(
+          `Monitor: 🔍 Reconnetting Ably - userId: ${userIdRef.current}, deviceCode: ${deviceCode}`
+        );
+
+        // Chiudi connessione esistente
+        ablyService.current?.close();
+
+        // Riconnetti
+        ablyService.current = new AblyService(
+          "https://become-hub.com/api/ably/token",
+          setAblyStatus
+        );
+
+        ablyService.current.connectWithToken(
+          authToken,
+          userIdRef.current,
+          deviceCode
+        );
+
+        console.log("Monitor: ✅ Ably riconnesso");
+      } else {
+        console.warn("Monitor: ⚠️ Dati mancanti per riconnessione Ably");
+      }
+    } catch (error: any) {
+      console.error("Monitor: ❌ Errore riconnessione Ably:", error.message);
+    }
+  };
+
+  const reconnectDevice = async () => {
+    console.log("Monitor: 🔄 Avvio riconnessione dispositivo...");
+
+    try {
+      // Step 1: Disconnetti completamente il dispositivo corrente
+      if (connectedDeviceId) {
+        console.log("Monitor: 🔌 Disconnessione dispositivo corrente...");
+        await polarSdk.disconnectFromDevice(connectedDeviceId);
+        setConnectedDeviceId(null);
+        setConnectedDeviceName("");
+        if (pollInterval.current) {
+          clearInterval(pollInterval.current);
+        }
+        stopBiometricSending();
+        ablyService.current?.close();
+      }
+
+      // Step 2: Simula spegnimento/riaccensione Bluetooth
+      console.log("Monitor: 📱 Simulazione spegnimento Bluetooth...");
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      console.log("Monitor: 📱 Simulazione riaccensione Bluetooth...");
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      // Step 3: Riavvia la scansione
+      console.log("Monitor: 🔍 Riavvio scansione dispositivi...");
+      setIsScanning(true);
+
+      // Avvia la scansione
+      await startScan();
+    } catch (error: any) {
+      console.error("Monitor: ❌ Errore durante riconnessione:", error.message);
+      setIsScanning(false);
     }
   };
 
@@ -1016,14 +1118,32 @@ export default function MonitorScreen() {
               )}
             </>
           ) : (
-            <TouchableOpacity
-              style={[styles.button, styles.disconnectButton]}
-              onPress={disconnectDevice}
-            >
-              <ThemedText style={styles.buttonText}>
-                Disconnetti {connectedDeviceName}
-              </ThemedText>
-            </TouchableOpacity>
+            <View style={styles.connectedButtons}>
+              <TouchableOpacity
+                style={[styles.button, styles.disconnectButton]}
+                onPress={disconnectDevice}
+              >
+                <ThemedText style={styles.buttonText}>
+                  Disconnetti {connectedDeviceName}
+                </ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.button, styles.reconnectButton]}
+                onPress={reconnectDevice}
+              >
+                <ThemedText style={styles.buttonText}>🔄 Riconnetti</ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.button, styles.ablyReconnectButton]}
+                onPress={reconnectAbly}
+              >
+                <ThemedText style={styles.buttonText}>
+                  🔗 Riconnetti Ably
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
           )}
 
           {/* Pulsante per cancellare dati salvati */}
@@ -1178,12 +1298,19 @@ const styles = StyleSheet.create({
   disconnectButton: {
     backgroundColor: "#F44336",
   },
-  clearButton: {
-    backgroundColor: "#FF9800",
-    marginTop: 10,
-  },
   reconnectButton: {
     backgroundColor: "#2196F3",
+    marginTop: 10,
+  },
+  ablyReconnectButton: {
+    backgroundColor: "#9C27B0",
+    marginTop: 10,
+  },
+  connectedButtons: {
+    width: "100%",
+  },
+  clearButton: {
+    backgroundColor: "#FF9800",
     marginTop: 10,
   },
   buttonText: {

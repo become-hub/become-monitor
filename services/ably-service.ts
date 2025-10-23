@@ -27,7 +27,7 @@ export class AblyService {
     }
 
     connectWithToken(authToken: string, userId: number, deviceCode: string) {
-        console.log("AblyService: 🚀 Connecting to Ably with token");
+        console.log(`AblyService: 🚀 Connecting to Ably with token - userId: ${userId} (type: ${typeof userId}), deviceCode: ${deviceCode}`);
 
         this.ably = new Ably.Realtime({
             authUrl: this.ablyTokenEndpoint,
@@ -101,13 +101,18 @@ export class AblyService {
         lf: number,
         hf: number
     ) {
+        console.log(`AblyService: 🔍 Connection check - ably: ${!!this.ably}, isConnected: ${this.isConnected}`);
         if (!this.ably || !this.isConnected) {
             console.warn("AblyService: ⚠️ Cannot send, not connected");
+            console.warn(`AblyService: 🔍 Details - ably exists: ${!!this.ably}, isConnected: ${this.isConnected}`);
             return;
         }
 
         try {
-            const channel = this.ably.channels.get(`private:${userId}`);
+            console.log(`AblyService: 🔍 Debug - Received userId: ${userId} (type: ${typeof userId}), deviceCode: ${deviceCode}`);
+            const channelName = `private:${userId}`;
+            console.log(`AblyService: 🔍 Channel name: ${channelName}`);
+            const channel = this.ably.channels.get(channelName);
 
             const message = {
                 heartRate: bpm,
