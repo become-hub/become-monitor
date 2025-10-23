@@ -16,6 +16,7 @@ import {
   PolarPpiData,
   polarSdk,
 } from "@/services/polar-ble-sdk";
+import { StorageService, StoredAuthData } from "@/services/storage-service";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -47,10 +48,8 @@ export default function MonitorScreen() {
   const ablyService = useRef<AblyService | null>(null);
   const [authCode, setAuthCode] = useState("");
   const [deviceCode, setDeviceCode] = useState("");
-  const [deviceToken, setDeviceToken] = useState("");
   const [authToken, setAuthToken] = useState("");
   const [userId, setUserId] = useState(0);
-  const [expiresAt, setExpiresAt] = useState(0);
   const [ablyStatus, setAblyStatus] = useState<ConnectionStatus>(
     ConnectionStatus.DISCONNECTED
   );
@@ -75,18 +74,64 @@ export default function MonitorScreen() {
       }
     );
 
-    // Controlla stato Bluetooth iniziale
-    polarSdk.checkBluetoothState().then((powered) => {
+    // Controlla stato Bluetooth iniziale e prova a riconnettersi
+    const initializeBluetooth = async () => {
+      const powered = await polarSdk.checkBluetoothState();
       console.log(
         `Monitor: 📱 Stato Bluetooth iniziale: ${powered ? "ON" : "OFF"}`
       );
       setBluetoothPowered(powered);
-    });
+
+      if (powered) {
+        // Controlla se abbiamo dati di autenticazione salvati
+        const storedAuthData = await StorageService.getAuthData();
+        if (storedAuthData && storedAuthData.deviceId) {
+          console.log(
+            `Monitor: 🔍 Tentativo riconnessione a ${
+              storedAuthData.deviceName || storedAuthData.deviceId
+            }`
+          );
+          // Prova a riconnettersi al dispositivo salvato usando l'ID
+          try {
+            await polarSdk.connectToDevice(storedAuthData.deviceId);
+          } catch {
+            console.log(
+              "Monitor: ⚠️ Riconnessione diretta fallita, sarà necessario fare scansione"
+            );
+          }
+        }
+      }
+    };
+
+    initializeBluetooth();
 
     // Setup Polar SDK event listeners
     polarSdk.addEventListener("onBluetoothStateChanged", (state) => {
       console.log(`Monitor: Bluetooth ${state.powered ? "ON" : "OFF"}`);
       setBluetoothPowered(state.powered);
+
+      // Se il Bluetooth si riaccende e non abbiamo un dispositivo connesso,
+      // prova a riconnettersi al dispositivo salvato
+      if (state.powered && !connectedDeviceId) {
+        const tryReconnect = async () => {
+          const storedAuthData = await StorageService.getAuthData();
+          if (storedAuthData && storedAuthData.deviceId) {
+            console.log(
+              `Monitor: 🔄 Bluetooth riacceso, tentativo riconnessione a ${
+                storedAuthData.deviceName || storedAuthData.deviceId
+              }`
+            );
+            try {
+              await polarSdk.connectToDevice(storedAuthData.deviceId);
+            } catch {
+              console.log(
+                "Monitor: ⚠️ Riconnessione dopo riaccensione Bluetooth fallita"
+              );
+            }
+          }
+        };
+        tryReconnect();
+      }
     });
 
     polarSdk.addEventListener("onDeviceFound", (device: PolarDeviceInfo) => {
@@ -103,6 +148,11 @@ export default function MonitorScreen() {
         console.log(`Monitor: ✅ Connesso a ${device.name}!`);
         setConnectedDeviceId(device.deviceId);
         setConnectedDeviceName(device.name);
+
+        // Aggiorna il nome e l'ID del dispositivo nei dati salvati se esistono
+        StorageService.updateDeviceName(device.name);
+        StorageService.updateDeviceId(device.deviceId);
+
         // Avvia autenticazione e streaming
         launchAuthAndStream(device.deviceId);
       }
@@ -187,6 +237,7 @@ export default function MonitorScreen() {
       }
       ablyService.current?.close();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const requestPermissions = async (): Promise<boolean> => {
@@ -257,40 +308,96 @@ export default function MonitorScreen() {
 
   const launchAuthAndStream = async (deviceId: string) => {
     try {
-      // Step 1: Autenticazione dispositivo
-      let currentDeviceToken = deviceToken;
+      // Step 1: Controlla se abbiamo dati di autenticazione salvati
+      const authFlow = await authService.current.startAuthFlow();
 
-      if (authToken === "" || Math.floor(Date.now() / 1000) > expiresAt) {
-        const authResponse = await authService.current.startDeviceAuth();
-        if (authResponse) {
-          currentDeviceToken = authResponse.deviceToken;
-          setAuthCode(authResponse.code);
-          setDeviceToken(authResponse.deviceToken);
-          setExpiresAt(authResponse.expiresAt);
-          console.log(
-            "Monitor: 🔑 Codice di autenticazione:",
-            authResponse.code
-          );
-          console.log(
-            "Monitor: 🎫 Device token salvato:",
-            authResponse.deviceToken
-          );
+      if (!authFlow.needsAuth && authFlow.storedData) {
+        // Usa i dati salvati
+        console.log("Monitor: 🔄 Utilizzo dati di autenticazione salvati");
+        const storedData = authFlow.storedData;
+
+        setAuthToken(storedData.authToken);
+        setUserId(storedData.userId);
+        setDeviceCode(storedData.deviceCode);
+
+        // Connetti ad Ably
+        console.log("🔵 Connessione Ably con token salvato...");
+        ablyService.current?.connectWithToken(
+          storedData.authToken,
+          storedData.userId,
+          storedData.deviceCode
+        );
+
+        // Avvia streaming PPI
+        console.log("💓 Avvio streaming PPI...");
+        try {
+          await polarSdk.startPpiStreaming(deviceId);
+          console.log("✅ PPI streaming avviato con successo!");
+        } catch (error: any) {
+          console.log("⚠️ PPI non disponibile:", error.message);
+          console.log("🔄 Usando modalità fallback: HRV calcolato da HR");
         }
+
+        return;
       }
 
-      // Step 2: Polling per conferma autenticazione
+      // Step 2: Nuovo flusso di autenticazione
+      if (authFlow.newAuthResponse) {
+        const authResponse = authFlow.newAuthResponse;
+        setAuthCode(authResponse.code);
+        console.log("Monitor: 🔑 Codice di autenticazione:", authResponse.code);
+        console.log(
+          "Monitor: 🎫 Device token da salvare:",
+          authResponse.deviceToken
+        );
+        console.log(
+          "Monitor: 🎫 Device token type:",
+          typeof authResponse.deviceToken
+        );
+        console.log(
+          "Monitor: 🎫 Device token length:",
+          authResponse.deviceToken?.length
+        );
+
+        // Salva il device token per il polling
+        await StorageService.saveDeviceToken(authResponse.deviceToken);
+        console.log("Monitor: 🎫 Device token salvato nel storage");
+      }
+
+      // Step 3: Polling per conferma autenticazione
       pollInterval.current = setInterval(async () => {
+        const currentDeviceToken = await StorageService.getDeviceToken();
         console.log("🔄 POLLING ATTIVO - deviceToken:", currentDeviceToken);
+        console.log(
+          "🔄 POLLING ATTIVO - deviceToken type:",
+          typeof currentDeviceToken
+        );
+
+        console.log(
+          "🔄 POLLING ATTIVO - deviceToken length:",
+          currentDeviceToken?.length
+        );
+
         if (currentDeviceToken) {
+          console.log("🔄 POLLING ATTIVO - Chiamando pollDeviceAuth...");
           const pollResponse = await authService.current.pollDeviceAuth(
             currentDeviceToken
           );
           console.log("📥 POLL RESPONSE RAW:", pollResponse);
+          console.log("📥 POLL RESPONSE TYPE:", typeof pollResponse);
 
           if (pollResponse) {
             console.log(
               "Monitor: 📥 Poll response:",
               JSON.stringify(pollResponse)
+            );
+            console.log(
+              "Monitor: 📥 Poll response.authenticated:",
+              pollResponse.authenticated
+            );
+            console.log(
+              "Monitor: 📥 Poll response.authenticated type:",
+              typeof pollResponse.authenticated
             );
 
             if (pollResponse.authenticated) {
@@ -299,6 +406,18 @@ export default function MonitorScreen() {
                 pollResponse.userId
               );
               console.log("🔥 AUTENTICAZIONE COMPLETATA - Avvio setup...");
+
+              const authData: StoredAuthData = {
+                authToken: pollResponse.session,
+                userId: parseInt(pollResponse.userId),
+                deviceCode: pollResponse.deviceCode,
+                expiresAt: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 ore
+                deviceName: connectedDeviceName,
+                deviceId: connectedDeviceId || undefined,
+              };
+
+              // Salva i dati di autenticazione
+              await authService.current.saveAuthData(authData);
 
               setAuthToken(pollResponse.session);
               setUserId(parseInt(pollResponse.userId));
@@ -413,18 +532,90 @@ export default function MonitorScreen() {
     }
   };
 
+  const clearStoredAuth = async () => {
+    try {
+      await authService.current.clearAuthData();
+      setAuthToken("");
+      setUserId(0);
+      setDeviceCode("");
+      setAuthCode("");
+      console.log("Monitor: 🗑️ Dati di autenticazione cancellati");
+      Alert.alert(
+        "Reset completato",
+        "I dati di autenticazione sono stati cancellati. La prossima volta dovrai inserire il codice di nuovo."
+      );
+    } catch (error: any) {
+      console.error("Monitor: Errore cancellazione dati:", error.message);
+    }
+  };
+
+  const tryReconnectToSavedDevice = async () => {
+    try {
+      const storedAuthData = await StorageService.getAuthData();
+      if (storedAuthData && storedAuthData.deviceId) {
+        console.log(
+          `Monitor: 🔄 Tentativo riconnessione manuale a ${
+            storedAuthData.deviceName || storedAuthData.deviceId
+          }`
+        );
+        await polarSdk.connectToDevice(storedAuthData.deviceId);
+      } else {
+        Alert.alert(
+          "Nessun dispositivo salvato",
+          "Non ci sono dispositivi salvati per la riconnessione."
+        );
+      }
+    } catch (error: any) {
+      console.error("Monitor: Errore riconnessione manuale:", error.message);
+      Alert.alert(
+        "Errore riconnessione",
+        "Impossibile riconnettersi al dispositivo salvato. Prova a fare una scansione."
+      );
+    }
+  };
+
+  const debugPollAuth = async () => {
+    try {
+      const deviceToken = await StorageService.getDeviceToken();
+      if (deviceToken) {
+        console.log("Monitor: 🔍 DEBUG - Test polling con token:", deviceToken);
+        const result = await authService.current.debugPollDeviceAuth(
+          deviceToken
+        );
+        console.log("Monitor: 🔍 DEBUG - Risultato polling:", result);
+        Alert.alert("Debug Polling", `Risultato: ${JSON.stringify(result)}`);
+      } else {
+        Alert.alert("Debug Polling", "Nessun device token salvato");
+      }
+    } catch (error: any) {
+      console.error("Monitor: Errore debug polling:", error.message);
+      Alert.alert("Errore Debug", error.message);
+    }
+  };
+
   const getBluetoothStateText = () => {
     return bluetoothPowered ? "🟢 Acceso" : "🔴 Spento";
   };
 
-  const getAblyStatusText = () => {
-    switch (ablyStatus) {
-      case ConnectionStatus.CONNECTED:
+  const getStreamingStatusText = () => {
+    if (ablyStatus === ConnectionStatus.CONNECTED) {
+      if (heartRate > 0) {
         return "🟢 Connesso";
-      case ConnectionStatus.CONNECTING:
-        return "🟡 Connessione...";
-      default:
-        return "🔴 Disconnesso";
+      } else {
+        return "🟠 In attesa dati";
+      }
+    } else if (ablyStatus === ConnectionStatus.CONNECTING) {
+      return "🟡 Connessione...";
+    } else {
+      return "🔴 Disconnesso";
+    }
+  };
+
+  const getDeviceStatusText = () => {
+    if (connectedDeviceId && connectedDeviceName) {
+      return `🟢 ${connectedDeviceName}`;
+    } else {
+      return "🔴 Nessun device";
     }
   };
 
@@ -450,9 +641,15 @@ export default function MonitorScreen() {
             </ThemedText>
           </View>
           <View style={styles.statusRow}>
+            <ThemedText style={styles.statusLabel}>Device connesso:</ThemedText>
+            <ThemedText style={styles.statusValue}>
+              {getDeviceStatusText()}
+            </ThemedText>
+          </View>
+          <View style={styles.statusRow}>
             <ThemedText style={styles.statusLabel}>Streaming:</ThemedText>
             <ThemedText style={styles.statusValue}>
-              {getAblyStatusText()}
+              {getStreamingStatusText()}
             </ThemedText>
           </View>
           {authCode && (
@@ -465,14 +662,6 @@ export default function MonitorScreen() {
               {!authToken && (
                 <ThemedText style={styles.authCode}>{authCode}</ThemedText>
               )}
-            </View>
-          )}
-          {connectedDeviceId && (
-            <View style={styles.statusRow}>
-              <ThemedText style={styles.statusLabel}>Dispositivo:</ThemedText>
-              <ThemedText style={styles.statusValue}>
-                ✅ {connectedDeviceName}
-              </ThemedText>
             </View>
           )}
         </ThemedView>
@@ -553,28 +742,46 @@ export default function MonitorScreen() {
         {/* Controlli */}
         <ThemedView style={styles.controlsSection}>
           {!connectedDeviceId ? (
-            <TouchableOpacity
-              style={[
-                styles.button,
-                styles.scanButton,
-                { backgroundColor: Colors[colorScheme ?? "light"].tint },
-              ]}
-              onPress={startScan}
-              disabled={isScanning || !bluetoothPowered}
-            >
-              {isScanning ? (
-                <>
-                  <ActivityIndicator color="#fff" style={{ marginRight: 10 }} />
+            <>
+              <TouchableOpacity
+                style={[
+                  styles.button,
+                  styles.scanButton,
+                  { backgroundColor: Colors[colorScheme ?? "light"].tint },
+                ]}
+                onPress={startScan}
+                disabled={isScanning || !bluetoothPowered}
+              >
+                {isScanning ? (
+                  <>
+                    <ActivityIndicator
+                      color="#fff"
+                      style={{ marginRight: 10 }}
+                    />
+                    <ThemedText style={styles.buttonText}>
+                      Scansione in corso...
+                    </ThemedText>
+                  </>
+                ) : (
                   <ThemedText style={styles.buttonText}>
-                    Scansione in corso...
+                    Cerca Dispositivo Polar
                   </ThemedText>
-                </>
-              ) : (
-                <ThemedText style={styles.buttonText}>
-                  Cerca Dispositivo Polar
-                </ThemedText>
+                )}
+              </TouchableOpacity>
+
+              {/* Pulsante riconnessione se abbiamo dati salvati */}
+              {authToken && (
+                <TouchableOpacity
+                  style={[styles.button, styles.reconnectButton]}
+                  onPress={tryReconnectToSavedDevice}
+                  disabled={!bluetoothPowered}
+                >
+                  <ThemedText style={styles.buttonText}>
+                    🔄 Riconnetti Dispositivo
+                  </ThemedText>
+                </TouchableOpacity>
               )}
-            </TouchableOpacity>
+            </>
           ) : (
             <TouchableOpacity
               style={[styles.button, styles.disconnectButton]}
@@ -585,6 +792,26 @@ export default function MonitorScreen() {
               </ThemedText>
             </TouchableOpacity>
           )}
+
+          {/* Pulsante per cancellare dati salvati */}
+          {authToken && (
+            <TouchableOpacity
+              style={[styles.button, styles.clearButton]}
+              onPress={clearStoredAuth}
+            >
+              <ThemedText style={styles.buttonText}>
+                🗑️ Cancella Token Salvato
+              </ThemedText>
+            </TouchableOpacity>
+          )}
+
+          {/* Pulsante di debug temporaneo */}
+          <TouchableOpacity
+            style={[styles.button, styles.debugButton]}
+            onPress={debugPollAuth}
+          >
+            <ThemedText style={styles.buttonText}>🔍 Debug Polling</ThemedText>
+          </TouchableOpacity>
         </ThemedView>
 
         {/* Info */}
@@ -714,6 +941,18 @@ const styles = StyleSheet.create({
   },
   disconnectButton: {
     backgroundColor: "#F44336",
+  },
+  clearButton: {
+    backgroundColor: "#FF9800",
+    marginTop: 10,
+  },
+  reconnectButton: {
+    backgroundColor: "#2196F3",
+    marginTop: 10,
+  },
+  debugButton: {
+    backgroundColor: "#9C27B0",
+    marginTop: 10,
   },
   buttonText: {
     color: "#fff",
