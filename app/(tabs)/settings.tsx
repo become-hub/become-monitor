@@ -1,3 +1,4 @@
+import { AppFooter } from "@/components/app-footer";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
@@ -397,12 +398,7 @@ export default function SettingsScreen() {
         </ThemedView>
 
         {/* Footer */}
-        <ThemedView style={styles.footer}>
-          <ThemedText style={styles.footerText}>
-            Become Monitor{"\n"}
-            Professional HRV Monitoring
-          </ThemedText>
-        </ThemedView>
+        <AppFooter />
       </ScrollView>
     </ThemedView>
   );
@@ -490,15 +486,6 @@ const styles = StyleSheet.create({
   infoValue: {
     fontSize: 14,
     opacity: 0.7,
-  },
-  footer: {
-    padding: 20,
-    alignItems: "center",
-  },
-  footerText: {
-    fontSize: 12,
-    opacity: 0.6,
-    textAlign: "center",
   },
   themeOptions: {
     flexDirection: "row",

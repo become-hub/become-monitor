@@ -1,3 +1,4 @@
+import { AppFooter } from "@/components/app-footer";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
@@ -7,12 +8,11 @@ import {
   AlertTriangle,
   BarChart3,
   Bluetooth,
-  BookOpen,
   CheckCircle,
   Cloud,
   ExternalLink,
-  Github,
   Heart,
+  Mail,
   Smartphone,
   Wifi,
 } from "lucide-react-native";
@@ -175,22 +175,11 @@ export default function DocsScreen() {
 
           <TouchableOpacity
             style={[styles.linkButton, { borderColor: Colors[theme].tint }]}
-            onPress={() => openLink("https://support.polar.com")}
+            onPress={() => openLink("mailto:support@become-hub.com")}
           >
             <View style={styles.linkContent}>
-              <BookOpen size={20} color={Colors[theme].tint} />
-              <ThemedText style={styles.linkText}>Polar Support</ThemedText>
-              <ExternalLink size={16} />
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.linkButton, { borderColor: Colors[theme].tint }]}
-            onPress={() => openLink("https://github.com/become-hub")}
-          >
-            <View style={styles.linkContent}>
-              <Github size={20} color={Colors[theme].tint} />
-              <ThemedText style={styles.linkText}>GitHub Repository</ThemedText>
+              <Mail size={20} color={Colors[theme].tint} />
+              <ThemedText style={styles.linkText}>Become Support</ThemedText>
               <ExternalLink size={16} />
             </View>
           </TouchableOpacity>
@@ -230,12 +219,7 @@ export default function DocsScreen() {
         </ThemedView>
 
         {/* Footer */}
-        <ThemedView style={styles.footer}>
-          <ThemedText style={styles.footerText}>
-            Become Monitor v1.0.0{"\n"}
-            Professional HRV Monitoring Solution
-          </ThemedText>
-        </ThemedView>
+        <AppFooter />
       </ScrollView>
     </ThemedView>
   );
@@ -304,14 +288,5 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     flex: 1,
     marginLeft: 12,
-  },
-  footer: {
-    padding: 20,
-    alignItems: "center",
-  },
-  footerText: {
-    fontSize: 12,
-    opacity: 0.6,
-    textAlign: "center",
   },
 });

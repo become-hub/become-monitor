@@ -1,3 +1,4 @@
+import { AppFooter } from "@/components/app-footer";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { BookOpen } from "lucide-react-native";
@@ -106,6 +107,9 @@ export default function HomeScreen() {
             </ThemedText>
           </TouchableOpacity>
         </ThemedView>
+
+        {/* Footer */}
+        <AppFooter />
       </ScrollView>
     </ThemedView>
   );

@@ -3,6 +3,7 @@
  * Migrazione del codice legacy per il monitoraggio cardiaco Polar
  */
 
+import { AppFooter } from "@/components/app-footer";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
@@ -1350,9 +1351,12 @@ export default function MonitorScreen() {
             Il sistema effettua un monitoraggio avanzato della frequenza
             cardiaca e calcola metriche HRV (RMSSD) con analisi delle bande
             LF/HF, fornendo un feedback fisiologico continuo per adattare
-            dinamicamente la scena VR in base allo stato dell’utente.
+            dinamicamente la scena VR in base allo stato dell&apos;utente.
           </ThemedText>
         </ThemedView>
+
+        {/* Footer */}
+        <AppFooter />
       </ScrollView>
     </ThemedView>
   );
