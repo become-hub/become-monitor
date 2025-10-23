@@ -32,7 +32,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="monitor"
         options={{
-          title: "Vital Signs",
+          title: "Polar Monitor",
           tabBarIcon: ({ color }) => <Heart size={28} color={color} />,
         }}
       />

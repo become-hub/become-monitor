@@ -1138,10 +1138,12 @@ export default function MonitorScreen() {
         {/* Header */}
         <ThemedView style={styles.header}>
           <ThemedText type="title" style={styles.title}>
-            Polar Monitor
+            {connectedDeviceName || "Polar Monitor"}
           </ThemedText>
           <ThemedText style={styles.subtitle}>
-            Monitoraggio cardiaco avanzato con HRV
+            {connectedDeviceName
+              ? "Monitoraggio cardiaco avanzato con HRV"
+              : "Connetti un dispositivo Polar per iniziare"}
           </ThemedText>
         </ThemedView>
 
@@ -1337,13 +1339,18 @@ export default function MonitorScreen() {
         {/* Info */}
         <ThemedView style={styles.infoSection}>
           <ThemedText style={styles.infoText}>
-            Questo monitor si connette ai dispositivi Polar (es. H10) per
-            monitorare la frequenza cardiaca e calcolare le metriche HRV in
-            tempo reale.
+            I dispositivi Polar 360 si connettono alla piattaforma Become per
+            offrire esperienze VR immersive e reattive. I dati biometrici
+            raccolti vengono trasmessi in tempo reale alle applicazioni Become,
+            consentendo un&apos;interazione precisa tra corpo e ambiente
+            virtuale.
           </ThemedText>
+
           <ThemedText style={styles.infoText}>
-            Le metriche includono: HR, HRV (RMSSD), e analisi delle frequenze
-            LF/HF per la variabilità cardiaca.
+            Il sistema effettua un monitoraggio avanzato della frequenza
+            cardiaca e calcola metriche HRV (RMSSD) con analisi delle bande
+            LF/HF, fornendo un feedback fisiologico continuo per adattare
+            dinamicamente la scena VR in base allo stato dell’utente.
           </ThemedText>
         </ThemedView>
       </ScrollView>
