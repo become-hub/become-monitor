@@ -125,6 +125,37 @@ export class AblyService {
         }
     }
 
+    /**
+     * Metodo generico per inviare messaggi ad Ably
+     */
+    sendMessage(
+        userId: number,
+        eventType: string,
+        data: any,
+        deviceCode?: string
+    ) {
+        if (!this.ably || !this.isConnected) {
+            console.warn("AblyService: ⚠️ Cannot send message, not connected");
+            return;
+        }
+
+        try {
+            const channel = this.ably.channels.get(`private:${userId}`);
+
+            const message = {
+                ...data,
+                type: eventType,
+                code: deviceCode,
+                timestamp: new Date().toISOString(),
+            };
+
+            channel.publish(eventType, JSON.stringify(message));
+            console.log(`AblyService: 📨 Sent ${eventType} to private:${userId}:`, data);
+        } catch (error: any) {
+            console.error(`AblyService: ❌ Failed to send ${eventType}:`, error.message);
+        }
+    }
+
     close() {
         if (this.ably) {
             this.ably.close();

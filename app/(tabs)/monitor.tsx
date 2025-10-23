@@ -63,6 +63,7 @@ export default function MonitorScreen() {
   // Finestra PPI per calcolo HRV
   const ppiWindow = useRef<number[]>([]);
   const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const biometricInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     // Inizializza Ably service
@@ -110,6 +111,19 @@ export default function MonitorScreen() {
       console.log(`Monitor: Bluetooth ${state.powered ? "ON" : "OFF"}`);
       setBluetoothPowered(state.powered);
 
+      // Invia stato Bluetooth ad Ably
+      if (ablyService.current && authToken && userId) {
+        ablyService.current.sendMessage(
+          userId,
+          "bluetooth_state_changed",
+          {
+            powered: state.powered,
+            status: state.powered ? "ON" : "OFF",
+          },
+          deviceCode
+        );
+      }
+
       // Se il Bluetooth si riaccende e non abbiamo un dispositivo connesso,
       // prova a riconnettersi al dispositivo salvato
       if (state.powered && !connectedDeviceId) {
@@ -136,9 +150,39 @@ export default function MonitorScreen() {
 
     polarSdk.addEventListener("onDeviceFound", (device: PolarDeviceInfo) => {
       console.log(`Monitor: 📡 Trovato: ${device.name} (${device.deviceId})`);
+
+      // Invia evento dispositivo trovato ad Ably
+      if (ablyService.current && authToken && userId) {
+        ablyService.current.sendMessage(
+          userId,
+          "device_found",
+          {
+            deviceId: device.deviceId,
+            deviceName: device.name,
+            rssi: device.rssi,
+          },
+          deviceCode
+        );
+      }
+
       // Connetti automaticamente al primo Polar trovato
       polarSdk.stopScan();
       setIsScanning(false);
+
+      // Invia evento di scansione fermata per dispositivo trovato ad Ably
+      if (ablyService.current && authToken && userId) {
+        ablyService.current.sendMessage(
+          userId,
+          "scan_stopped",
+          {
+            action: "scan_stopped",
+            reason: "device_found",
+            foundDevice: device.name,
+          },
+          deviceCode
+        );
+      }
+
       polarSdk.connectToDevice(device.deviceId);
     });
 
@@ -153,6 +197,20 @@ export default function MonitorScreen() {
         StorageService.updateDeviceName(device.name);
         StorageService.updateDeviceId(device.deviceId);
 
+        // Invia evento di connessione ad Ably
+        if (ablyService.current && authToken && userId) {
+          ablyService.current.sendMessage(
+            userId,
+            "device_connected",
+            {
+              deviceId: device.deviceId,
+              deviceName: device.name,
+              rssi: device.rssi,
+            },
+            deviceCode
+          );
+        }
+
         // Avvia autenticazione e streaming
         launchAuthAndStream(device.deviceId);
       }
@@ -162,11 +220,27 @@ export default function MonitorScreen() {
       "onDeviceDisconnected",
       (device: PolarDeviceInfo) => {
         console.log("Monitor: ⚠️ Dispositivo disconnesso");
+
+        // Invia evento di disconnessione ad Ably
+        if (ablyService.current && authToken && userId) {
+          ablyService.current.sendMessage(
+            userId,
+            "device_disconnected",
+            {
+              deviceId: device.deviceId,
+              deviceName: device.name,
+              reason: "disconnected",
+            },
+            deviceCode
+          );
+        }
+
         setConnectedDeviceId(null);
         setConnectedDeviceName("");
         if (pollInterval.current) {
           clearInterval(pollInterval.current);
         }
+        stopBiometricSending();
         ablyService.current?.close();
       }
     );
@@ -174,6 +248,26 @@ export default function MonitorScreen() {
     polarSdk.addEventListener("onHeartRateReceived", (data: PolarHrData) => {
       console.log(`Monitor: 💓 HR=${data.hr} BPM`);
       setHeartRate(data.hr);
+
+      // Invia dati della frequenza cardiaca ad Ably (solo HR, HRV viene inviato separatamente quando calcolato)
+      if (ablyService.current) {
+        ablyService.current.sendMessage(
+          29,
+          "heart_rate",
+          {
+            deviceId: data.deviceId,
+            heartRate: data.hr,
+            contactDetected: data.contactDetected,
+            contactSupported: data.contactSupported,
+            ppiWindowSize: ppiWindow.current.length,
+          },
+          deviceCode
+        );
+
+        console.log(
+          `Monitor: 📤 HEART RATE EVENT SENT - HR: ${data.hr}, PPI Window: ${ppiWindow.current.length}`
+        );
+      }
 
       // Se non ci sono dati PPI, calcola RR approssimato da BPM come fallback
       if (data.hr > 0) {
@@ -218,12 +312,41 @@ export default function MonitorScreen() {
       console.log(
         `Monitor: 📊 PPI Data ricevuto - ${data.samples.length} samples`
       );
+
+      // Invia dati PPI ad Ably
+      if (ablyService.current && authToken && userId) {
+        ablyService.current.sendMessage(
+          userId,
+          "ppi_data",
+          {
+            deviceId: data.deviceId,
+            samples: data.samples,
+            sampleCount: data.samples.length,
+          },
+          deviceCode
+        );
+      }
+
       handlePpiData(data);
     });
 
     polarSdk.addEventListener("onPpiStreamError", (error: any) => {
       console.log("Monitor: ⚠️ PPI Stream Error:", error.error);
       console.log("Monitor: 🔄 Modalità fallback attiva (HRV da HR)");
+
+      // Invia errore PPI ad Ably
+      if (ablyService.current && authToken && userId) {
+        ablyService.current.sendMessage(
+          userId,
+          "ppi_stream_error",
+          {
+            error: error.error,
+            message: "PPI stream error occurred",
+            fallbackMode: true,
+          },
+          deviceCode
+        );
+      }
     });
 
     return () => {
@@ -235,6 +358,7 @@ export default function MonitorScreen() {
       if (pollInterval.current) {
         clearInterval(pollInterval.current);
       }
+      stopBiometricSending();
       ablyService.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -285,6 +409,19 @@ export default function MonitorScreen() {
     setIsScanning(true);
     console.log("Monitor: 🔍 Avvio scansione Polar...");
 
+    // Invia evento di scansione avviata ad Ably
+    if (ablyService.current && authToken && userId) {
+      ablyService.current.sendMessage(
+        userId,
+        "scan_started",
+        {
+          action: "scan_started",
+          timestamp: new Date().toISOString(),
+        },
+        deviceCode
+      );
+    }
+
     try {
       await polarSdk.startScan();
 
@@ -294,6 +431,20 @@ export default function MonitorScreen() {
           await polarSdk.stopScan();
           setIsScanning(false);
           console.log("Monitor: ⏱️ Timeout scansione");
+
+          // Invia evento di scansione timeout ad Ably
+          if (ablyService.current && authToken && userId) {
+            ablyService.current.sendMessage(
+              userId,
+              "scan_timeout",
+              {
+                action: "scan_timeout",
+                reason: "timeout",
+                duration: 15000,
+              },
+              deviceCode
+            );
+          }
         }
       }, 15000);
     } catch (error: any) {
@@ -337,6 +488,9 @@ export default function MonitorScreen() {
           console.log("⚠️ PPI non disponibile:", error.message);
           console.log("🔄 Usando modalità fallback: HRV calcolato da HR");
         }
+
+        // Avvia invio periodico dei dati biometrici
+        startBiometricSending();
 
         return;
       }
@@ -407,6 +561,20 @@ export default function MonitorScreen() {
               );
               console.log("🔥 AUTENTICAZIONE COMPLETATA - Avvio setup...");
 
+              // Invia evento di autenticazione completata ad Ably
+              if (ablyService.current) {
+                ablyService.current.sendMessage(
+                  parseInt(pollResponse.userId),
+                  "authentication_completed",
+                  {
+                    userId: pollResponse.userId,
+                    deviceCode: pollResponse.deviceCode,
+                    authenticated: true,
+                  },
+                  pollResponse.deviceCode
+                );
+              }
+
               const authData: StoredAuthData = {
                 authToken: pollResponse.session,
                 userId: parseInt(pollResponse.userId),
@@ -446,6 +614,9 @@ export default function MonitorScreen() {
                 console.log("⚠️ PPI non disponibile:", error.message);
                 console.log("🔄 Usando modalità fallback: HRV calcolato da HR");
               }
+
+              // Avvia invio periodico dei dati biometrici
+              startBiometricSending();
             } else {
               console.log("⏳ POLLING - authenticated: false");
             }
@@ -509,7 +680,29 @@ export default function MonitorScreen() {
             Math.round(lf),
             Math.round(hf)
           );
-          console.log(`Monitor: 📤 Inviato HRV ad Ably`);
+
+          // Invia evento completo con tutti i dati biometrici calcolati
+          ablyService.current?.sendMessage(
+            29,
+            "heart_rate_complete",
+            {
+              deviceId: connectedDeviceId,
+              heartRate: heartRate,
+              hrv: Math.round(rmssd),
+              lfPower: Math.round(lf),
+              hfPower: Math.round(hf),
+              windowSize: ppiWindow.current.length,
+              contactDetected: true,
+              contactSupported: true,
+            },
+            deviceCode
+          );
+
+          console.log(
+            `Monitor: 📤 HEART RATE COMPLETE EVENT SENT - HR: ${heartRate}, HRV: ${Math.round(
+              rmssd
+            )}, LF: ${Math.round(lf)}, HF: ${Math.round(hf)}`
+          );
         }
       }
     });
@@ -524,6 +717,7 @@ export default function MonitorScreen() {
         if (pollInterval.current) {
           clearInterval(pollInterval.current);
         }
+        stopBiometricSending();
         ablyService.current?.close();
         console.log("Monitor: 🔌 Dispositivo disconnesso");
       } catch (error: any) {
@@ -574,22 +768,42 @@ export default function MonitorScreen() {
     }
   };
 
-  const debugPollAuth = async () => {
-    try {
-      const deviceToken = await StorageService.getDeviceToken();
-      if (deviceToken) {
-        console.log("Monitor: 🔍 DEBUG - Test polling con token:", deviceToken);
-        const result = await authService.current.debugPollDeviceAuth(
-          deviceToken
+  const startBiometricSending = () => {
+    // Ferma il timer esistente se presente
+    if (biometricInterval.current) {
+      clearInterval(biometricInterval.current);
+    }
+
+    // Avvia invio periodico dei dati biometrici ogni secondo
+    biometricInterval.current = setInterval(() => {
+      if (ablyService.current && authToken && userId && heartRate > 0) {
+        // Invia dati biometrici ogni secondo
+        ablyService.current.sendMessage(
+          29,
+          "biometric_data",
+          {
+            heartRate: heartRate,
+            hrv: hrv,
+            lfPower: lfPower,
+            hfPower: hfPower,
+            ppiWindowSize: ppiWindow.current.length,
+            timestamp: new Date().toISOString(),
+          },
+          deviceCode
         );
-        console.log("Monitor: 🔍 DEBUG - Risultato polling:", result);
-        Alert.alert("Debug Polling", `Risultato: ${JSON.stringify(result)}`);
-      } else {
-        Alert.alert("Debug Polling", "Nessun device token salvato");
+
+        console.log(
+          `Monitor: 📤 BIOMETRIC EVENT SENT - HR: ${heartRate}, HRV: ${hrv}, LF: ${lfPower}, HF: ${hfPower}`
+        );
       }
-    } catch (error: any) {
-      console.error("Monitor: Errore debug polling:", error.message);
-      Alert.alert("Errore Debug", error.message);
+    }, 1000); // Ogni secondo
+  };
+
+  const stopBiometricSending = () => {
+    if (biometricInterval.current) {
+      clearInterval(biometricInterval.current);
+      biometricInterval.current = null;
+      console.log("Monitor: ⏹️ Fermato invio periodico dati biometrici");
     }
   };
 
@@ -804,14 +1018,6 @@ export default function MonitorScreen() {
               </ThemedText>
             </TouchableOpacity>
           )}
-
-          {/* Pulsante di debug temporaneo */}
-          <TouchableOpacity
-            style={[styles.button, styles.debugButton]}
-            onPress={debugPollAuth}
-          >
-            <ThemedText style={styles.buttonText}>🔍 Debug Polling</ThemedText>
-          </TouchableOpacity>
         </ThemedView>
 
         {/* Info */}
@@ -948,10 +1154,6 @@ const styles = StyleSheet.create({
   },
   reconnectButton: {
     backgroundColor: "#2196F3",
-    marginTop: 10,
-  },
-  debugButton: {
-    backgroundColor: "#9C27B0",
     marginTop: 10,
   },
   buttonText: {

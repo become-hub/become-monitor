@@ -138,12 +138,5 @@ export class AuthService {
         };
     }
 
-    /**
-     * Metodo di debug per testare il polling con un token specifico
-     */
-    async debugPollDeviceAuth(deviceToken: string): Promise<DevicePollResponse | null> {
-        console.log("AuthService: DEBUG pollDeviceAuth con token:", deviceToken);
-        return await this.pollDeviceAuth(deviceToken);
-    }
 }
 
