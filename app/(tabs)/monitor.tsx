@@ -252,7 +252,7 @@ export default function MonitorScreen() {
       // Invia dati della frequenza cardiaca ad Ably (solo HR, HRV viene inviato separatamente quando calcolato)
       if (ablyService.current) {
         ablyService.current.sendMessage(
-          29,
+          userId,
           "heart_rate",
           {
             deviceId: data.deviceId,
@@ -683,7 +683,7 @@ export default function MonitorScreen() {
 
           // Invia evento completo con tutti i dati biometrici calcolati
           ablyService.current?.sendMessage(
-            29,
+            userId,
             "heart_rate_complete",
             {
               deviceId: connectedDeviceId,
@@ -779,7 +779,7 @@ export default function MonitorScreen() {
       if (ablyService.current && authToken && userId && heartRate > 0) {
         // Invia dati biometrici ogni secondo
         ablyService.current.sendMessage(
-          29,
+          userId,
           "biometric_data",
           {
             heartRate: heartRate,
@@ -864,6 +864,18 @@ export default function MonitorScreen() {
             <ThemedText style={styles.statusLabel}>Streaming:</ThemedText>
             <ThemedText style={styles.statusValue}>
               {getStreamingStatusText()}
+            </ThemedText>
+          </View>
+          <View style={styles.statusRow}>
+            <ThemedText style={styles.statusLabel}>Device Code:</ThemedText>
+            <ThemedText style={styles.statusValue}>
+              {deviceCode || "N/A"}
+            </ThemedText>
+          </View>
+          <View style={styles.statusRow}>
+            <ThemedText style={styles.statusLabel}>User ID:</ThemedText>
+            <ThemedText style={styles.statusValue}>
+              {userId || "N/A"}
             </ThemedText>
           </View>
           {authCode && (
