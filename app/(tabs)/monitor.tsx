@@ -6,7 +6,7 @@
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useTheme } from "@/contexts/ThemeContext";
 import { AblyService, ConnectionStatus } from "@/services/ably-service";
 import { AuthService } from "@/services/auth-service";
 import { calculateRMSSD, computeLfHf } from "@/services/hrv-calculator";
@@ -17,6 +17,7 @@ import {
   polarSdk,
 } from "@/services/polar-ble-sdk";
 import { StorageService, StoredAuthData } from "@/services/storage-service";
+import { Activity, Heart, Trash2, Zap } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -33,7 +34,7 @@ import {
 const WINDOW_SIZE = 30; // ultimi 30 battiti (~30s)
 
 export default function MonitorScreen() {
-  const colorScheme = useColorScheme();
+  const { theme } = useTheme();
 
   // Bluetooth & Polar
   const [bluetoothPowered, setBluetoothPowered] = useState(false);
@@ -79,7 +80,7 @@ export default function MonitorScreen() {
     const initializeBluetooth = async () => {
       const powered = await polarSdk.checkBluetoothState();
       console.log(
-        `Monitor: 📱 Stato Bluetooth iniziale: ${powered ? "ON" : "OFF"}`
+        `Monitor: Stato Bluetooth iniziale: ${powered ? "ON" : "OFF"}`
       );
       setBluetoothPowered(powered);
 
@@ -88,7 +89,7 @@ export default function MonitorScreen() {
         const storedAuthData = await StorageService.getAuthData();
         if (storedAuthData && storedAuthData.deviceId) {
           console.log(
-            `Monitor: 🔍 Tentativo riconnessione a ${
+            `Monitor: Tentativo riconnessione a ${
               storedAuthData.deviceName || storedAuthData.deviceId
             }`
           );
@@ -97,7 +98,7 @@ export default function MonitorScreen() {
             await polarSdk.connectToDevice(storedAuthData.deviceId);
           } catch {
             console.log(
-              "Monitor: ⚠️ Riconnessione diretta fallita, sarà necessario fare scansione"
+              "Monitor: Riconnessione diretta fallita, sarà necessario fare scansione"
             );
           }
         }
@@ -295,6 +296,9 @@ export default function MonitorScreen() {
 
           // Invia ad Ably
           if (authToken && ablyStatus === ConnectionStatus.CONNECTED) {
+            console.log(
+              `Monitor: 🔍 Debug - userId: ${userId}, deviceCode: ${deviceCode}`
+            );
             ablyService.current?.sendHeartRate(
               deviceCode,
               userId,
@@ -672,6 +676,9 @@ export default function MonitorScreen() {
 
         // Invia ad Ably
         if (authToken && ablyStatus === ConnectionStatus.CONNECTED) {
+          console.log(
+            `Monitor: 🔍 Debug PPI - userId: ${userId}, deviceCode: ${deviceCode}`
+          );
           ablyService.current?.sendHeartRate(
             deviceCode,
             userId,
@@ -882,7 +889,7 @@ export default function MonitorScreen() {
             <View style={styles.authCodeContainer}>
               <ThemedText style={styles.authCodeLabel}>
                 {authToken
-                  ? "✅ Autenticato con successo!"
+                  ? "Autenticato con successo!"
                   : "Inserisci questo codice sul PC:"}
               </ThemedText>
               {!authToken && (
@@ -906,11 +913,11 @@ export default function MonitorScreen() {
 
           <View style={styles.metricsGrid}>
             <View
-              style={[
-                styles.metricCard,
-                { borderColor: Colors[colorScheme ?? "light"].tint },
-              ]}
+              style={[styles.metricCard, { borderColor: "rgba(0,0,0,0.1)" }]}
             >
+              <View style={styles.metricIconContainer}>
+                <Heart size={24} color={Colors[theme].tint} />
+              </View>
               <ThemedText style={styles.metricLabel}>Heart Rate</ThemedText>
               <ThemedText style={styles.metricValue}>
                 {heartRate > 0 ? heartRate : "—"}
@@ -919,11 +926,11 @@ export default function MonitorScreen() {
             </View>
 
             <View
-              style={[
-                styles.metricCard,
-                { borderColor: Colors[colorScheme ?? "light"].tint },
-              ]}
+              style={[styles.metricCard, { borderColor: "rgba(0,0,0,0.1)" }]}
             >
+              <View style={styles.metricIconContainer}>
+                <Activity size={24} color={Colors[theme].tint} />
+              </View>
               <ThemedText style={styles.metricLabel}>HRV (RMSSD)</ThemedText>
               <ThemedText style={styles.metricValue}>
                 {hrv > 0 ? hrv : "—"}
@@ -938,11 +945,11 @@ export default function MonitorScreen() {
             </View>
 
             <View
-              style={[
-                styles.metricCard,
-                { borderColor: Colors[colorScheme ?? "light"].tint },
-              ]}
+              style={[styles.metricCard, { borderColor: "rgba(0,0,0,0.1)" }]}
             >
+              <View style={styles.metricIconContainer}>
+                <Zap size={24} color={Colors[theme].tint} />
+              </View>
               <ThemedText style={styles.metricLabel}>LF Power</ThemedText>
               <ThemedText style={styles.metricValue}>
                 {lfPower > 0 ? lfPower : "—"}
@@ -951,11 +958,11 @@ export default function MonitorScreen() {
             </View>
 
             <View
-              style={[
-                styles.metricCard,
-                { borderColor: Colors[colorScheme ?? "light"].tint },
-              ]}
+              style={[styles.metricCard, { borderColor: "rgba(0,0,0,0.1)" }]}
             >
+              <View style={styles.metricIconContainer}>
+                <Zap size={24} color={Colors[theme].tint} />
+              </View>
               <ThemedText style={styles.metricLabel}>HF Power</ThemedText>
               <ThemedText style={styles.metricValue}>
                 {hfPower > 0 ? hfPower : "—"}
@@ -973,7 +980,7 @@ export default function MonitorScreen() {
                 style={[
                   styles.button,
                   styles.scanButton,
-                  { backgroundColor: Colors[colorScheme ?? "light"].tint },
+                  { backgroundColor: Colors[theme].tint },
                 ]}
                 onPress={startScan}
                 disabled={isScanning || !bluetoothPowered}
@@ -1025,9 +1032,12 @@ export default function MonitorScreen() {
               style={[styles.button, styles.clearButton]}
               onPress={clearStoredAuth}
             >
-              <ThemedText style={styles.buttonText}>
-                🗑️ Cancella Token Salvato
-              </ThemedText>
+              <View style={styles.buttonContent}>
+                <Trash2 size={16} color="#fff" />
+                <ThemedText style={styles.buttonText}>
+                  Cancella Token Salvato
+                </ThemedText>
+              </View>
             </TouchableOpacity>
           )}
         </ThemedView>
@@ -1035,12 +1045,12 @@ export default function MonitorScreen() {
         {/* Info */}
         <ThemedView style={styles.infoSection}>
           <ThemedText style={styles.infoText}>
-            💡 Questo monitor si connette ai dispositivi Polar (es. H10) per
+            Questo monitor si connette ai dispositivi Polar (es. H10) per
             monitorare la frequenza cardiaca e calcolare le metriche HRV in
             tempo reale.
           </ThemedText>
           <ThemedText style={styles.infoText}>
-            📊 Le metriche includono: HR, HRV (RMSSD), e analisi delle frequenze
+            Le metriche includono: HR, HRV (RMSSD), e analisi delle frequenze
             LF/HF per la variabilità cardiaca.
           </ThemedText>
         </ThemedView>
@@ -1125,24 +1135,32 @@ const styles = StyleSheet.create({
   metricCard: {
     flex: 1,
     minWidth: "45%",
-    padding: 15,
+    padding: 20,
     borderRadius: 12,
     borderWidth: 1,
     alignItems: "center",
   },
+  metricIconContainer: {
+    marginBottom: 8,
+  },
   metricLabel: {
-    fontSize: 12,
+    fontSize: 14,
     opacity: 0.7,
     marginBottom: 8,
+    fontWeight: "500",
+    textAlign: "center",
   },
   metricValue: {
     fontSize: 32,
-    fontWeight: "bold",
+    fontWeight: "600",
     marginBottom: 4,
+    textAlign: "center",
   },
   metricUnit: {
     fontSize: 14,
     opacity: 0.6,
+    fontWeight: "400",
+    textAlign: "center",
   },
   controlsSection: {
     padding: 20,
@@ -1172,6 +1190,12 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontWeight: "600",
+  },
+  buttonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
   infoSection: {
     padding: 20,
