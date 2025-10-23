@@ -17,6 +17,9 @@ import {
   polarSdk,
 } from "@/services/polar-ble-sdk";
 import { StorageService, StoredAuthData } from "@/services/storage-service";
+import { useScanStore } from "@/stores/scan-store";
+import { useSettingsStore } from "@/stores/settings-store";
+import { useUserStore } from "@/stores/user-store";
 import { Activity, Heart, Trash2, Zap } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -33,24 +36,49 @@ import {
 // Dimensione finestra per HRV
 const WINDOW_SIZE = 30; // ultimi 30 battiti (~30s)
 
+// Timeout di scansione dispositivo
+const SCAN_TIMEOUT = 30000; // 30 secondi
+
 export default function MonitorScreen() {
   const { theme } = useTheme();
 
+  // Scan store
+  const {
+    isScanning,
+    setScanning,
+    setDeviceFound,
+    setScanStartTime,
+    setConnectedDeviceId: setConnectedDeviceIdInStore,
+  } = useScanStore();
+
+  // User store
+  const {
+    userId,
+    deviceCode,
+    authToken,
+    authCode,
+    appId,
+    setUserId,
+    setDeviceCode,
+    setAuthToken,
+    setAuthCode,
+    setAppId,
+  } = useUserStore();
+
+  // Settings store
+  const { debugMode } = useSettingsStore();
+
   // Bluetooth & Polar
   const [bluetoothPowered, setBluetoothPowered] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
   const [connectedDeviceId, setConnectedDeviceId] = useState<string | null>(
     null
   );
   const [connectedDeviceName, setConnectedDeviceName] = useState<string>("");
+  const [foundDeviceName, setFoundDeviceName] = useState<string>("");
 
   // Auth & Ably
   const authService = useRef(new AuthService());
   const ablyService = useRef<AblyService | null>(null);
-  const [authCode, setAuthCode] = useState("");
-  const [deviceCode, setDeviceCode] = useState("");
-  const [authToken, setAuthToken] = useState("");
-  const [userId, setUserId] = useState(0);
   const userIdRef = useRef(0);
 
   // Log ogni volta che userId cambia
@@ -122,15 +150,16 @@ export default function MonitorScreen() {
       setBluetoothPowered(state.powered);
 
       // Invia stato Bluetooth ad Ably
-      if (ablyService.current && authToken && userId) {
+      const userState = useUserStore.getState();
+      if (ablyService.current && userState.authToken && userState.userId) {
         ablyService.current.sendMessage(
-          userId,
+          userState.userId,
           "bluetooth_state_changed",
           {
             powered: state.powered,
             status: state.powered ? "ON" : "OFF",
           },
-          deviceCode
+          userState.deviceCode
         );
       }
 
@@ -161,35 +190,49 @@ export default function MonitorScreen() {
     polarSdk.addEventListener("onDeviceFound", (device: PolarDeviceInfo) => {
       console.log(`Monitor: 📡 Trovato: ${device.name} (${device.deviceId})`);
 
+      // Marca che abbiamo trovato un dispositivo durante la scansione
+      setDeviceFound(true);
+      setFoundDeviceName(device.name);
+
       // Invia evento dispositivo trovato ad Ably
-      if (ablyService.current && authToken && userId) {
+      const userStateFound = useUserStore.getState();
+      if (
+        ablyService.current &&
+        userStateFound.authToken &&
+        userStateFound.userId
+      ) {
         ablyService.current.sendMessage(
-          userId,
+          userStateFound.userId,
           "device_found",
           {
             deviceId: device.deviceId,
             deviceName: device.name,
             rssi: device.rssi,
           },
-          deviceCode
+          userStateFound.deviceCode
         );
       }
 
       // Connetti automaticamente al primo Polar trovato
       polarSdk.stopScan();
-      setIsScanning(false);
+      setScanningState(false);
 
       // Invia evento di scansione fermata per dispositivo trovato ad Ably
-      if (ablyService.current && authToken && userId) {
+      const userStateStopped = useUserStore.getState();
+      if (
+        ablyService.current &&
+        userStateStopped.userId &&
+        userStateStopped.deviceCode
+      ) {
         ablyService.current.sendMessage(
-          userId,
+          userStateStopped.userId,
           "scan_stopped",
           {
             action: "scan_stopped",
             reason: "device_found",
             foundDevice: device.name,
           },
-          deviceCode
+          userStateStopped.deviceCode
         );
       }
 
@@ -201,23 +244,30 @@ export default function MonitorScreen() {
       (device: PolarDeviceInfo) => {
         console.log(`Monitor: ✅ Connesso a ${device.name}!`);
         setConnectedDeviceId(device.deviceId);
+        setConnectedDeviceIdInStore(device.deviceId);
         setConnectedDeviceName(device.name);
+        setFoundDeviceName("");
 
         // Aggiorna il nome e l'ID del dispositivo nei dati salvati se esistono
         StorageService.updateDeviceName(device.name);
         StorageService.updateDeviceId(device.deviceId);
 
         // Invia evento di connessione ad Ably
-        if (ablyService.current && authToken && userId) {
+        const userStateConnected = useUserStore.getState();
+        if (
+          ablyService.current &&
+          userStateConnected.userId &&
+          userStateConnected.deviceCode
+        ) {
           ablyService.current.sendMessage(
-            userId,
+            userStateConnected.userId,
             "device_connected",
             {
               deviceId: device.deviceId,
               deviceName: device.name,
               rssi: device.rssi,
             },
-            deviceCode
+            userStateConnected.deviceCode
           );
         }
 
@@ -232,21 +282,28 @@ export default function MonitorScreen() {
         console.log("Monitor: ⚠️ Dispositivo disconnesso");
 
         // Invia evento di disconnessione ad Ably
-        if (ablyService.current && authToken && userId) {
+        const userStateDisconnected = useUserStore.getState();
+        if (
+          ablyService.current &&
+          userStateDisconnected.userId &&
+          userStateDisconnected.deviceCode
+        ) {
           ablyService.current.sendMessage(
-            userId,
+            userStateDisconnected.userId,
             "device_disconnected",
             {
               deviceId: device.deviceId,
               deviceName: device.name,
               reason: "disconnected",
             },
-            deviceCode
+            userStateDisconnected.deviceCode
           );
         }
 
         setConnectedDeviceId(null);
+        setConnectedDeviceIdInStore(null);
         setConnectedDeviceName("");
+        setFoundDeviceName("");
         if (pollInterval.current) {
           clearInterval(pollInterval.current);
         }
@@ -260,9 +317,10 @@ export default function MonitorScreen() {
       setHeartRate(data.hr);
 
       // Invia dati della frequenza cardiaca ad Ably (solo HR, HRV viene inviato separatamente quando calcolato)
-      if (ablyService.current) {
+      const userStateHR = useUserStore.getState();
+      if (ablyService.current && userStateHR.userId && userStateHR.deviceCode) {
         ablyService.current.sendMessage(
-          userId,
+          userStateHR.userId,
           "heart_rate",
           {
             deviceId: data.deviceId,
@@ -271,7 +329,7 @@ export default function MonitorScreen() {
             contactSupported: data.contactSupported,
             ppiWindowSize: ppiWindow.current.length,
           },
-          deviceCode
+          userStateHR.deviceCode
         );
 
         console.log(
@@ -304,15 +362,23 @@ export default function MonitorScreen() {
           );
 
           // Invia ad Ably
-          if (authToken && ablyStatus === ConnectionStatus.CONNECTED) {
+          const userStateHRFallback = useUserStore.getState();
+          if (
+            userStateHRFallback.authToken &&
+            ablyStatus === ConnectionStatus.CONNECTED &&
+            userStateHRFallback.userId &&
+            userStateHRFallback.deviceCode
+          ) {
             console.log(
-              `Monitor: 🔍 Debug - userId: ${userId} (type: ${typeof userId}), userIdRef: ${
+              `Monitor: 🔍 Debug - userId: ${
+                userStateHRFallback.userId
+              } (type: ${typeof userStateHRFallback.userId}), userIdRef: ${
                 userIdRef.current
-              }, deviceCode: ${deviceCode}`
+              }, deviceCode: ${userStateHRFallback.deviceCode}`
             );
             console.log(
               `Monitor: 🔍 Current state - authToken: ${
-                authToken ? "present" : "missing"
+                userStateHRFallback.authToken ? "present" : "missing"
               }, ablyStatus: ${ablyStatus}`
             );
             console.log(
@@ -323,8 +389,8 @@ export default function MonitorScreen() {
               }`
             );
             ablyService.current?.sendHeartRate(
-              deviceCode,
-              userIdRef.current,
+              userStateHRFallback.deviceCode,
+              userStateHRFallback.userId,
               data.hr,
               Math.round(rmssd),
               Math.round(lf),
@@ -341,16 +407,21 @@ export default function MonitorScreen() {
       );
 
       // Invia dati PPI ad Ably
-      if (ablyService.current && authToken && userId) {
+      const userStatePPI = useUserStore.getState();
+      if (
+        ablyService.current &&
+        userStatePPI.userId &&
+        userStatePPI.deviceCode
+      ) {
         ablyService.current.sendMessage(
-          userId,
+          userStatePPI.userId,
           "ppi_data",
           {
             deviceId: data.deviceId,
             samples: data.samples,
             sampleCount: data.samples.length,
           },
-          deviceCode
+          userStatePPI.deviceCode
         );
       }
 
@@ -362,16 +433,21 @@ export default function MonitorScreen() {
       console.log("Monitor: 🔄 Modalità fallback attiva (HRV da HR)");
 
       // Invia errore PPI ad Ably
-      if (ablyService.current && authToken && userId) {
+      const userStatePPIError = useUserStore.getState();
+      if (
+        ablyService.current &&
+        userStatePPIError.userId &&
+        userStatePPIError.deviceCode
+      ) {
         ablyService.current.sendMessage(
-          userId,
+          userStatePPIError.userId,
           "ppi_stream_error",
           {
             error: error.error,
             message: "PPI stream error occurred",
             fallbackMode: true,
           },
-          deviceCode
+          userStatePPIError.deviceCode
         );
       }
     });
@@ -390,6 +466,10 @@ export default function MonitorScreen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const setScanningState = (value: boolean) => {
+    setScanning(value);
+  };
 
   const requestPermissions = async (): Promise<boolean> => {
     if (Platform.OS === "android") {
@@ -433,50 +513,88 @@ export default function MonitorScreen() {
     const hasPermission = await requestPermissions();
     if (!hasPermission) return;
 
-    setIsScanning(true);
+    // Reset flag e timestamp di scansione
+    setDeviceFound(false);
+    setFoundDeviceName("");
+    setScanStartTime(Date.now());
+
+    setScanningState(true);
     console.log("Monitor: 🔍 Avvio scansione Polar...");
 
     // Invia evento di scansione avviata ad Ably
-    if (ablyService.current && authToken && userId) {
+    const userStateScan = useUserStore.getState();
+    if (
+      ablyService.current &&
+      userStateScan.userId &&
+      userStateScan.deviceCode
+    ) {
       ablyService.current.sendMessage(
-        userId,
+        userStateScan.userId,
         "scan_started",
         {
           action: "scan_started",
           timestamp: new Date().toISOString(),
         },
-        deviceCode
+        userStateScan.deviceCode
       );
     }
 
     try {
       await polarSdk.startScan();
 
-      // Timeout scansione
+      // Timeout scansione completa
       setTimeout(async () => {
-        if (isScanning) {
+        const currentState = useScanStore.getState();
+        if (currentState.isScanning) {
           await polarSdk.stopScan();
-          setIsScanning(false);
-          console.log("Monitor: ⏱️ Timeout scansione");
+          setScanningState(false);
+          console.log("Monitor: ⏱️ Timeout scansione completo");
+
+          // Mostra l'alert solo se non è stato trovato un dispositivo E non c'è già un dispositivo connesso
+          if (
+            !currentState.deviceFoundDuringScan &&
+            !currentState.connectedDeviceId
+          ) {
+            console.log(
+              "Monitor: ⚠️ Nessun dispositivo trovato dopo timeout scansione - mostro alert"
+            );
+
+            Alert.alert(
+              "Difficoltà di connessione",
+              "Sembra che sia difficile connettersi con il tuo Polar360. Prova a spegnere e riaccendere il bluetooth per resettare la connessione manualmente.",
+              [
+                {
+                  text: "Chiudi",
+                  style: "cancel",
+                },
+              ]
+            );
+          }
 
           // Invia evento di scansione timeout ad Ably
-          if (ablyService.current && authToken && userId) {
+          const userStateTimeout = useUserStore.getState();
+          if (
+            ablyService.current &&
+            userStateTimeout.userId &&
+            userStateTimeout.deviceCode
+          ) {
             ablyService.current.sendMessage(
-              userId,
+              userStateTimeout.userId,
               "scan_timeout",
               {
                 action: "scan_timeout",
                 reason: "timeout",
-                duration: 15000,
+                duration: SCAN_TIMEOUT,
               },
-              deviceCode
+              userStateTimeout.deviceCode
             );
           }
         }
-      }, 15000);
+      }, SCAN_TIMEOUT);
     } catch (error: any) {
       console.error("Monitor: Errore scansione:", error);
-      setIsScanning(false);
+      setScanningState(false);
+
       Alert.alert(
         "Errore",
         `Impossibile avviare la scansione: ${error.message}`
@@ -504,6 +622,9 @@ export default function MonitorScreen() {
         );
         setUserId(storedData.userId);
         setDeviceCode(storedData.deviceCode);
+        if (storedData.appId) {
+          setAppId(storedData.appId);
+        }
 
         // Connetti ad Ably
         console.log("🔵 Connessione Ably con token salvato...");
@@ -616,6 +737,7 @@ export default function MonitorScreen() {
                 expiresAt: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 ore
                 deviceName: connectedDeviceName,
                 deviceId: connectedDeviceId || undefined,
+                appId: pollResponse.appId,
               };
 
               // Salva i dati di autenticazione
@@ -627,6 +749,9 @@ export default function MonitorScreen() {
               );
               setUserId(parseInt(pollResponse.userId));
               setDeviceCode(pollResponse.deviceCode);
+              if (pollResponse.appId) {
+                setAppId(pollResponse.appId);
+              }
 
               // Connetti ad Ably
               console.log("🔵 Connessione Ably...");
@@ -708,13 +833,19 @@ export default function MonitorScreen() {
         );
 
         // Invia ad Ably
-        if (authToken && ablyStatus === ConnectionStatus.CONNECTED) {
+        const userStateHRV = useUserStore.getState();
+        if (
+          userStateHRV.authToken &&
+          ablyStatus === ConnectionStatus.CONNECTED &&
+          userStateHRV.userId &&
+          userStateHRV.deviceCode
+        ) {
           console.log(
-            `Monitor: 🔍 Debug PPI - userId: ${userId}, userIdRef: ${userIdRef.current}, deviceCode: ${deviceCode}`
+            `Monitor: 🔍 Debug PPI - userId: ${userStateHRV.userId}, userIdRef: ${userIdRef.current}, deviceCode: ${userStateHRV.deviceCode}`
           );
           ablyService.current?.sendHeartRate(
-            deviceCode,
-            userIdRef.current,
+            userStateHRV.deviceCode,
+            userStateHRV.userId,
             heartRate,
             Math.round(rmssd),
             Math.round(lf),
@@ -723,7 +854,7 @@ export default function MonitorScreen() {
 
           // Invia evento completo con tutti i dati biometrici calcolati
           ablyService.current?.sendMessage(
-            userIdRef.current,
+            userStateHRV.userId,
             "heart_rate_complete",
             {
               deviceId: connectedDeviceId,
@@ -735,7 +866,7 @@ export default function MonitorScreen() {
               contactDetected: true,
               contactSupported: true,
             },
-            deviceCode
+            userStateHRV.deviceCode
           );
 
           console.log(
@@ -750,88 +881,37 @@ export default function MonitorScreen() {
 
   const disconnectDevice = async () => {
     if (connectedDeviceId) {
-      try {
-        await polarSdk.disconnectFromDevice(connectedDeviceId);
-        setConnectedDeviceId(null);
-        setConnectedDeviceName("");
-        if (pollInterval.current) {
-          clearInterval(pollInterval.current);
-        }
-        stopBiometricSending();
-        ablyService.current?.close();
-        console.log("Monitor: 🔌 Dispositivo disconnesso");
-      } catch (error: any) {
-        console.error("Monitor: Errore disconnessione:", error.message);
-      }
-    }
-  };
-
-  const reconnectAbly = async () => {
-    console.log("Monitor: 🔄 Riconnessione Ably...");
-
-    try {
-      if (authToken && userIdRef.current && deviceCode) {
-        console.log(
-          `Monitor: 🔍 Reconnetting Ably - userId: ${userIdRef.current}, deviceCode: ${deviceCode}`
-        );
-
-        // Chiudi connessione esistente
-        ablyService.current?.close();
-
-        // Riconnetti
-        ablyService.current = new AblyService(
-          "https://become-hub.com/api/ably/token",
-          setAblyStatus
-        );
-
-        ablyService.current.connectWithToken(
-          authToken,
-          userIdRef.current,
-          deviceCode
-        );
-
-        console.log("Monitor: ✅ Ably riconnesso");
-      } else {
-        console.warn("Monitor: ⚠️ Dati mancanti per riconnessione Ably");
-      }
-    } catch (error: any) {
-      console.error("Monitor: ❌ Errore riconnessione Ably:", error.message);
-    }
-  };
-
-  const reconnectDevice = async () => {
-    console.log("Monitor: 🔄 Avvio riconnessione dispositivo...");
-
-    try {
-      // Step 1: Disconnetti completamente il dispositivo corrente
-      if (connectedDeviceId) {
-        console.log("Monitor: 🔌 Disconnessione dispositivo corrente...");
-        await polarSdk.disconnectFromDevice(connectedDeviceId);
-        setConnectedDeviceId(null);
-        setConnectedDeviceName("");
-        if (pollInterval.current) {
-          clearInterval(pollInterval.current);
-        }
-        stopBiometricSending();
-        ablyService.current?.close();
-      }
-
-      // Step 2: Simula spegnimento/riaccensione Bluetooth
-      console.log("Monitor: 📱 Simulazione spegnimento Bluetooth...");
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      console.log("Monitor: 📱 Simulazione riaccensione Bluetooth...");
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Step 3: Riavvia la scansione
-      console.log("Monitor: 🔍 Riavvio scansione dispositivi...");
-      setIsScanning(true);
-
-      // Avvia la scansione
-      await startScan();
-    } catch (error: any) {
-      console.error("Monitor: ❌ Errore durante riconnessione:", error.message);
-      setIsScanning(false);
+      Alert.alert(
+        "Disconnetti dispositivo",
+        "Sei sicuro di voler disconnettere il dispositivo?",
+        [
+          {
+            text: "Annulla",
+            style: "cancel",
+          },
+          {
+            text: "Disconnetti",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await polarSdk.disconnectFromDevice(connectedDeviceId);
+                setConnectedDeviceId(null);
+                setConnectedDeviceIdInStore(null);
+                setConnectedDeviceName("");
+                setFoundDeviceName("");
+                if (pollInterval.current) {
+                  clearInterval(pollInterval.current);
+                }
+                stopBiometricSending();
+                ablyService.current?.close();
+                console.log("Monitor: 🔌 Dispositivo disconnesso");
+              } catch (error: any) {
+                console.error("Monitor: Errore disconnessione:", error.message);
+              }
+            },
+          },
+        ]
+      );
     }
   };
 
@@ -852,31 +932,6 @@ export default function MonitorScreen() {
     }
   };
 
-  const tryReconnectToSavedDevice = async () => {
-    try {
-      const storedAuthData = await StorageService.getAuthData();
-      if (storedAuthData && storedAuthData.deviceId) {
-        console.log(
-          `Monitor: 🔄 Tentativo riconnessione manuale a ${
-            storedAuthData.deviceName || storedAuthData.deviceId
-          }`
-        );
-        await polarSdk.connectToDevice(storedAuthData.deviceId);
-      } else {
-        Alert.alert(
-          "Nessun dispositivo salvato",
-          "Non ci sono dispositivi salvati per la riconnessione."
-        );
-      }
-    } catch (error: any) {
-      console.error("Monitor: Errore riconnessione manuale:", error.message);
-      Alert.alert(
-        "Errore riconnessione",
-        "Impossibile riconnettersi al dispositivo salvato. Prova a fare una scansione."
-      );
-    }
-  };
-
   const startBiometricSending = () => {
     // Ferma il timer esistente se presente
     if (biometricInterval.current) {
@@ -885,10 +940,16 @@ export default function MonitorScreen() {
 
     // Avvia invio periodico dei dati biometrici ogni secondo
     biometricInterval.current = setInterval(() => {
-      if (ablyService.current && authToken && userId && heartRate > 0) {
+      const userStateBiometric = useUserStore.getState();
+      if (
+        ablyService.current &&
+        userStateBiometric.userId &&
+        userStateBiometric.deviceCode &&
+        heartRate > 0
+      ) {
         // Invia dati biometrici ogni secondo
         ablyService.current.sendMessage(
-          userId,
+          userStateBiometric.userId,
           "biometric_data",
           {
             heartRate: heartRate,
@@ -898,7 +959,7 @@ export default function MonitorScreen() {
             ppiWindowSize: ppiWindow.current.length,
             timestamp: new Date().toISOString(),
           },
-          deviceCode
+          userStateBiometric.deviceCode
         );
 
         console.log(
@@ -987,6 +1048,10 @@ export default function MonitorScreen() {
               {userId || "N/A"}
             </ThemedText>
           </View>
+          <View style={styles.statusRow}>
+            <ThemedText style={styles.statusLabel}>App ID:</ThemedText>
+            <ThemedText style={styles.statusValue}>{appId || "N/A"}</ThemedText>
+          </View>
           {authCode && (
             <View style={styles.authCodeContainer}>
               <ThemedText style={styles.authCodeLabel}>
@@ -1015,7 +1080,7 @@ export default function MonitorScreen() {
 
           <View style={styles.metricsGrid}>
             <View
-              style={[styles.metricCard, { borderColor: "rgba(0,0,0,0.1)" }]}
+              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
             >
               <View style={styles.metricIconContainer}>
                 <Heart size={24} color={Colors[theme].tint} />
@@ -1028,7 +1093,7 @@ export default function MonitorScreen() {
             </View>
 
             <View
-              style={[styles.metricCard, { borderColor: "rgba(0,0,0,0.1)" }]}
+              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
             >
               <View style={styles.metricIconContainer}>
                 <Activity size={24} color={Colors[theme].tint} />
@@ -1047,7 +1112,7 @@ export default function MonitorScreen() {
             </View>
 
             <View
-              style={[styles.metricCard, { borderColor: "rgba(0,0,0,0.1)" }]}
+              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
             >
               <View style={styles.metricIconContainer}>
                 <Zap size={24} color={Colors[theme].tint} />
@@ -1060,7 +1125,7 @@ export default function MonitorScreen() {
             </View>
 
             <View
-              style={[styles.metricCard, { borderColor: "rgba(0,0,0,0.1)" }]}
+              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
             >
               <View style={styles.metricIconContainer}>
                 <Zap size={24} color={Colors[theme].tint} />
@@ -1078,42 +1143,37 @@ export default function MonitorScreen() {
         <ThemedView style={styles.controlsSection}>
           {!connectedDeviceId ? (
             <>
-              <TouchableOpacity
-                style={[
-                  styles.button,
-                  styles.scanButton,
-                  { backgroundColor: Colors[theme].tint },
-                ]}
-                onPress={startScan}
-                disabled={isScanning || !bluetoothPowered}
-              >
-                {isScanning ? (
-                  <>
-                    <ActivityIndicator
-                      color="#fff"
-                      style={{ marginRight: 10 }}
-                    />
-                    <ThemedText style={styles.buttonText}>
-                      Scansione in corso...
-                    </ThemedText>
-                  </>
-                ) : (
-                  <ThemedText style={styles.buttonText}>
-                    Cerca Dispositivo Polar
+              {foundDeviceName ? (
+                <ThemedView style={styles.successMessage}>
+                  <ThemedText style={styles.successText}>
+                    ✅ Trovato device {foundDeviceName}
                   </ThemedText>
-                )}
-              </TouchableOpacity>
-
-              {/* Pulsante riconnessione se abbiamo dati salvati */}
-              {authToken && (
+                </ThemedView>
+              ) : (
                 <TouchableOpacity
-                  style={[styles.button, styles.reconnectButton]}
-                  onPress={tryReconnectToSavedDevice}
-                  disabled={!bluetoothPowered}
+                  style={[
+                    styles.button,
+                    styles.scanButton,
+                    { backgroundColor: Colors[theme].tint },
+                  ]}
+                  onPress={startScan}
+                  disabled={isScanning || !bluetoothPowered}
                 >
-                  <ThemedText style={styles.buttonText}>
-                    🔄 Riconnetti Dispositivo
-                  </ThemedText>
+                  {isScanning ? (
+                    <>
+                      <ActivityIndicator
+                        color="#fff"
+                        style={{ marginRight: 10 }}
+                      />
+                      <ThemedText style={styles.buttonText}>
+                        Scansione in corso...
+                      </ThemedText>
+                    </>
+                  ) : (
+                    <ThemedText style={styles.buttonText}>
+                      Cerca Dispositivo Polar
+                    </ThemedText>
+                  )}
                 </TouchableOpacity>
               )}
             </>
@@ -1127,27 +1187,11 @@ export default function MonitorScreen() {
                   Disconnetti {connectedDeviceName}
                 </ThemedText>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.button, styles.reconnectButton]}
-                onPress={reconnectDevice}
-              >
-                <ThemedText style={styles.buttonText}>🔄 Riconnetti</ThemedText>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.button, styles.ablyReconnectButton]}
-                onPress={reconnectAbly}
-              >
-                <ThemedText style={styles.buttonText}>
-                  🔗 Riconnetti Ably
-                </ThemedText>
-              </TouchableOpacity>
             </View>
           )}
 
-          {/* Pulsante per cancellare dati salvati */}
-          {authToken && (
+          {/* Pulsante per cancellare dati salvati - solo in debug mode */}
+          {authToken && debugMode && (
             <TouchableOpacity
               style={[styles.button, styles.clearButton]}
               onPress={clearStoredAuth}
@@ -1323,6 +1367,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+  },
+  successMessage: {
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "rgba(76, 175, 80, 0.1)",
+    borderWidth: 2,
+    borderColor: "#4CAF50",
+    alignItems: "center",
+  },
+  successText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#4CAF50",
   },
   infoSection: {
     padding: 20,

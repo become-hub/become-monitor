@@ -2,6 +2,7 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useSettingsStore } from "@/stores/settings-store";
 import {
   Download,
   Info,
@@ -22,10 +23,65 @@ import {
 
 export default function SettingsScreen() {
   const { theme, themePreference, updateThemePreference } = useTheme();
+  const { debugMode, setDebugMode } = useSettingsStore();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [autoConnect, setAutoConnect] = useState(true);
   const [dataSync, setDataSync] = useState(true);
-  const [debugMode, setDebugMode] = useState(false);
+
+  const getCurrentDatePassword = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}${month}${day}`;
+  };
+
+  const handleDebugModeToggle = (value: boolean) => {
+    if (value) {
+      // Se stanno attivando il debug mode, richiedi la password
+      Alert.prompt(
+        "Debug Mode",
+        "Inserisci la password per attivare la modalità debug:",
+        [
+          {
+            text: "Annulla",
+            style: "cancel",
+            onPress: () => setDebugMode(false),
+          },
+          {
+            text: "Conferma",
+            onPress: (inputPassword: string | undefined) => {
+              const correctPassword = getCurrentDatePassword();
+              if (inputPassword === correctPassword) {
+                setDebugMode(true);
+                Alert.alert("Successo", "Debug mode attivato");
+              } else {
+                Alert.alert("Errore", "Password non corretta");
+                setDebugMode(false);
+              }
+            },
+          },
+        ],
+        "plain-text"
+      );
+    } else {
+      // Se stanno disattivando, chiedi conferma
+      Alert.alert(
+        "Disattiva Debug Mode",
+        "Sei sicuro di voler disattivare la modalità debug?",
+        [
+          {
+            text: "Annulla",
+            style: "cancel",
+          },
+          {
+            text: "Disattiva",
+            onPress: () => setDebugMode(false),
+          },
+        ]
+      );
+    }
+  };
 
   const handleClearData = () => {
     Alert.alert(
@@ -268,7 +324,7 @@ export default function SettingsScreen() {
             </View>
             <Switch
               value={debugMode}
-              onValueChange={setDebugMode}
+              onValueChange={handleDebugModeToggle}
               trackColor={{
                 false: "#767577",
                 true: Colors[theme].tint,

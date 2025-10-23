@@ -12,6 +12,7 @@ export interface StoredAuthData {
     expiresAt: number;
     deviceName?: string;
     deviceId?: string;
+    appId?: string;
 }
 
 export class StorageService {

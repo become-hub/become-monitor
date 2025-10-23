@@ -16,6 +16,7 @@ export interface DevicePollResponse {
     userId: string;
     session: string;
     deviceCode: string;
+    appId?: string;
 }
 
 export class AuthService {
