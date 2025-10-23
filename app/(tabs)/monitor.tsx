@@ -26,6 +26,8 @@ import {
   Heart,
   Search,
   Trash2,
+  Unplug,
+  XCircle,
   Zap,
 } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
@@ -100,8 +102,11 @@ export default function MonitorScreen() {
   const [lfPower, setLfPower] = useState(0);
   const [hfPower, setHfPower] = useState(0);
 
-  // Stato locale per nascondere il messaggio di successo
-  const [showSuccessMessage, setShowSuccessMessage] = useState(true);
+  // Stato per la notifica di autenticazione
+  const [notification, setNotification] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
 
   // Log ogni volta che userId cambia
   useEffect(() => {
@@ -111,11 +116,17 @@ export default function MonitorScreen() {
     userIdRef.current = userId;
   }, [userId]);
 
-  // Timer per nascondere il messaggio di successo dopo 5 secondi
+  // Mostra notifica di autenticazione quando il token è disponibile
   useEffect(() => {
     if (authToken) {
+      setNotification({
+        type: "success",
+        message: "Autenticato con successo!",
+      });
+
+      // Auto-close dopo 5 secondi
       const timer = setTimeout(() => {
-        setShowSuccessMessage(false);
+        setNotification(null);
       }, 5000);
 
       return () => clearTimeout(timer);
@@ -304,6 +315,17 @@ export default function MonitorScreen() {
       "onDeviceDisconnected",
       (device: PolarDeviceInfo) => {
         console.log("Monitor: ⚠️ Dispositivo disconnesso");
+
+        // Mostra notifica di disconnessione
+        setNotification({
+          type: "error",
+          message: `Dispositivo disconnesso`,
+        });
+
+        // Auto-close dopo 5 secondi
+        setTimeout(() => {
+          setNotification(null);
+        }, 5000);
 
         // Invia evento di disconnessione ad Ably
         const userStateDisconnected = useUserStore.getState();
@@ -632,52 +654,72 @@ export default function MonitorScreen() {
   const launchAuthAndStream = async (deviceId: string) => {
     try {
       // Step 1: Controlla se abbiamo dati di autenticazione salvati
-      const authFlow = await authService.current.startAuthFlow();
+      const storedAuthData = await StorageService.getAuthData();
 
-      if (!authFlow.needsAuth && authFlow.storedData) {
-        // Usa i dati salvati
-        console.log("Monitor: 🔄 Utilizzo dati di autenticazione salvati");
-        const storedData = authFlow.storedData;
-        console.log(
-          "Monitor: 🔍 Stored data:",
-          JSON.stringify(storedData, null, 2)
+      if (storedAuthData && storedAuthData.deviceToken) {
+        console.log("Monitor: 🔍 Token salvato trovato, validazione...");
+
+        // Valida il token chiamando il poll endpoint
+        const pollResponse = await authService.current.pollDeviceAuth(
+          storedAuthData.deviceToken
         );
 
-        setAuthToken(storedData.authToken);
-        console.log(
-          `Monitor: 🔍 Setting userId from stored data: ${storedData.userId}`
-        );
-        setUserId(storedData.userId);
-        setDeviceCode(storedData.deviceCode);
-        if (storedData.appId) {
-          setAppId(storedData.appId);
+        if (pollResponse && pollResponse.authenticated === true) {
+          // Token valido, usa i dati salvati
+          console.log("Monitor: ✅ Token valido, utilizzo dati salvati");
+          console.log(
+            "Monitor: 🔍 Stored data:",
+            JSON.stringify(storedAuthData, null, 2)
+          );
+
+          setAuthToken(storedAuthData.authToken);
+          console.log(
+            `Monitor: 🔍 Setting userId from stored data: ${storedAuthData.userId}`
+          );
+          setUserId(storedAuthData.userId);
+          setDeviceCode(storedAuthData.deviceCode);
+          if (storedAuthData.appId) {
+            setAppId(storedAuthData.appId);
+          }
+
+          // Connetti ad Ably
+          console.log("🔵 Connessione Ably con token salvato...");
+          ablyService.current?.connectWithToken(
+            storedAuthData.authToken,
+            storedAuthData.userId,
+            storedAuthData.deviceCode
+          );
+
+          // Avvia streaming PPI
+          console.log("💓 Avvio streaming PPI...");
+          try {
+            await polarSdk.startPpiStreaming(deviceId);
+            console.log("✅ PPI streaming avviato con successo!");
+          } catch (error: any) {
+            console.log("⚠️ PPI non disponibile:", error.message);
+            console.log("🔄 Usando modalità fallback: HRV calcolato da HR");
+          }
+
+          // Avvia invio periodico dei dati biometrici
+          startBiometricSending();
+
+          return;
+        } else {
+          // Token non valido, cancella i dati salvati
+          console.log("Monitor: ❌ Token non valido, cancello dati salvati");
+          await authService.current.clearAuthData();
         }
-
-        // Connetti ad Ably
-        console.log("🔵 Connessione Ably con token salvato...");
-        ablyService.current?.connectWithToken(
-          storedData.authToken,
-          storedData.userId,
-          storedData.deviceCode
-        );
-
-        // Avvia streaming PPI
-        console.log("💓 Avvio streaming PPI...");
-        try {
-          await polarSdk.startPpiStreaming(deviceId);
-          console.log("✅ PPI streaming avviato con successo!");
-        } catch (error: any) {
-          console.log("⚠️ PPI non disponibile:", error.message);
-          console.log("🔄 Usando modalità fallback: HRV calcolato da HR");
-        }
-
-        // Avvia invio periodico dei dati biometrici
-        startBiometricSending();
-
-        return;
       }
 
       // Step 2: Nuovo flusso di autenticazione
+      const authFlow = await authService.current.startAuthFlow();
+
+      if (!authFlow.needsAuth && authFlow.storedData) {
+        // Questa parte ora non dovrebbe essere raggiunta dato che abbiamo già gestito il caso sopra
+        console.log("Monitor: ⚠️ Unexpected: needsAuth=false dopo validazione");
+        return;
+      }
+
       if (authFlow.newAuthResponse) {
         const authResponse = authFlow.newAuthResponse;
         setAuthCode(authResponse.code);
@@ -700,7 +742,7 @@ export default function MonitorScreen() {
         console.log("Monitor: 🎫 Device token salvato nel storage");
       }
 
-      // Step 3: Polling per conferma autenticazione
+      // Step 3: Polling per conferma autenticazione (solo se non avevamo token salvato valido)
       pollInterval.current = setInterval(async () => {
         const currentDeviceToken = await StorageService.getDeviceToken();
         console.log("🔄 POLLING ATTIVO - deviceToken:", currentDeviceToken);
@@ -1023,9 +1065,6 @@ export default function MonitorScreen() {
     setLfPower(0);
     setHfPower(0);
 
-    // Reset messaggio di successo
-    setShowSuccessMessage(true);
-
     // Reset finestra PPI
     ppiWindow.current = [];
 
@@ -1037,6 +1076,11 @@ export default function MonitorScreen() {
   };
 
   const getStreamingStatusText = () => {
+    // Se non c'è un dispositivo connesso, lo streaming è disconnesso
+    if (!connectedDeviceId) {
+      return "🔴 Disconnesso";
+    }
+
     if (ablyStatus === ConnectionStatus.CONNECTED) {
       if (heartRate > 0) {
         return "🟢 Connesso";
@@ -1060,6 +1104,36 @@ export default function MonitorScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      {/* Notifica di autenticazione */}
+      {notification && (
+        <View
+          style={[
+            styles.notification,
+            notification.type === "success"
+              ? styles.notificationSuccess
+              : styles.notificationError,
+          ]}
+        >
+          {notification.type === "success" ? (
+            <CheckCircle size={24} color="#fff" />
+          ) : notification.message.includes("disconnesso") ? (
+            <Unplug size={24} color="#fff" />
+          ) : (
+            <XCircle size={24} color="#fff" />
+          )}
+          <ThemedText style={styles.notificationText}>
+            {notification.message}
+          </ThemedText>
+          {/* Pulsante di chiusura */}
+          <TouchableOpacity
+            onPress={() => setNotification(null)}
+            style={styles.notificationCloseButton}
+          >
+            <XCircle size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      )}
+
       <ScrollView style={styles.scrollView}>
         {/* Header */}
         <ThemedView style={styles.header}>
@@ -1107,22 +1181,12 @@ export default function MonitorScreen() {
             <ThemedText style={styles.statusLabel}>App ID:</ThemedText>
             <ThemedText style={styles.statusValue}>{appId || "N/A"}</ThemedText>
           </View>
-          {!authToken && connectedDeviceId && (
+          {!authToken && connectedDeviceId && authCode && (
             <View style={styles.authCodeContainer}>
               <ThemedText style={styles.authCodeLabel}>
                 Inserisci questo codice sul PC:
               </ThemedText>
               <ThemedText style={styles.authCode}>{authCode}</ThemedText>
-            </View>
-          )}
-          {authToken && showSuccessMessage && (
-            <View style={styles.successAuthContainer}>
-              <View style={styles.successAuthContent}>
-                <CheckCircle size={20} color="#4CAF50" />
-                <ThemedText style={styles.successAuthLabel}>
-                  Autenticato con successo!
-                </ThemedText>
-              </View>
             </View>
           )}
         </ThemedView>
@@ -1342,23 +1406,38 @@ const styles = StyleSheet.create({
     color: "#FF9800",
     letterSpacing: 4,
   },
-  successAuthContainer: {
-    marginTop: 15,
-    padding: 15,
-    backgroundColor: "rgba(76, 175, 80, 0.1)",
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#4CAF50",
-  },
-  successAuthContent: {
+  notification: {
+    position: "absolute",
+    top: 60,
+    left: 20,
+    right: 20,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    padding: 16,
+    borderRadius: 12,
+    zIndex: 1000,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
-  successAuthLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#4CAF50",
+  notificationSuccess: {
+    backgroundColor: "#10B981", // Verde
+  },
+  notificationError: {
+    backgroundColor: "#EF4444", // Rosso
+  },
+  notificationText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "500",
+    marginLeft: 12,
+    flex: 1,
+  },
+  notificationCloseButton: {
+    padding: 4,
+    marginLeft: 8,
   },
   metricsSection: {
     padding: 20,
