@@ -5,12 +5,10 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
   CheckCircle,
-  Download,
   Info,
   Monitor,
   Moon,
   Sun,
-  Trash2,
   XCircle,
 } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
@@ -23,11 +21,11 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import packageJson from "../../package.json";
 
 export default function SettingsScreen() {
   const { theme, themePreference, updateThemePreference } = useTheme();
   const { debugMode, setDebugMode } = useSettingsStore();
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [autoConnect, setAutoConnect] = useState(true);
   const [dataSync, setDataSync] = useState(true);
   const [localDebugMode, setLocalDebugMode] = useState(debugMode);
@@ -109,51 +107,10 @@ export default function SettingsScreen() {
     setLocalDebugMode(false); // Ripristina lo switch
   };
 
-  const handleClearData = () => {
-    Alert.alert(
-      "Clear All Data",
-      "This will remove all stored authentication data and device connections. Are you sure?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
-        {
-          text: "Clear",
-          style: "destructive",
-          onPress: () => {
-            // TODO: Implement data clearing
-            Alert.alert("Success", "All data has been cleared.");
-          },
-        },
-      ]
-    );
-  };
-
-  const handleExportData = () => {
-    Alert.alert(
-      "Export Data",
-      "Export your monitoring data for analysis or backup.",
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
-        {
-          text: "Export",
-          onPress: () => {
-            // TODO: Implement data export
-            Alert.alert("Success", "Data export started.");
-          },
-        },
-      ]
-    );
-  };
-
   const handleAbout = () => {
     Alert.alert(
       "About Become Monitor",
-      "Version 1.0.0\n\nProfessional HRV monitoring solution for athletes and health professionals.\n\n© 2024 Become Hub",
+      `Version ${packageJson.version}\n\nProfessional HRV monitoring solution for athletes and health professionals.\n\n© 2025 Become Hub`,
       [{ text: "OK" }]
     );
   };
@@ -336,33 +293,6 @@ export default function SettingsScreen() {
           </ThemedView>
         </ThemedView>
 
-        {/* Notification Settings */}
-        <ThemedView style={styles.section}>
-          <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Notifications
-          </ThemedText>
-
-          <ThemedView style={styles.settingItem}>
-            <View style={styles.settingContent}>
-              <ThemedText style={styles.settingLabel}>
-                Push Notifications
-              </ThemedText>
-              <ThemedText style={styles.settingDescription}>
-                Receive alerts for connection status
-              </ThemedText>
-            </View>
-            <Switch
-              value={notificationsEnabled}
-              onValueChange={setNotificationsEnabled}
-              trackColor={{
-                false: "#767577",
-                true: Colors[theme].tint,
-              }}
-              thumbColor={notificationsEnabled ? "#fff" : "#f4f3f4"}
-            />
-          </ThemedView>
-        </ThemedView>
-
         {/* Advanced Settings */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
@@ -435,39 +365,6 @@ export default function SettingsScreen() {
           )}
         </ThemedView>
 
-        {/* Data Management */}
-        <ThemedView style={styles.section}>
-          <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Data Management
-          </ThemedText>
-
-          <TouchableOpacity
-            style={[styles.actionButton, { borderColor: Colors[theme].tint }]}
-            onPress={handleExportData}
-          >
-            <View style={styles.actionButtonContent}>
-              <Download size={20} color={Colors[theme].tint} />
-              <ThemedText style={styles.actionButtonText}>
-                Export Data
-              </ThemedText>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.actionButton, { borderColor: "#FF9800" }]}
-            onPress={handleClearData}
-          >
-            <View style={styles.actionButtonContent}>
-              <Trash2 size={20} color="#FF9800" />
-              <ThemedText
-                style={[styles.actionButtonText, { color: "#FF9800" }]}
-              >
-                Clear All Data
-              </ThemedText>
-            </View>
-          </TouchableOpacity>
-        </ThemedView>
-
         {/* App Information */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
@@ -476,18 +373,15 @@ export default function SettingsScreen() {
 
           <ThemedView style={styles.infoCard}>
             <ThemedText style={styles.infoLabel}>Version</ThemedText>
-            <ThemedText style={styles.infoValue}>1.0.0</ThemedText>
+            <ThemedText style={styles.infoValue}>
+              {packageJson.version}
+            </ThemedText>
           </ThemedView>
 
           <ThemedView style={styles.infoCard}>
             <ThemedText style={styles.infoLabel}>Build</ThemedText>
-            <ThemedText style={styles.infoValue}>2024.01.001</ThemedText>
-          </ThemedView>
-
-          <ThemedView style={styles.infoCard}>
-            <ThemedText style={styles.infoLabel}>Platform</ThemedText>
             <ThemedText style={styles.infoValue}>
-              React Native + Expo
+              {new Date().toISOString().slice(0, 10).replace(/-/g, "")}
             </ThemedText>
           </ThemedView>
 
