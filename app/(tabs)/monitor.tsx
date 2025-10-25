@@ -141,12 +141,18 @@ export default function MonitorScreen() {
 
   useEffect(() => {
     // Inizializza Ably service
+    console.log("Monitor: 🔵 Inizializzazione AblyService...");
     ablyService.current = new AblyService(
       API_BASE_URL + "/services/ably",
       (status) => {
         setAblyStatus(status);
         console.log("Monitor: 🔵 Ably status:", status);
+        console.log("Monitor: 🔵 AblyService instance:", !!ablyService.current);
       }
+    );
+    console.log(
+      "Monitor: 🔵 AblyService inizializzato:",
+      !!ablyService.current
     );
 
     // Controlla stato Bluetooth iniziale e prova a riconnettersi
@@ -693,6 +699,18 @@ export default function MonitorScreen() {
                 pollResponse.deviceCode
               );
 
+              // Retry automatico per connessione Ably se non si connette entro 10 secondi
+              setTimeout(() => {
+                if (ablyStatus !== ConnectionStatus.CONNECTED) {
+                  console.log("🔧 Ably non connesso dopo 10s, retry...");
+                  ablyService.current?.connectWithToken(
+                    pollResponse.session,
+                    parseInt(pollResponse.userId),
+                    pollResponse.deviceCode
+                  );
+                }
+              }, 10000);
+
               // Ferma il polling
               if (pollInterval.current) {
                 clearInterval(pollInterval.current);
@@ -776,12 +794,23 @@ export default function MonitorScreen() {
       // Streamma sempre se HR è disponibile
       if (heartRate > 0) {
         const userStateHRV = useUserStore.getState();
+        console.log("🔍 DEBUG STREAMING - Controllo condizioni:");
+        console.log("🔍 authToken:", !!userStateHRV.authToken);
+        console.log("🔍 ablyStatus:", ablyStatus);
+        console.log("🔍 userId:", userStateHRV.userId);
+        console.log("🔍 deviceCode:", userStateHRV.deviceCode);
+        console.log("🔍 heartRate:", heartRate);
+        console.log("🔍 ablyService.current:", !!ablyService.current);
+
         if (
           userStateHRV.authToken &&
           ablyStatus === ConnectionStatus.CONNECTED &&
           userStateHRV.userId &&
           userStateHRV.deviceCode
         ) {
+          console.log(
+            "✅ TUTTE LE CONDIZIONI SODDISFATTE - Invio dati ad Ably"
+          );
           const timestamp = new Date().toISOString();
           ablyService.current?.sendMessage(
             userStateHRV.userId,
@@ -796,6 +825,8 @@ export default function MonitorScreen() {
             },
             userStateHRV.deviceCode
           );
+        } else {
+          console.log("❌ CONDIZIONI NON SODDISFATTE - Non invio dati ad Ably");
         }
       }
     });
@@ -867,12 +898,23 @@ export default function MonitorScreen() {
     // Avvia invio periodico dei dati biometrici ogni secondo
     biometricInterval.current = setInterval(() => {
       const userStateBiometric = useUserStore.getState();
+      // Debug ridotto - solo se necessario
+      if (debugMode) {
+        console.log("🔍 DEBUG BIOMETRIC SENDING - Controllo condizioni:");
+        console.log("🔍 ablyService.current:", !!ablyService.current);
+        console.log("🔍 userId:", userStateBiometric.userId);
+        console.log("🔍 deviceCode:", userStateBiometric.deviceCode);
+        console.log("🔍 heartRate:", heartRate);
+        console.log("🔍 ablyStatus:", ablyStatus);
+      }
+
       if (
         ablyService.current &&
         userStateBiometric.userId &&
         userStateBiometric.deviceCode &&
         heartRate > 0
       ) {
+        console.log("✅ BIOMETRIC SENDING - Invio dati ad Ably");
         // Invia dati biometrici ogni secondo con nuovo formato
         const timestamp = new Date().toISOString();
         ablyService.current.sendMessage(
@@ -888,6 +930,22 @@ export default function MonitorScreen() {
           },
           userStateBiometric.deviceCode
         );
+      } else {
+        // Log solo se il problema persiste o se è un problema critico
+        const isCriticalIssue =
+          !ablyService.current ||
+          !userStateBiometric.userId ||
+          !userStateBiometric.deviceCode;
+        const isHeartRateIssue = heartRate === 0;
+
+        if (isCriticalIssue || (isHeartRateIssue && debugMode)) {
+          console.log("❌ BIOMETRIC SENDING - Condizioni non soddisfatte:");
+          console.log("  - ablyService.current:", !!ablyService.current);
+          console.log("  - userId:", userStateBiometric.userId);
+          console.log("  - deviceCode:", userStateBiometric.deviceCode);
+          console.log("  - heartRate:", heartRate);
+          console.log("  - ablyStatus:", ablyStatus);
+        }
       }
     }, 1000); // Ogni secondo
   };

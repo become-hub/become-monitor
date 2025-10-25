@@ -53,6 +53,7 @@ export class AblyService {
                 case "connected":
                     this.isConnected = true;
                     console.log("AblyService: ✅ Connected!");
+                    console.log("AblyService: 🔍 Calling connectionStatusCallback with CONNECTED");
                     this.connectionStatusCallback(ConnectionStatus.CONNECTED);
 
                     // Entra in presenza solo una volta per connessione
@@ -66,6 +67,12 @@ export class AblyService {
                                 "AblyService: 🤝 Presence entered once:",
                                 deviceCode
                             );
+                            // Forza un aggiornamento dello stato dopo presence
+                            setTimeout(() => {
+                                if (this.isConnected) {
+                                    this.connectionStatusCallback(ConnectionStatus.CONNECTED);
+                                }
+                            }, 1000);
                         }).catch((err: any) => {
                             console.error(
                                 "AblyService: ❌ Presence error:",
@@ -139,14 +146,17 @@ export class AblyService {
         data: any,
         deviceCode?: string
     ) {
+        // Debug ridotto - solo per errori
+        console.log(`AblyService: 📤 Sending ${eventType} to user ${userId}`);
+
         if (!this.ably || !this.isConnected) {
             console.warn("AblyService: ⚠️ Cannot send message, not connected");
+            console.warn(`AblyService: 🔍 Details - ably exists: ${!!this.ably}, isConnected: ${this.isConnected}`);
             return;
         }
 
         try {
             const channel = this.ably.channels.get(`private:${userId}`);
-
             const message = {
                 ...data,
                 type: eventType,
@@ -155,7 +165,7 @@ export class AblyService {
             };
 
             channel.publish(eventType, JSON.stringify(message));
-            console.log(`AblyService: 📨 Sent ${eventType} to private:${userId}:`, data);
+            console.log(`AblyService: ✅ Sent ${eventType} to private:${userId}`);
         } catch (error: any) {
             console.error(`AblyService: ❌ Failed to send ${eventType}:`, error.message);
         }
