@@ -1,0 +1,13 @@
+# Android build outputs
+/build
+/app/build
+/.gradle
+/.idea
+*.iml
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Gradle files
+.gradle/
+gradle-wrapper.jar

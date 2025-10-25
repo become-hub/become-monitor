@@ -1,0 +1,4 @@
+/Users/gabriele/Git/become-monitor/android/app/.cxx/Debug/75j6q1s3/armeabi-v7a/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/foo.dir
+/Users/gabriele/Git/become-monitor/android/app/.cxx/Debug/75j6q1s3/armeabi-v7a/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/boo.dir
+/Users/gabriele/Git/become-monitor/android/app/.cxx/Debug/75j6q1s3/armeabi-v7a/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/edit_cache.dir
+/Users/gabriele/Git/become-monitor/android/app/.cxx/Debug/75j6q1s3/armeabi-v7a/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/rebuild_cache.dir
