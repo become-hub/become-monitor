@@ -185,19 +185,7 @@ export default function MonitorScreen() {
       console.log(`Monitor: Bluetooth ${state.powered ? "ON" : "OFF"}`);
       setBluetoothPowered(state.powered);
 
-      // Invia stato Bluetooth ad Ably
-      const userState = useUserStore.getState();
-      if (ablyService.current && userState.authToken && userState.userId) {
-        ablyService.current.sendMessage(
-          userState.userId,
-          "bluetooth_state_changed",
-          {
-            powered: state.powered,
-            status: state.powered ? "ON" : "OFF",
-          },
-          userState.deviceCode
-        );
-      }
+      // Non inviamo più eventi bluetooth_state_changed separati
 
       // Se il Bluetooth si riaccende e non abbiamo un dispositivo connesso,
       // prova a riconnettersi al dispositivo salvato
@@ -230,47 +218,9 @@ export default function MonitorScreen() {
       setDeviceFound(true);
       setFoundDeviceName(device.name);
 
-      // Invia evento dispositivo trovato ad Ably
-      const userStateFound = useUserStore.getState();
-      if (
-        ablyService.current &&
-        userStateFound.authToken &&
-        userStateFound.userId
-      ) {
-        ablyService.current.sendMessage(
-          userStateFound.userId,
-          "device_found",
-          {
-            deviceId: device.deviceId,
-            deviceName: device.name,
-            rssi: device.rssi,
-          },
-          userStateFound.deviceCode
-        );
-      }
-
       // Connetti automaticamente al primo Polar trovato
       polarSdk.stopScan();
       setScanningState(false);
-
-      // Invia evento di scansione fermata per dispositivo trovato ad Ably
-      const userStateStopped = useUserStore.getState();
-      if (
-        ablyService.current &&
-        userStateStopped.userId &&
-        userStateStopped.deviceCode
-      ) {
-        ablyService.current.sendMessage(
-          userStateStopped.userId,
-          "scan_stopped",
-          {
-            action: "scan_stopped",
-            reason: "device_found",
-            foundDevice: device.name,
-          },
-          userStateStopped.deviceCode
-        );
-      }
 
       polarSdk.connectToDevice(device.deviceId);
     });
@@ -287,25 +237,6 @@ export default function MonitorScreen() {
         // Aggiorna il nome e l'ID del dispositivo nei dati salvati se esistono
         StorageService.updateDeviceName(device.name);
         StorageService.updateDeviceId(device.deviceId);
-
-        // Invia evento di connessione ad Ably
-        const userStateConnected = useUserStore.getState();
-        if (
-          ablyService.current &&
-          userStateConnected.userId &&
-          userStateConnected.deviceCode
-        ) {
-          ablyService.current.sendMessage(
-            userStateConnected.userId,
-            "device_connected",
-            {
-              deviceId: device.deviceId,
-              deviceName: device.name,
-              rssi: device.rssi,
-            },
-            userStateConnected.deviceCode
-          );
-        }
 
         // Avvia autenticazione e streaming
         launchAuthAndStream(device.deviceId);
@@ -328,25 +259,6 @@ export default function MonitorScreen() {
           setNotification(null);
         }, 5000);
 
-        // Invia evento di disconnessione ad Ably
-        const userStateDisconnected = useUserStore.getState();
-        if (
-          ablyService.current &&
-          userStateDisconnected.userId &&
-          userStateDisconnected.deviceCode
-        ) {
-          ablyService.current.sendMessage(
-            userStateDisconnected.userId,
-            "device_disconnected",
-            {
-              deviceId: device.deviceId,
-              deviceName: device.name,
-              reason: "disconnected",
-            },
-            userStateDisconnected.deviceCode
-          );
-        }
-
         setConnectedDeviceId(null);
         setConnectedDeviceIdInStore(null);
         setConnectedDeviceName("");
@@ -366,27 +278,6 @@ export default function MonitorScreen() {
       console.log(`Monitor: 💓 HR=${data.hr} BPM`);
       setHeartRate(data.hr);
 
-      // Invia dati della frequenza cardiaca ad Ably (solo HR, HRV viene inviato separatamente quando calcolato)
-      const userStateHR = useUserStore.getState();
-      if (ablyService.current && userStateHR.userId && userStateHR.deviceCode) {
-        ablyService.current.sendMessage(
-          userStateHR.userId,
-          "heart_rate",
-          {
-            deviceId: data.deviceId,
-            heartRate: data.hr,
-            contactDetected: data.contactDetected,
-            contactSupported: data.contactSupported,
-            ppiWindowSize: ppiWindow.current.length,
-          },
-          userStateHR.deviceCode
-        );
-
-        console.log(
-          `Monitor: 📤 HEART RATE EVENT SENT - HR: ${data.hr}, PPI Window: ${ppiWindow.current.length}`
-        );
-      }
-
       // Se non ci sono dati PPI, calcola RR approssimato da BPM come fallback
       if (data.hr > 0) {
         const approximateRR = Math.round(60000 / data.hr);
@@ -397,56 +288,51 @@ export default function MonitorScreen() {
         }
 
         // Calcola HRV quando la finestra è piena
+        let hrvValue = null;
+        let lfPowerValue = null;
+        let hfPowerValue = null;
+
         if (ppiWindow.current.length === WINDOW_SIZE) {
           const rmssd = calculateRMSSD(ppiWindow.current);
-          setHrv(Math.round(rmssd));
+          const roundedRmsdd = Math.round(rmssd);
+          setHrv(roundedRmsdd);
+          hrvValue = roundedRmsdd;
 
           const { lf, hf } = computeLfHf(ppiWindow.current);
-          setLfPower(Math.round(lf));
-          setHfPower(Math.round(hf));
+          const roundedLf = Math.round(lf);
+          const roundedHf = Math.round(hf);
+          setLfPower(roundedLf);
+          setHfPower(roundedHf);
+          lfPowerValue = roundedLf;
+          hfPowerValue = roundedHf;
 
           console.log(
-            `Monitor: 📊 HRV (da HR)=${Math.round(rmssd)}ms, LF=${Math.round(
-              lf
-            )}, HF=${Math.round(hf)}`
+            `Monitor: 📊 HRV (da HR)=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`
           );
+        }
 
-          // Invia ad Ably
-          const userStateHRFallback = useUserStore.getState();
-          if (
-            userStateHRFallback.authToken &&
-            ablyStatus === ConnectionStatus.CONNECTED &&
-            userStateHRFallback.userId &&
+        // Streamma sempre appena c'è HR
+        const userStateHRFallback = useUserStore.getState();
+        if (
+          userStateHRFallback.authToken &&
+          ablyStatus === ConnectionStatus.CONNECTED &&
+          userStateHRFallback.userId &&
+          userStateHRFallback.deviceCode
+        ) {
+          const timestamp = new Date().toISOString();
+          ablyService.current?.sendMessage(
+            userStateHRFallback.userId,
+            "heartRate",
+            {
+              deviceId: connectedDeviceId,
+              hr: data.hr,
+              hrv: hrvValue,
+              lfPower: lfPowerValue,
+              hfPower: hfPowerValue,
+              date: timestamp,
+            },
             userStateHRFallback.deviceCode
-          ) {
-            console.log(
-              `Monitor: 🔍 Debug - userId: ${
-                userStateHRFallback.userId
-              } (type: ${typeof userStateHRFallback.userId}), userIdRef: ${
-                userIdRef.current
-              }, deviceCode: ${userStateHRFallback.deviceCode}`
-            );
-            console.log(
-              `Monitor: 🔍 Current state - authToken: ${
-                userStateHRFallback.authToken ? "present" : "missing"
-              }, ablyStatus: ${ablyStatus}`
-            );
-            console.log(
-              `Monitor: 🔍 Ably connection status: ${
-                ablyStatus === ConnectionStatus.CONNECTED
-                  ? "CONNECTED"
-                  : "NOT CONNECTED"
-              }`
-            );
-            ablyService.current?.sendHeartRate(
-              userStateHRFallback.deviceCode,
-              userStateHRFallback.userId,
-              data.hr,
-              Math.round(rmssd),
-              Math.round(lf),
-              Math.round(hf)
-            );
-          }
+          );
         }
       }
     });
@@ -456,50 +342,12 @@ export default function MonitorScreen() {
         `Monitor: 📊 PPI Data ricevuto - ${data.samples.length} samples`
       );
 
-      // Invia dati PPI ad Ably
-      const userStatePPI = useUserStore.getState();
-      if (
-        ablyService.current &&
-        userStatePPI.userId &&
-        userStatePPI.deviceCode
-      ) {
-        ablyService.current.sendMessage(
-          userStatePPI.userId,
-          "ppi_data",
-          {
-            deviceId: data.deviceId,
-            samples: data.samples,
-            sampleCount: data.samples.length,
-          },
-          userStatePPI.deviceCode
-        );
-      }
-
       handlePpiData(data);
     });
 
     polarSdk.addEventListener("onPpiStreamError", (error: any) => {
       console.log("Monitor: ⚠️ PPI Stream Error:", error.error);
       console.log("Monitor: 🔄 Modalità fallback attiva (HRV da HR)");
-
-      // Invia errore PPI ad Ably
-      const userStatePPIError = useUserStore.getState();
-      if (
-        ablyService.current &&
-        userStatePPIError.userId &&
-        userStatePPIError.deviceCode
-      ) {
-        ablyService.current.sendMessage(
-          userStatePPIError.userId,
-          "ppi_stream_error",
-          {
-            error: error.error,
-            message: "PPI stream error occurred",
-            fallbackMode: true,
-          },
-          userStatePPIError.deviceCode
-        );
-      }
     });
 
     return () => {
@@ -632,24 +480,6 @@ export default function MonitorScreen() {
     setScanningState(true);
     console.log("Monitor: 🔍 Avvio scansione Polar...");
 
-    // Invia evento di scansione avviata ad Ably
-    const userStateScan = useUserStore.getState();
-    if (
-      ablyService.current &&
-      userStateScan.userId &&
-      userStateScan.deviceCode
-    ) {
-      ablyService.current.sendMessage(
-        userStateScan.userId,
-        "scan_started",
-        {
-          action: "scan_started",
-          timestamp: new Date().toISOString(),
-        },
-        userStateScan.deviceCode
-      );
-    }
-
     try {
       await polarSdk.startScan();
 
@@ -679,25 +509,6 @@ export default function MonitorScreen() {
                   style: "cancel",
                 },
               ]
-            );
-          }
-
-          // Invia evento di scansione timeout ad Ably
-          const userStateTimeout = useUserStore.getState();
-          if (
-            ablyService.current &&
-            userStateTimeout.userId &&
-            userStateTimeout.deviceCode
-          ) {
-            ablyService.current.sendMessage(
-              userStateTimeout.userId,
-              "scan_timeout",
-              {
-                action: "scan_timeout",
-                reason: "timeout",
-                duration: SCAN_TIMEOUT,
-              },
-              userStateTimeout.deviceCode
             );
           }
         }
@@ -847,20 +658,6 @@ export default function MonitorScreen() {
               );
               console.log("🔥 AUTENTICAZIONE COMPLETATA - Avvio setup...");
 
-              // Invia evento di autenticazione completata ad Ably
-              if (ablyService.current) {
-                ablyService.current.sendMessage(
-                  parseInt(pollResponse.userId),
-                  "authentication_completed",
-                  {
-                    userId: pollResponse.userId,
-                    deviceCode: pollResponse.deviceCode,
-                    authenticated: true,
-                  },
-                  pollResponse.deviceCode
-                );
-              }
-
               // Recupera il deviceToken per salvarlo insieme agli altri dati
               const currentDeviceToken = await StorageService.getDeviceToken();
 
@@ -952,22 +749,32 @@ export default function MonitorScreen() {
       );
 
       // Calcola HRV quando la finestra è piena
+      let hrvValue = null;
+      let lfPowerValue = null;
+      let hfPowerValue = null;
+
       if (ppiWindow.current.length === WINDOW_SIZE) {
         const rmssd = calculateRMSSD(ppiWindow.current);
-        setHrv(Math.round(rmssd));
+        const roundedRmsdd = Math.round(rmssd);
+        setHrv(roundedRmsdd);
+        hrvValue = roundedRmsdd;
 
         // Calcola LF/HF
         const { lf, hf } = computeLfHf(ppiWindow.current);
-        setLfPower(Math.round(lf));
-        setHfPower(Math.round(hf));
+        const roundedLf = Math.round(lf);
+        const roundedHf = Math.round(hf);
+        setLfPower(roundedLf);
+        setHfPower(roundedHf);
+        lfPowerValue = roundedLf;
+        hfPowerValue = roundedHf;
 
         console.log(
-          `Monitor: 📊 HRV=${Math.round(rmssd)}ms, LF=${Math.round(
-            lf
-          )}, HF=${Math.round(hf)}`
+          `Monitor: 📊 HRV=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`
         );
+      }
 
-        // Invia ad Ably
+      // Streamma sempre se HR è disponibile
+      if (heartRate > 0) {
         const userStateHRV = useUserStore.getState();
         if (
           userStateHRV.authToken &&
@@ -975,39 +782,19 @@ export default function MonitorScreen() {
           userStateHRV.userId &&
           userStateHRV.deviceCode
         ) {
-          console.log(
-            `Monitor: 🔍 Debug PPI - userId: ${userStateHRV.userId}, userIdRef: ${userIdRef.current}, deviceCode: ${userStateHRV.deviceCode}`
-          );
-          ablyService.current?.sendHeartRate(
-            userStateHRV.deviceCode,
-            userStateHRV.userId,
-            heartRate,
-            Math.round(rmssd),
-            Math.round(lf),
-            Math.round(hf)
-          );
-
-          // Invia evento completo con tutti i dati biometrici calcolati
+          const timestamp = new Date().toISOString();
           ablyService.current?.sendMessage(
             userStateHRV.userId,
-            "heart_rate_complete",
+            "heartRate",
             {
               deviceId: connectedDeviceId,
-              heartRate: heartRate,
-              hrv: Math.round(rmssd),
-              lfPower: Math.round(lf),
-              hfPower: Math.round(hf),
-              windowSize: ppiWindow.current.length,
-              contactDetected: true,
-              contactSupported: true,
+              hr: heartRate,
+              hrv: hrvValue,
+              lfPower: lfPowerValue,
+              hfPower: hfPowerValue,
+              date: timestamp,
             },
             userStateHRV.deviceCode
-          );
-
-          console.log(
-            `Monitor: 📤 HEART RATE COMPLETE EVENT SENT - HR: ${heartRate}, HRV: ${Math.round(
-              rmssd
-            )}, LF: ${Math.round(lf)}, HF: ${Math.round(hf)}`
           );
         }
       }
@@ -1086,23 +873,20 @@ export default function MonitorScreen() {
         userStateBiometric.deviceCode &&
         heartRate > 0
       ) {
-        // Invia dati biometrici ogni secondo
+        // Invia dati biometrici ogni secondo con nuovo formato
+        const timestamp = new Date().toISOString();
         ablyService.current.sendMessage(
           userStateBiometric.userId,
-          "biometric_data",
+          "heartRate",
           {
-            heartRate: heartRate,
-            hrv: hrv,
-            lfPower: lfPower,
-            hfPower: hfPower,
-            ppiWindowSize: ppiWindow.current.length,
-            timestamp: new Date().toISOString(),
+            deviceId: connectedDeviceId,
+            hr: heartRate,
+            hrv: hrv > 0 ? hrv : null,
+            lfPower: lfPower > 0 ? lfPower : null,
+            hfPower: hfPower > 0 ? hfPower : null,
+            date: timestamp,
           },
           userStateBiometric.deviceCode
-        );
-
-        console.log(
-          `Monitor: 📤 BIOMETRIC EVENT SENT - HR: ${heartRate}, HRV: ${hrv}, LF: ${lfPower}, HF: ${hfPower}`
         );
       }
     }, 1000); // Ogni secondo

@@ -183,6 +183,127 @@ describe('AblyService', () => {
         });
     });
 
+    describe('sendMessage', () => {
+        it('non invia se non connesso', () => {
+            ablyService.sendMessage(123, 'heartRate', { deviceId: 'dev-123', hr: 75, hrv: 45, lfPower: 1200, hfPower: 800, date: '2024-01-01T00:00:00Z' }, 'dev-123');
+
+            expect(mockChannel.publish).not.toHaveBeenCalled();
+        });
+
+        it('invia messaggio corretto quando connesso', () => {
+            ablyService.connectWithToken('test-token', 456, 'dev-123');
+
+            const onCallback = mockAbly.connection.on.mock.calls[0][0];
+            onCallback({ current: 'connected' });
+
+            const timestamp = '2024-01-01T00:00:00Z';
+            ablyService.sendMessage(
+                456,
+                'heartRate',
+                {
+                    deviceId: 'dev-123',
+                    hr: 75,
+                    hrv: 45,
+                    lfPower: 1200,
+                    hfPower: 800,
+                    date: timestamp,
+                },
+                'dev-123'
+            );
+
+            expect(mockChannel.publish).toHaveBeenCalledWith(
+                'heartRate',
+                expect.stringContaining('"deviceId":"dev-123"')
+            );
+            expect(mockChannel.publish).toHaveBeenCalledWith(
+                'heartRate',
+                expect.stringContaining('"hr":75')
+            );
+            expect(mockChannel.publish).toHaveBeenCalledWith(
+                'heartRate',
+                expect.stringContaining('"hrv":45')
+            );
+        });
+
+        it('include tutti i campi nel messaggio heartRate', () => {
+            ablyService.connectWithToken('test-token', 456, 'dev-123');
+
+            const onCallback = mockAbly.connection.on.mock.calls[0][0];
+            onCallback({ current: 'connected' });
+
+            const timestamp = '2024-01-01T00:00:00Z';
+            ablyService.sendMessage(
+                456,
+                'heartRate',
+                {
+                    deviceId: 'dev-123',
+                    hr: 80,
+                    hrv: 50,
+                    lfPower: 1500,
+                    hfPower: 900,
+                    date: timestamp,
+                },
+                'dev-123'
+            );
+
+            const publishCall = mockChannel.publish.mock.calls[0];
+            const message = JSON.parse(publishCall[1]);
+
+            expect(message.deviceId).toBe('dev-123');
+            expect(message.hr).toBe(80);
+            expect(message.hrv).toBe(50);
+            expect(message.lfPower).toBe(1500);
+            expect(message.hfPower).toBe(900);
+            expect(message.date).toBe(timestamp);
+            expect(message.type).toBe('heartRate');
+            expect(message.code).toBe('dev-123');
+            expect(message).toHaveProperty('timestamp');
+        });
+
+        it('gestisce errore durante publish', () => {
+            mockChannel.publish.mockImplementation(() => {
+                throw new Error('Publish failed');
+            });
+
+            ablyService.connectWithToken('test-token', 456, 'dev-123');
+
+            const onCallback = mockAbly.connection.on.mock.calls[0][0];
+            onCallback({ current: 'connected' });
+
+            expect(() => {
+                ablyService.sendMessage(456, 'heartRate', { deviceId: 'dev-123', hr: 75, hrv: 45, lfPower: 1200, hfPower: 800, date: '2024-01-01T00:00:00Z' }, 'dev-123');
+            }).not.toThrow();
+        });
+
+        it('usa il timestamp corrente se non fornito', () => {
+            ablyService.connectWithToken('test-token', 456, 'dev-123');
+
+            const onCallback = mockAbly.connection.on.mock.calls[0][0];
+            onCallback({ current: 'connected' });
+
+            ablyService.sendMessage(
+                456,
+                'heartRate',
+                {
+                    deviceId: 'dev-123',
+                    hr: 75,
+                    hrv: 45,
+                    lfPower: 1200,
+                    hfPower: 800,
+                    date: '2024-01-01T00:00:00Z',
+                },
+                'dev-123'
+            );
+
+            const publishCall = mockChannel.publish.mock.calls[0];
+            const message = JSON.parse(publishCall[1]);
+
+            // Verifica che timestamp sia presente e sia una ISO string valida
+            expect(message).toHaveProperty('timestamp');
+            expect(new Date(message.timestamp).toISOString()).toBe(message.timestamp);
+        });
+    });
+
     describe('close', () => {
         it('chiude connessione Ably', () => {
             ablyService.connectWithToken('test-token', 123, 'device-abc');
