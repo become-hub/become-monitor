@@ -6,6 +6,7 @@
 import { AppFooter } from "@/components/app-footer";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { API_BASE_URL } from "@/constants/constants";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
 import { AblyService, ConnectionStatus } from "@/services/ably-service";
@@ -31,7 +32,7 @@ import {
   XCircle,
   Zap,
 } from "lucide-react-native";
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -141,7 +142,7 @@ export default function MonitorScreen() {
   useEffect(() => {
     // Inizializza Ably service
     ablyService.current = new AblyService(
-      "https://production-api25.become-hub.com/services/ably",
+      API_BASE_URL + "/services/ably",
       (status) => {
         setAblyStatus(status);
         console.log("Monitor: 🔵 Ably status:", status);
