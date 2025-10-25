@@ -3,8 +3,10 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
+import { polarSdk } from "@/services/polar-ble-sdk";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
+  Bluetooth,
   CheckCircle,
   Info,
   Monitor,
@@ -32,10 +34,37 @@ export default function SettingsScreen() {
   const [localDebugMode, setLocalDebugMode] = useState(debugMode);
   const [password, setPassword] = useState("");
   const [showPasswordInput, setShowPasswordInput] = useState(false);
+  const [bluetoothEnabled, setBluetoothEnabled] = useState(false);
   const [notification, setNotification] = useState<{
     type: "success" | "error";
     message: string;
   } | null>(null);
+
+  // Check Bluetooth state on mount and update
+  useEffect(() => {
+    const checkBluetoothState = async () => {
+      try {
+        const isEnabled = await polarSdk.checkBluetoothState();
+        setBluetoothEnabled(isEnabled);
+      } catch (error) {
+        console.error("Error checking Bluetooth state:", error);
+      }
+    };
+
+    checkBluetoothState();
+
+    // Listen for Bluetooth state changes
+    const listener = polarSdk.addEventListener(
+      "onBluetoothStateChanged",
+      (state) => {
+        setBluetoothEnabled(state.powered);
+      }
+    );
+
+    return () => {
+      polarSdk.removeEventListener("onBluetoothStateChanged");
+    };
+  }, []);
 
   // Sincronizza localDebugMode con debugMode quando cambia
   useEffect(() => {
@@ -108,6 +137,85 @@ export default function SettingsScreen() {
     setLocalDebugMode(false); // Ripristina lo switch
   };
 
+  const handleBluetoothToggle = async (value: boolean) => {
+    // Solo attivazione: se cercano di spegnere, ignora
+    if (!value) return;
+    try {
+      const hasPermissions = await polarSdk.hasBluetoothPermissions();
+      if (!hasPermissions) {
+        await polarSdk.requestBluetoothPermissions();
+        await new Promise((r) => setTimeout(r, 500));
+        const finalCheck = await polarSdk.hasBluetoothPermissions();
+        if (!finalCheck) return;
+      }
+      const requested = await polarSdk.requestEnableBluetooth();
+      if (requested) {
+        await new Promise((r) => setTimeout(r, 800));
+        const current = await polarSdk.checkBluetoothState();
+        setBluetoothEnabled(current);
+        if (current)
+          setNotification({ type: "success", message: "Bluetooth attivato" });
+        setTimeout(() => setNotification(null), 2500);
+      }
+    } catch {
+      // silenzioso: niente disattivazione supportata
+    }
+  };
+
+  const performBluetoothToggle = async (value: boolean) => {
+    console.log(`Settings: 🔄 Esecuzione toggle Bluetooth a: ${value}`);
+    try {
+      // Su Android 13+, le app non possono controllare direttamente il Bluetooth
+      // Dobbiamo usare il dialog di sistema per entrambe le operazioni
+
+      if (value) {
+        // Attivazione: usa il dialog di sistema
+        console.log("Settings: 📱 Uso requestEnableBluetooth per attivare...");
+        const requested = await polarSdk.requestEnableBluetooth();
+        console.log(
+          `Settings: ✅ requestEnableBluetooth ha avuto successo: ${requested}`
+        );
+
+        // Aspetta che l'utente risponda al dialog
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Verifica lo stato aggiornato
+        const currentState = await polarSdk.checkBluetoothState();
+        console.log(
+          `Settings: 📡 Stato Bluetooth dopo dialog: ${currentState}`
+        );
+
+        setBluetoothEnabled(currentState);
+
+        if (currentState) {
+          setNotification({
+            type: "success",
+            message: "Bluetooth attivato",
+          });
+        } else {
+          setNotification({
+            type: "error",
+            message: "Bluetooth non attivato dall'utente",
+          });
+        }
+        setTimeout(() => setNotification(null), 3000);
+        return;
+      } else {
+        // Disattivazione non supportata dall'app
+        return;
+      }
+    } catch (error: any) {
+      console.error("Settings: ❌ Errore esecuzione toggle Bluetooth:", error);
+      setNotification({
+        type: "error",
+        message: `Errore: ${
+          error.message || "Impossibile modificare lo stato del Bluetooth"
+        }`,
+      });
+      setBluetoothEnabled(!value); // Ripristina lo switch
+    }
+  };
+
   const handleAbout = () => {
     Alert.alert(
       "About Become Monitor",
@@ -162,6 +270,39 @@ export default function SettingsScreen() {
           <ThemedText type="subtitle" style={styles.sectionTitle}>
             Connection
           </ThemedText>
+
+          <ThemedView style={styles.settingItem}>
+            <View style={styles.settingContent}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <Bluetooth
+                  size={18}
+                  color={bluetoothEnabled ? Colors[theme].tint : "#999"}
+                />
+                <ThemedText style={styles.settingLabel}>Bluetooth</ThemedText>
+              </View>
+              <ThemedText style={styles.settingDescription}>
+                {bluetoothEnabled
+                  ? "Bluetooth è attivo (usa Impostazioni per disattivare)"
+                  : "Bluetooth è disattivo"}
+              </ThemedText>
+            </View>
+            <Switch
+              value={bluetoothEnabled}
+              disabled={bluetoothEnabled}
+              onValueChange={(next) => {
+                if (next) {
+                  handleBluetoothToggle(true);
+                }
+              }}
+              trackColor={{
+                false: "#767577",
+                true: Colors[theme].tint,
+              }}
+              thumbColor={bluetoothEnabled ? "#fff" : "#f4f3f4"}
+            />
+          </ThemedView>
 
           <ThemedView style={styles.settingItem}>
             <View style={styles.settingContent}>

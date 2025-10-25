@@ -1,5 +1,6 @@
 package com.gabriele.muscogiuri.becomemonitor
 
+import android.app.Activity
 import android.util.Log
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
@@ -47,6 +48,19 @@ class PolarBleModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
 
     override fun getName(): String = "PolarBleModule"
 
+    // Metodi richiesti da NativeEventEmitter
+    @ReactMethod
+    fun addListener(eventName: String) {
+        // Metodo richiesto da NativeEventEmitter
+        // Non necessario implementare nulla qui
+    }
+
+    @ReactMethod
+    fun removeListeners(count: Int) {
+        // Metodo richiesto da NativeEventEmitter
+        // Non necessario implementare nulla qui
+    }
+
     @ReactMethod
     fun checkBluetoothState(promise: Promise) {
         try {
@@ -54,6 +68,73 @@ class PolarBleModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
             promise.resolve(powered)
         } catch (e: Exception) {
             promise.reject("BLUETOOTH_CHECK_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun hasBluetoothPermissions(promise: Promise) {
+        try {
+            val hasPermissions = bluetoothManager.hasBluetoothPermissions()
+            promise.resolve(hasPermissions)
+        } catch (e: Exception) {
+            promise.reject("PERMISSION_CHECK_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun requestBluetoothPermissions(promise: Promise) {
+        try {
+            val activity = reactApplicationContext.currentActivity
+            if (activity != null) {
+                bluetoothManager.requestBluetoothPermissions(activity)
+                promise.resolve(true)
+            } else {
+                promise.reject("NO_ACTIVITY", "No current activity available")
+            }
+        } catch (e: Exception) {
+            promise.reject("PERMISSION_REQUEST_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun requestEnableBluetooth(promise: Promise) {
+        try {
+            val activity = reactApplicationContext.currentActivity
+            if (activity != null) {
+                val result = bluetoothManager.requestEnableBluetooth(activity)
+                promise.resolve(result)
+            } else {
+                promise.reject("NO_ACTIVITY", "No current activity available")
+            }
+        } catch (e: Exception) {
+            promise.reject("ENABLE_BT_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun setBluetoothEnabled(enable: Boolean, promise: Promise) {
+        try {
+            // Per Android, proviamo prima setBluetoothEnabled diretto
+            val result = bluetoothManager.setBluetoothEnabled(enable)
+            result.onSuccess { success ->
+                promise.resolve(success)
+            }.onFailure { error ->
+                // Se fallisce per permessi o altre ragioni, usa requestEnableBluetooth
+                if (enable) {
+                    val activity = reactApplicationContext.currentActivity
+                    if (activity != null) {
+                        val requested = bluetoothManager.requestEnableBluetooth(activity)
+                        promise.resolve(requested)
+                    } else {
+                        promise.reject("NO_ACTIVITY", "No current activity available")
+                    }
+                } else {
+                    // Per disabilitare, usa setBluetoothEnabled
+                    promise.reject("TOGGLE_BT_ERROR", error.message)
+                }
+            }
+        } catch (e: Exception) {
+            promise.reject("TOGGLE_BT_ERROR", e.message)
         }
     }
 
@@ -214,6 +295,8 @@ class PolarBleModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
             .emit(eventName, params)
     }
+
+
 
     override fun onCatalystInstanceDestroy() {
         super.onCatalystInstanceDestroy()

@@ -61,6 +61,36 @@ class PolarBleSdk {
     }
 
     /**
+     * Verifica se i permessi Bluetooth sono concessi
+     */
+    async hasBluetoothPermissions(): Promise<boolean> {
+        return PolarBleModule.hasBluetoothPermissions();
+    }
+
+    /**
+     * Richiede i permessi Bluetooth necessari
+     */
+    async requestBluetoothPermissions(): Promise<void> {
+        return PolarBleModule.requestBluetoothPermissions();
+    }
+
+    /**
+     * Richiede di attivare il Bluetooth (mostra dialog sistema)
+     */
+    async requestEnableBluetooth(): Promise<boolean> {
+        return PolarBleModule.requestEnableBluetooth();
+    }
+
+    /**
+     * Attiva o disattiva il Bluetooth direttamente
+     */
+    async setBluetoothEnabled(enable: boolean): Promise<boolean> {
+        return PolarBleModule.setBluetoothEnabled(enable);
+    }
+
+    // openBluetoothSettings rimosso: non supportiamo più spegnimento via app
+
+    /**
      * Avvia la scansione dei dispositivi Polar
      */
     async startScan(): Promise<void> {

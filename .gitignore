@@ -39,6 +39,9 @@ yarn-error.*
 app-example
 
 # generated native folders
-/ios
-/android
 /legacy
+
+# Android NDK build outputs (Gradle)
+android/.cxx/
+android/app/.cxx/
+android/**/.cxx/

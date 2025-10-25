@@ -35,7 +35,6 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  PermissionsAndroid,
   Platform,
   ScrollView,
   StyleSheet,
@@ -523,45 +522,106 @@ export default function MonitorScreen() {
 
   const requestPermissions = async (): Promise<boolean> => {
     if (Platform.OS === "android") {
-      if (Platform.Version >= 31) {
-        const granted = await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        ]);
+      try {
+        console.log("Monitor: 🔐 Verifica stato permessi...");
+        // Verifica se i permessi sono già concessi
+        const hasPermissions = await polarSdk.hasBluetoothPermissions();
+        console.log(`Monitor: 🔐 Permessi concessi: ${hasPermissions}`);
 
-        const allGranted = Object.values(granted).every(
-          (status) => status === PermissionsAndroid.RESULTS.GRANTED
-        );
+        if (!hasPermissions) {
+          console.log("Monitor: 🔐 Permessi non concessi, richiedo...");
 
-        if (!allGranted) {
-          Alert.alert(
-            "Permessi richiesti",
-            "I permessi Bluetooth sono necessari"
-          );
-          return false;
+          // Richiedi permessi tramite il modulo nativo
+          // NOTA: Questo mostrerà il dialog Android se non ci sono errori
+          try {
+            await polarSdk.requestBluetoothPermissions();
+            console.log("Monitor: 🔐 Richiesta permessi inviata");
+
+            // Aspetta un po' più tempo per far processare la richiesta
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            const finalCheck = await polarSdk.hasBluetoothPermissions();
+            console.log(`Monitor: 🔐 Verifica finale permessi: ${finalCheck}`);
+
+            if (!finalCheck) {
+              Alert.alert(
+                "Permessi richiesti",
+                "I permessi Bluetooth sono necessari per utilizzare l'app. Vai nelle impostazioni e concesse i permessi."
+              );
+              return false;
+            }
+          } catch (permissionError: any) {
+            console.error(
+              "Monitor: Errore nella richiesta permessi:",
+              permissionError
+            );
+            Alert.alert(
+              "Errore",
+              "Impossibile richiedere i permessi: " + permissionError.message
+            );
+            return false;
+          }
+        } else {
+          console.log("Monitor: ✅ Permessi già concessi");
         }
-      } else {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
-        );
 
-        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-          return false;
-        }
+        return true;
+      } catch (error: any) {
+        console.error("Monitor: Errore richiesta permessi:", error);
+        Alert.alert(
+          "Errore",
+          "Impossibile richiedere i permessi Bluetooth: " + error.message
+        );
+        return false;
       }
     }
     return true;
   };
 
   const startScan = async () => {
-    if (!bluetoothPowered) {
-      Alert.alert("Bluetooth disabilitato", "Abilita il Bluetooth");
+    console.log("Monitor: 🔍 startScan chiamato");
+
+    // PRIMA richiedi i permessi (indipendentemente dallo stato Bluetooth)
+    console.log("Monitor: 🔐 Controllo permessi...");
+    const hasPermission = await requestPermissions();
+    if (!hasPermission) {
+      console.log("Monitor: ❌ Permessi non concessi");
       return;
     }
+    console.log("Monitor: ✅ Permessi concessi");
 
-    const hasPermission = await requestPermissions();
-    if (!hasPermission) return;
+    // POI controlla lo stato Bluetooth
+    const btState = await polarSdk.checkBluetoothState();
+    console.log(`Monitor: Bluetooth stato: ${btState ? "ON" : "OFF"}`);
+
+    if (!btState) {
+      Alert.alert("Bluetooth disabilitato", "Vuoi attivare il Bluetooth?", [
+        {
+          text: "Annulla",
+          style: "cancel",
+        },
+        {
+          text: "Attiva",
+          onPress: async () => {
+            try {
+              console.log("Monitor: 🔵 Tentativo attivazione Bluetooth...");
+              await polarSdk.setBluetoothEnabled(true);
+              console.log("Monitor: ✅ Bluetooth attivato");
+
+              // Riprova la scansione dopo aver attivato Bluetooth
+              setTimeout(() => startScan(), 1000);
+            } catch (error: any) {
+              console.error("Monitor: Errore attivazione Bluetooth:", error);
+              Alert.alert(
+                "Errore",
+                "Impossibile attivare il Bluetooth automaticamente. Attivalo manualmente dalle impostazioni del dispositivo."
+              );
+            }
+          },
+        },
+      ]);
+      return;
+    }
 
     // Reset flag e timestamp di scansione
     setDeviceFound(false);

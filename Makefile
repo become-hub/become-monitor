@@ -1,4 +1,4 @@
-.PHONY: prebuild clean-prebuild android ios logs test test-watch test-coverage test-ci clean-test help
+.PHONY: prebuild clean-prebuild android virtual-smartphone ios logs test test-watch test-coverage test-ci clean-test help
 
 # Prebuild dell'app con clean per rigenerare completamente le cartelle native
 prebuild:
@@ -12,15 +12,32 @@ clean-prebuild:
 	rm -rf android ios
 	@echo "✅ Cartelle native rimosse!"
 
-# Avvia l'app su Android
+# Avvia l'app su dispositivo Android fisico
 android:
-	@echo "🤖 Avvio app su Android..."
+	@echo "📱 Avvio app su dispositivo Android fisico..."
 	@echo "☕ Configurazione Java 17 e Android SDK..."
+	@echo "🔍 Verificando dispositivi collegati..."
+	@adb devices
+	@echo "🚀 Avvio su dispositivo fisico..."
+	@echo "⚠️  Se non vedi il tuo smartphone nella lista sopra, abilita il debug USB!"
+	export JAVA_HOME=/opt/homebrew/opt/openjdk@17 && \
+	export ANDROID_HOME=$$HOME/Library/Android/sdk && \
+	export PATH=$$PATH:$$ANDROID_HOME/platform-tools:$$ANDROID_HOME/cmdline-tools/latest/bin && \
+	npx expo run:android --device
+	@echo "✅ App avviata su dispositivo Android!"
+
+# Avvia l'app su emulatore Android
+virtual-smartphone:
+	@echo "🤖 Avvio app su emulatore Android..."
+	@echo "☕ Configurazione Java 17 e Android SDK..."
+	@echo "🔍 Verificando emulatori disponibili..."
+	@adb devices
+	@echo "🚀 Avvio su emulatore..."
 	export JAVA_HOME=/opt/homebrew/opt/openjdk@17 && \
 	export ANDROID_HOME=$$HOME/Library/Android/sdk && \
 	export PATH=$$PATH:$$ANDROID_HOME/platform-tools:$$ANDROID_HOME/cmdline-tools/latest/bin && \
 	npx expo run:android
-	@echo "✅ App avviata su Android!"
+	@echo "✅ App avviata su emulatore Android!"
 
 # Avvia l'app su iOS
 ios:
@@ -66,7 +83,8 @@ help:
 	@echo "Build & Run:"
 	@echo "  make prebuild        - Esegue npx expo prebuild --clean"
 	@echo "  make clean-prebuild  - Rimuove le cartelle android/ e ios/"
-	@echo "  make android         - Avvia l'app su Android (con Java 17)"
+	@echo "  make android         - Avvia l'app su dispositivo Android fisico"
+	@echo "  make virtual-smartphone - Avvia l'app su emulatore Android"
 	@echo "  make ios             - Avvia l'app su iOS (expo run:ios)"
 	@echo ""
 	@echo "Testing:"
