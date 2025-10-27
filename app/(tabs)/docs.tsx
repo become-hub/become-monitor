@@ -3,6 +3,7 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useLocale } from "@/hooks/use-locale";
 import {
   Activity,
   AlertTriangle,
@@ -27,6 +28,7 @@ import {
 
 export default function DocsScreen() {
   const { theme } = useTheme();
+  const { strings } = useLocale();
 
   const openLink = (url: string) => {
     Linking.openURL(url);
@@ -38,28 +40,28 @@ export default function DocsScreen() {
         {/* Header */}
         <ThemedView style={styles.header}>
           <ThemedText type="title" style={styles.title}>
-            Documentation
+            {strings.docs.title}
           </ThemedText>
           <ThemedText style={styles.subtitle}>
-            Learn how to use Become Monitor effectively
+            {strings.docs.subtitle}
           </ThemedText>
         </ThemedView>
 
         {/* Getting Started */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Getting Started
+            {strings.docs.gettingStarted}
           </ThemedText>
 
           <ThemedView style={styles.card}>
             <View style={styles.cardHeader}>
               <Smartphone size={20} color={Colors[theme].tint} />
-              <ThemedText style={styles.cardTitle}>App Overview</ThemedText>
+              <ThemedText style={styles.cardTitle}>
+                {strings.docs.appOverview}
+              </ThemedText>
             </View>
             <ThemedText style={styles.cardText}>
-              Become Monitor is a professional heart rate variability (HRV)
-              monitoring app designed for athletes, health professionals, and
-              wellness enthusiasts.
+              {strings.docs.appOverviewDescription}
             </ThemedText>
           </ThemedView>
 
@@ -67,43 +69,60 @@ export default function DocsScreen() {
             <View style={styles.cardHeader}>
               <Bluetooth size={20} color={Colors[theme].tint} />
               <ThemedText style={styles.cardTitle}>
-                Device Connection
+                {strings.docs.deviceConnection}
               </ThemedText>
             </View>
             <ThemedText style={styles.cardText}>
-              Connect your Polar device (H10, OH1, Verity Sense) via Bluetooth
-              to start real-time heart rate and HRV monitoring.
+              {strings.docs.deviceConnectionDescription}
             </ThemedText>
+            <TouchableOpacity
+              style={[
+                styles.linkButton,
+                { borderColor: Colors[theme].tint, marginTop: 12 },
+              ]}
+              onPress={() =>
+                openLink(
+                  "https://github.com/become-hub/become-monitor/blob/main/docs/polar-360-connection-guide.md"
+                )
+              }
+            >
+              <View style={styles.linkContent}>
+                <ThemedText style={styles.linkText}>
+                  {strings.docs.polar360SetupGuide}
+                </ThemedText>
+                <ExternalLink size={16} />
+              </View>
+            </TouchableOpacity>
           </ThemedView>
         </ThemedView>
 
         {/* Features */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Key Features
+            {strings.docs.keyFeatures}
           </ThemedText>
 
           <ThemedView style={styles.card}>
             <View style={styles.cardHeader}>
               <Heart size={20} color={Colors[theme].tint} />
               <ThemedText style={styles.cardTitle}>
-                Heart Rate Monitoring
+                {strings.docs.heartRateMonitoring}
               </ThemedText>
             </View>
             <ThemedText style={styles.cardText}>
-              Real-time heart rate tracking with contact detection and signal
-              quality indicators.
+              {strings.docs.heartRateMonitoringDescription}
             </ThemedText>
           </ThemedView>
 
           <ThemedView style={styles.card}>
             <View style={styles.cardHeader}>
               <BarChart3 size={20} color={Colors[theme].tint} />
-              <ThemedText style={styles.cardTitle}>HRV Analysis</ThemedText>
+              <ThemedText style={styles.cardTitle}>
+                {strings.docs.hrvAnalysis}
+              </ThemedText>
             </View>
             <ThemedText style={styles.cardText}>
-              Advanced HRV calculations including RMSSD, LF/HF power analysis
-              for comprehensive autonomic nervous system assessment.
+              {strings.docs.hrvAnalysisDescription}
             </ThemedText>
           </ThemedView>
 
@@ -111,12 +130,11 @@ export default function DocsScreen() {
             <View style={styles.cardHeader}>
               <Cloud size={20} color={Colors[theme].tint} />
               <ThemedText style={styles.cardTitle}>
-                Cloud Integration
+                {strings.docs.cloudIntegration}
               </ThemedText>
             </View>
             <ThemedText style={styles.cardText}>
-              Secure data transmission to Become Hub for analysis, storage, and
-              professional insights.
+              {strings.docs.cloudIntegrationDescription}
             </ThemedText>
           </ThemedView>
         </ThemedView>
@@ -124,18 +142,18 @@ export default function DocsScreen() {
         {/* Technical Details */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Technical Specifications
+            {strings.docs.technicalSpecs}
           </ThemedText>
 
           <ThemedView style={styles.card}>
             <View style={styles.cardHeader}>
               <Activity size={20} color={Colors[theme].tint} />
-              <ThemedText style={styles.cardTitle}>HRV Metrics</ThemedText>
+              <ThemedText style={styles.cardTitle}>
+                {strings.docs.hrvMetrics}
+              </ThemedText>
             </View>
             <ThemedText style={styles.cardText}>
-              • RMSSD (Root Mean Square of Successive Differences){"\n"}• LF
-              Power (Low Frequency){"\n"}• HF Power (High Frequency){"\n"}•
-              30-second rolling window analysis
+              {strings.docs.hrvMetricsDescription}
             </ThemedText>
           </ThemedView>
 
@@ -143,21 +161,56 @@ export default function DocsScreen() {
             <View style={styles.cardHeader}>
               <Bluetooth size={20} color={Colors[theme].tint} />
               <ThemedText style={styles.cardTitle}>
-                Supported Devices
+                {strings.docs.supportedDevices}
               </ThemedText>
             </View>
             <ThemedText style={styles.cardText}>
-              • Polar H10 (Chest strap){"\n"}• Polar OH1 (Optical sensor){"\n"}•
-              Polar Verity Sense (Optical sensor){"\n"}• Bluetooth Low Energy
-              (BLE) compatible
+              {strings.docs.supportedDevicesDescription}
             </ThemedText>
+          </ThemedView>
+        </ThemedView>
+
+        {/* Device Guides */}
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle" style={styles.sectionTitle}>
+            {strings.docs.deviceGuides}
+          </ThemedText>
+
+          <ThemedView style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Bluetooth size={20} color={Colors[theme].tint} />
+              <ThemedText style={styles.cardTitle}>
+                {strings.docs.polar360ConnectionGuide}
+              </ThemedText>
+            </View>
+            <ThemedText style={styles.cardText}>
+              {strings.docs.polar360GuideDescription}
+            </ThemedText>
+            <TouchableOpacity
+              style={[
+                styles.linkButton,
+                { borderColor: Colors[theme].tint, marginTop: 12 },
+              ]}
+              onPress={() =>
+                openLink(
+                  "https://github.com/become-hub/become-monitor/blob/main/docs/polar-360-connection-guide.md"
+                )
+              }
+            >
+              <View style={styles.linkContent}>
+                <ThemedText style={styles.linkText}>
+                  {strings.docs.viewPolar360Guide}
+                </ThemedText>
+                <ExternalLink size={16} />
+              </View>
+            </TouchableOpacity>
           </ThemedView>
         </ThemedView>
 
         {/* Resources */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Resources
+            {strings.docs.resources}
           </ThemedText>
 
           <TouchableOpacity
@@ -167,7 +220,7 @@ export default function DocsScreen() {
             <View style={styles.linkContent}>
               <Wifi size={20} color={Colors[theme].tint} />
               <ThemedText style={styles.linkText}>
-                Become Hub Website
+                {strings.docs.becomeHubWebsite}
               </ThemedText>
               <ExternalLink size={16} />
             </View>
@@ -179,7 +232,9 @@ export default function DocsScreen() {
           >
             <View style={styles.linkContent}>
               <Mail size={20} color={Colors[theme].tint} />
-              <ThemedText style={styles.linkText}>Become Support</ThemedText>
+              <ThemedText style={styles.linkText}>
+                {strings.docs.becomeSupport}
+              </ThemedText>
               <ExternalLink size={16} />
             </View>
           </TouchableOpacity>
@@ -188,32 +243,30 @@ export default function DocsScreen() {
         {/* Troubleshooting */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Troubleshooting
+            {strings.docs.troubleshooting}
           </ThemedText>
 
           <ThemedView style={styles.card}>
             <View style={styles.cardHeader}>
               <AlertTriangle size={20} color={Colors[theme].tint} />
               <ThemedText style={styles.cardTitle}>
-                Connection Issues
+                {strings.docs.connectionIssues}
               </ThemedText>
             </View>
             <ThemedText style={styles.cardText}>
-              • Ensure Bluetooth is enabled{"\n"}• Check device battery level
-              {"\n"}• Restart the app if needed{"\n"}• Clear stored
-              authentication data
+              {strings.docs.connectionIssuesDescription}
             </ThemedText>
           </ThemedView>
 
           <ThemedView style={styles.card}>
             <View style={styles.cardHeader}>
               <CheckCircle size={20} color={Colors[theme].tint} />
-              <ThemedText style={styles.cardTitle}>Data Quality</ThemedText>
+              <ThemedText style={styles.cardTitle}>
+                {strings.docs.dataQuality}
+              </ThemedText>
             </View>
             <ThemedText style={styles.cardText}>
-              • Ensure good skin contact{"\n"}• Avoid movement during
-              measurement{"\n"}• Check for interference from other devices{"\n"}
-              • Allow 30 seconds for stable readings
+              {strings.docs.dataQualityDescription}
             </ThemedText>
           </ThemedView>
         </ThemedView>

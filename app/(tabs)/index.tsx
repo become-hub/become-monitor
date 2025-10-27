@@ -8,9 +8,11 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useLocale } from "@/hooks/use-locale";
 
 export default function HomeScreen() {
   const { theme } = useTheme();
+  const { strings } = useLocale();
   const router = useRouter();
 
   const handleStartPress = () => {
@@ -34,7 +36,7 @@ export default function HomeScreen() {
             />
           </View>
           <ThemedText type="title" style={styles.deviceTitle}>
-            Scegli il tuo device
+            {strings.home.title}
           </ThemedText>
           <ThemedText style={styles.deviceDescription}>
             Connetti il tuo dispositivo Polar 360 per iniziare a monitorare le

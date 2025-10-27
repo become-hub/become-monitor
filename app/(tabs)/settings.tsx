@@ -3,11 +3,13 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useLocale } from "@/hooks/use-locale";
 import { polarSdk } from "@/services/polar-ble-sdk";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
   Bluetooth,
   CheckCircle,
+  Globe,
   Info,
   Monitor,
   Moon,
@@ -28,6 +30,7 @@ import packageJson from "../../package.json";
 
 export default function SettingsScreen() {
   const { theme, themePreference, updateThemePreference } = useTheme();
+  const { strings } = useLocale();
   const { debugMode, setDebugMode } = useSettingsStore();
   const [autoConnect, setAutoConnect] = useState(true);
   const [dataSync, setDataSync] = useState(true);
@@ -54,12 +57,9 @@ export default function SettingsScreen() {
     checkBluetoothState();
 
     // Listen for Bluetooth state changes
-    const listener = polarSdk.addEventListener(
-      "onBluetoothStateChanged",
-      (state) => {
-        setBluetoothEnabled(state.powered);
-      }
-    );
+    polarSdk.addEventListener("onBluetoothStateChanged", (state) => {
+      setBluetoothEnabled(state.powered);
+    });
 
     return () => {
       polarSdk.removeEventListener("onBluetoothStateChanged");
@@ -162,60 +162,6 @@ export default function SettingsScreen() {
     }
   };
 
-  const performBluetoothToggle = async (value: boolean) => {
-    console.log(`Settings: 🔄 Esecuzione toggle Bluetooth a: ${value}`);
-    try {
-      // Su Android 13+, le app non possono controllare direttamente il Bluetooth
-      // Dobbiamo usare il dialog di sistema per entrambe le operazioni
-
-      if (value) {
-        // Attivazione: usa il dialog di sistema
-        console.log("Settings: 📱 Uso requestEnableBluetooth per attivare...");
-        const requested = await polarSdk.requestEnableBluetooth();
-        console.log(
-          `Settings: ✅ requestEnableBluetooth ha avuto successo: ${requested}`
-        );
-
-        // Aspetta che l'utente risponda al dialog
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        // Verifica lo stato aggiornato
-        const currentState = await polarSdk.checkBluetoothState();
-        console.log(
-          `Settings: 📡 Stato Bluetooth dopo dialog: ${currentState}`
-        );
-
-        setBluetoothEnabled(currentState);
-
-        if (currentState) {
-          setNotification({
-            type: "success",
-            message: "Bluetooth attivato",
-          });
-        } else {
-          setNotification({
-            type: "error",
-            message: "Bluetooth non attivato dall'utente",
-          });
-        }
-        setTimeout(() => setNotification(null), 3000);
-        return;
-      } else {
-        // Disattivazione non supportata dall'app
-        return;
-      }
-    } catch (error: any) {
-      console.error("Settings: ❌ Errore esecuzione toggle Bluetooth:", error);
-      setNotification({
-        type: "error",
-        message: `Errore: ${
-          error.message || "Impossibile modificare lo stato del Bluetooth"
-        }`,
-      });
-      setBluetoothEnabled(!value); // Ripristina lo switch
-    }
-  };
-
   const handleAbout = () => {
     Alert.alert(
       "About Become Monitor",
@@ -258,17 +204,52 @@ export default function SettingsScreen() {
         {/* Header */}
         <ThemedView style={styles.header}>
           <ThemedText type="title" style={styles.title}>
-            Settings
+            {strings.settings.title}
           </ThemedText>
           <ThemedText style={styles.subtitle}>
-            Configure your monitoring experience
+            Configura la tua esperienza di monitoraggio
           </ThemedText>
+        </ThemedView>
+
+        {/* Language Settings */}
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle" style={styles.sectionTitle}>
+            {strings.settings.language}
+          </ThemedText>
+
+          <ThemedView style={styles.settingItem}>
+            <View style={styles.settingContent}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <Globe size={18} color={Colors[theme].tint} />
+                <ThemedText style={styles.settingLabel}>
+                  {strings.settings.selectLanguage}
+                </ThemedText>
+              </View>
+              <ThemedText style={styles.settingDescription}>
+                {strings.settings.languageDescription}
+              </ThemedText>
+            </View>
+            <View style={styles.languageSelector}>
+              <TouchableOpacity
+                style={[
+                  styles.languageOption,
+                  { borderColor: Colors[theme].tint },
+                ]}
+              >
+                <ThemedText style={styles.languageOptionText}>
+                  🇮🇹 Italiano
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+          </ThemedView>
         </ThemedView>
 
         {/* Connection Settings */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Connection
+            Connessione
           </ThemedText>
 
           <ThemedView style={styles.settingItem}>
@@ -344,11 +325,11 @@ export default function SettingsScreen() {
         {/* Theme Settings */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Appearance
+            {strings.settings.theme}
           </ThemedText>
           <ThemedText style={styles.currentThemeText}>
-            Current theme: {theme}{" "}
-            {themePreference === "system" ? "(system)" : ""}
+            Tema attuale: {theme === "light" ? "Chiaro" : "Scuro"}{" "}
+            {themePreference === "system" ? "(sistema)" : ""}
           </ThemedText>
 
           <ThemedView style={styles.themeOptions}>
@@ -374,7 +355,7 @@ export default function SettingsScreen() {
                       styles.themeOptionTextSelected,
                   ]}
                 >
-                  Light
+                  {strings.settings.light}
                 </ThemedText>
               </View>
             </TouchableOpacity>
@@ -401,7 +382,7 @@ export default function SettingsScreen() {
                       styles.themeOptionTextSelected,
                   ]}
                 >
-                  Dark
+                  {strings.settings.dark}
                 </ThemedText>
               </View>
             </TouchableOpacity>
@@ -428,7 +409,7 @@ export default function SettingsScreen() {
                       styles.themeOptionTextSelected,
                   ]}
                 >
-                  System
+                  {strings.settings.system}
                 </ThemedText>
               </View>
             </TouchableOpacity>
@@ -438,7 +419,7 @@ export default function SettingsScreen() {
         {/* Advanced Settings */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Advanced
+            Avanzate
           </ThemedText>
 
           <ThemedView style={styles.settingItem}>
@@ -510,7 +491,7 @@ export default function SettingsScreen() {
         {/* App Information */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            App Information
+            {strings.settings.about}
           </ThemedText>
 
           <ThemedView style={styles.infoCard}>
@@ -729,5 +710,20 @@ const styles = StyleSheet.create({
   notificationCloseButton: {
     padding: 4,
     marginLeft: 8,
+  },
+  languageSelector: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  languageOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    backgroundColor: "rgba(0,0,0,0.05)",
+  },
+  languageOptionText: {
+    fontSize: 14,
+    fontWeight: "500",
   },
 });

@@ -319,19 +319,27 @@ export default function MonitorScreen() {
 
         // Streamma sempre appena c'è HR
         const userStateHRFallback = useUserStore.getState();
+        console.log("🔍 HR FALLBACK - Controllo condizioni:");
+        console.log("🔍 authToken:", !!userStateHRFallback.authToken);
+        console.log("🔍 ablyStatus:", ablyStatus);
+        console.log("🔍 userId:", userStateHRFallback.userId);
+        console.log("🔍 deviceCode:", userStateHRFallback.deviceCode);
+        console.log("🔍 ablyService.current:", !!ablyService.current);
+
         if (
           userStateHRFallback.authToken &&
-          ablyStatus === ConnectionStatus.CONNECTED &&
+          ablyService.current &&
           userStateHRFallback.userId &&
           userStateHRFallback.deviceCode
         ) {
+          console.log("✅ HR FALLBACK - Invio dati ad Ably");
           const timestamp = new Date().toISOString();
-          ablyService.current?.sendMessage(
+          ablyService.current.sendMessage(
             userStateHRFallback.userId,
             "heartRate",
             {
               deviceId: connectedDeviceId,
-              hr: data.hr,
+              heartRate: data.hr,
               hrv: hrvValue,
               lfPower: lfPowerValue,
               hfPower: hfPowerValue,
@@ -339,6 +347,8 @@ export default function MonitorScreen() {
             },
             userStateHRFallback.deviceCode
           );
+        } else {
+          console.log("❌ HR FALLBACK - Condizioni non soddisfatte");
         }
       }
     });
@@ -804,7 +814,7 @@ export default function MonitorScreen() {
 
         if (
           userStateHRV.authToken &&
-          ablyStatus === ConnectionStatus.CONNECTED &&
+          ablyService.current &&
           userStateHRV.userId &&
           userStateHRV.deviceCode
         ) {
@@ -812,12 +822,12 @@ export default function MonitorScreen() {
             "✅ TUTTE LE CONDIZIONI SODDISFATTE - Invio dati ad Ably"
           );
           const timestamp = new Date().toISOString();
-          ablyService.current?.sendMessage(
+          ablyService.current.sendMessage(
             userStateHRV.userId,
             "heartRate",
             {
               deviceId: connectedDeviceId,
-              hr: heartRate,
+              heartRate: heartRate,
               hrv: hrvValue,
               lfPower: lfPowerValue,
               hfPower: hfPowerValue,
@@ -910,6 +920,7 @@ export default function MonitorScreen() {
 
       if (
         ablyService.current &&
+        userStateBiometric.authToken &&
         userStateBiometric.userId &&
         userStateBiometric.deviceCode &&
         heartRate > 0
@@ -934,6 +945,7 @@ export default function MonitorScreen() {
         // Log solo se il problema persiste o se è un problema critico
         const isCriticalIssue =
           !ablyService.current ||
+          !userStateBiometric.authToken ||
           !userStateBiometric.userId ||
           !userStateBiometric.deviceCode;
         const isHeartRateIssue = heartRate === 0;
@@ -941,6 +953,7 @@ export default function MonitorScreen() {
         if (isCriticalIssue || (isHeartRateIssue && debugMode)) {
           console.log("❌ BIOMETRIC SENDING - Condizioni non soddisfatte:");
           console.log("  - ablyService.current:", !!ablyService.current);
+          console.log("  - authToken:", !!userStateBiometric.authToken);
           console.log("  - userId:", userStateBiometric.userId);
           console.log("  - deviceCode:", userStateBiometric.deviceCode);
           console.log("  - heartRate:", heartRate);

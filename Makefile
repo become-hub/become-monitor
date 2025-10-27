@@ -1,4 +1,4 @@
-.PHONY: prebuild clean-prebuild android virtual-smartphone ios logs test test-watch test-coverage test-ci clean-test help
+.PHONY: prebuild clean-prebuild android virtual-smartphone ios apk logs test test-watch test-coverage test-ci clean-test help
 
 # Prebuild dell'app con clean per rigenerare completamente le cartelle native
 prebuild:
@@ -45,6 +45,31 @@ ios:
 	npx expo run:ios
 	@echo "✅ App avviata su iOS!"
 
+# Genera APK per Android
+apk:
+	@echo "📦 Generazione APK Android..."
+	@echo "☕ Configurazione Java 17 e Android SDK..."
+	@if [ ! -d "android" ]; then \
+		echo "🔧 Esecuzione prebuild (cartelle native non trovate)..."; \
+		npx expo prebuild --platform android; \
+	else \
+		echo "✅ Cartelle native esistenti, salto il prebuild per preservare le icone personalizzate"; \
+	fi
+	@echo "🏗️  Build APK in corso..."
+	export JAVA_HOME=/opt/homebrew/opt/openjdk@17 && \
+	export ANDROID_HOME=$$HOME/Library/Android/sdk && \
+	export PATH=$$PATH:$$ANDROID_HOME/platform-tools:$$ANDROID_HOME/cmdline-tools/latest/bin && \
+	cd android && ./gradlew assembleRelease
+	@echo "📝 Lettura versione da package.json..."
+	@VERSION=$$(node -p "require('./package.json').version") && \
+	APK_NAME="become-monitor-v$$VERSION.apk" && \
+	APK_SOURCE="android/app/build/outputs/apk/release/app-release.apk" && \
+	APK_DEST="android/app/build/outputs/apk/release/$$APK_NAME" && \
+	echo "🔄 Rinominazione APK in $$APK_NAME..." && \
+	mv "$$APK_SOURCE" "$$APK_DEST" && \
+	echo "✅ APK generato e rinominato!" && \
+	echo "📱 File APK: $$APK_DEST"
+
 # Mostra i log Android in tempo reale
 logs:
 	@echo "📋 Mostrando log Android (Ctrl+C per uscire)..."
@@ -86,6 +111,7 @@ help:
 	@echo "  make android         - Avvia l'app su dispositivo Android fisico"
 	@echo "  make virtual-smartphone - Avvia l'app su emulatore Android"
 	@echo "  make ios             - Avvia l'app su iOS (expo run:ios)"
+	@echo "  make apk             - Genera APK Android per distribuzione"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test            - Esegue i test"

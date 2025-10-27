@@ -4,10 +4,12 @@ import React from "react";
 import { HapticTab } from "@/components/haptic-tab";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useLocale } from "@/hooks/use-locale";
 import { BookOpen, Heart, Home, Settings } from "lucide-react-native";
 
 export default function TabLayout() {
   const { theme } = useTheme();
+  const { strings } = useLocale();
 
   return (
     <Tabs
@@ -25,28 +27,28 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
+          title: strings.navigation.home,
           tabBarIcon: ({ color }) => <Home size={28} color={color} />,
         }}
       />
       <Tabs.Screen
         name="monitor"
         options={{
-          title: "Polar Monitor",
+          title: strings.navigation.monitor,
           tabBarIcon: ({ color }) => <Heart size={28} color={color} />,
         }}
       />
       <Tabs.Screen
         name="docs"
         options={{
-          title: "Docs",
+          title: strings.navigation.docs,
           tabBarIcon: ({ color }) => <BookOpen size={28} color={color} />,
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
-          title: "Settings",
+          title: strings.navigation.settings,
           tabBarIcon: ({ color }) => <Settings size={28} color={color} />,
         }}
       />
