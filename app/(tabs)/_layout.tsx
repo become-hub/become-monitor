@@ -2,37 +2,54 @@ import { Tabs } from "expo-router";
 import React from "react";
 
 import { HapticTab } from "@/components/haptic-tab";
-import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useTheme } from "@/contexts/ThemeContext";
+import { useLocale } from "@/hooks/use-locale";
+import { BookOpen, Heart, Home, Settings } from "lucide-react-native";
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  const { theme } = useTheme();
+  const { strings } = useLocale();
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? "light"].tint,
+        tabBarActiveTintColor: Colors[theme].tint,
         headerShown: false,
         tabBarButton: HapticTab,
+        tabBarStyle: {
+          paddingTop: 8,
+          paddingBottom: 8,
+          height: 65,
+        },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="house.fill" color={color} />
-          ),
+          title: strings.navigation.home,
+          tabBarIcon: ({ color }) => <Home size={28} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="monitor"
         options={{
-          title: "Explore",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
-          ),
+          title: strings.navigation.monitor,
+          tabBarIcon: ({ color }) => <Heart size={28} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="docs"
+        options={{
+          title: strings.navigation.docs,
+          tabBarIcon: ({ color }) => <BookOpen size={28} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: strings.navigation.settings,
+          tabBarIcon: ({ color }) => <Settings size={28} color={color} />,
         }}
       />
     </Tabs>

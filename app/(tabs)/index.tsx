@@ -1,98 +1,224 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { AppFooter } from "@/components/app-footer";
+import { Image } from "expo-image";
+import { useRouter } from "expo-router";
+import { BookOpen } from "lucide-react-native";
+import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { ThemedText } from "@/components/themed-text";
+import { ThemedView } from "@/components/themed-view";
+import { Colors } from "@/constants/theme";
+import { useTheme } from "@/contexts/ThemeContext";
+import { useLocale } from "@/hooks/use-locale";
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const { theme } = useTheme();
+  const { strings } = useLocale();
+  const router = useRouter();
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  const handleStartPress = () => {
+    router.push("/(tabs)/monitor");
+  };
+
+  const handleDocsPress = () => {
+    router.push("/(tabs)/docs");
+  };
+
+  return (
+    <ThemedView style={styles.container}>
+      <ScrollView style={styles.scrollView}>
+        {/* Header */}
+        <ThemedView style={styles.header}>
+          <View style={styles.logoContainer}>
+            <Image
+              source={require("@/assets/images/icon.png")}
+              style={styles.becomeLogo}
+              contentFit="contain"
+            />
+          </View>
+          <ThemedText type="title" style={styles.deviceTitle}>
+            {strings.home.title}
+          </ThemedText>
+          <ThemedText style={styles.deviceDescription}>
+            Connetti il tuo dispositivo Polar 360 per iniziare a monitorare le
+            tue prestazioni nelle app Become Hub
+          </ThemedText>
+        </ThemedView>
+
+        {/* Card Polar 360 */}
+        <ThemedView style={styles.section}>
+          <ThemedView
+            style={[styles.card, { borderColor: Colors[theme].border }]}
+          >
+            {/* Logo Polar in alto a destra */}
+            <View style={styles.poweredByContainer}>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <ThemedText
+                  style={[
+                    styles.poweredByText,
+                    { marginRight: 6, fontWeight: "500", fontSize: 13 },
+                  ]}
+                >
+                  powered by
+                </ThemedText>
+                <Image
+                  source={require("@/assets/images/polar-logo.webp")}
+                  style={[styles.polarLogo]}
+                  contentFit="contain"
+                />
+              </View>
+            </View>
+
+            {/* Image centrale */}
+            <View style={styles.cardImageContainer}>
+              <Image
+                source={require("@/assets/images/polar360.webp")}
+                style={styles.polarImage}
+                contentFit="contain"
+              />
+            </View>
+
+            {/* Content */}
+            <View style={styles.cardContent}>
+              <ThemedText type="subtitle" style={styles.cardTitle}>
+                Polar 360
+              </ThemedText>
+              <ThemedText style={styles.cardText}>
+                Collega il tuo dispositivo Polar 360 per iniziare ad usare le
+                app di Become Hub Performance e Food
+              </ThemedText>
+              <TouchableOpacity
+                style={[styles.cardButton, { borderColor: Colors[theme].tint }]}
+                onPress={handleStartPress}
+              >
+                <ThemedText
+                  style={[styles.cardButtonText, { color: Colors[theme].tint }]}
+                >
+                  Connetti Polar 360
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+          </ThemedView>
+
+          {/* Link alla documentazione */}
+          <TouchableOpacity style={styles.docsLink} onPress={handleDocsPress}>
+            <BookOpen size={16} color={Colors[theme].tint} />
+            <ThemedText
+              style={[styles.docsLinkText, { color: Colors[theme].tint }]}
+            >
+              Scopri come connettere il dispositivo la prima volta
+            </ThemedText>
+          </TouchableOpacity>
+        </ThemedView>
+
+        {/* Footer */}
+        <AppFooter />
+      </ScrollView>
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flex: 1,
   },
-  stepContainer: {
-    gap: 8,
+  scrollView: {
+    flex: 1,
+  },
+  header: {
+    padding: 20,
+    paddingTop: 60,
+  },
+  logoContainer: {
+    marginBottom: 20,
+    paddingVertical: 20,
+  },
+  becomeLogo: {
+    width: 120,
+    height: 120,
+  },
+  deviceTitle: {
     marginBottom: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  deviceDescription: {
+    fontSize: 16,
+    opacity: 0.7,
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  section: {
+    padding: 20,
+    paddingTop: 0,
+  },
+  card: {
+    padding: 24,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: "center",
+    position: "relative",
+  },
+  poweredByContainer: {
+    position: "absolute",
+    top: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  polarLogo: {
+    width: 60,
+    height: 30,
+  },
+  poweredByText: {
+    fontSize: 12,
+    opacity: 0.6,
+    fontWeight: "500",
+  },
+  cardImageContainer: {
+    width: 200,
+    height: 200,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  polarImage: {
+    width: 200,
+    height: 200,
+  },
+  cardContent: {
+    width: "100%",
+    alignItems: "center",
+  },
+  cardTitle: {
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  cardText: {
+    fontSize: 16,
+    opacity: 0.8,
+    lineHeight: 24,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  cardButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 8,
+    borderWidth: 2,
+  },
+  cardButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  docsLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 16,
+    paddingVertical: 8,
+  },
+  docsLinkText: {
+    fontSize: 14,
+    fontWeight: "500",
   },
 });

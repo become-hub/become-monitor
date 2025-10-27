@@ -1,0 +1,19 @@
+# iOS build files
+build/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+
+# CocoaPods
+Pods/
+*.xcworkspace/xcuserdata/
+
+# OS
+.DS_Store
+Thumbs.db
