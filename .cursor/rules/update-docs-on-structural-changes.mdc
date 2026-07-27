@@ -1,0 +1,34 @@
+---
+description: Structural changes must update project documentation in the same change
+alwaysApply: true
+---
+
+# Update docs with structural changes
+
+Every **structural** change must update the relevant documentation in the **same** PR/commit set. Do not leave docs for a follow-up.
+
+## What counts as structural
+
+- Connection / pairing / BLE / Polar flows
+- Auth, API base URL, environments, feature flags
+- Native modules, SDK upgrades, required permissions
+- User-facing setup steps, prerequisites, or supported devices
+- Removal or replacement of a dependency the user was told to use (e.g. Polar Flow)
+
+## What to update
+
+- Prefer existing guides under `docs/` (e.g. `docs/polar-360-connection-guide.md`)
+- If no doc exists for the area, add a short focused guide rather than leaving behavior undocumented
+- Keep docs aligned with **current** app behavior (remove obsolete steps)
+
+## Checklist before finishing
+
+1. Diff the structural change
+2. Find or create the matching doc
+3. Update prerequisites, steps, and troubleshooting so a new user can follow them without Polar Flow / stale advice
+4. Mention the doc update in the commit/PR summary when relevant
+
+```text
+❌ BAD: Change FTU/pairing in code; leave docs saying "configure with Polar Flow first"
+✅ GOOD: Same change updates docs/polar-360-connection-guide.md to SDK FTU + no Flow required
+```

@@ -13,6 +13,9 @@ jest.mock('react-native', () => {
         ensureFirstTimeUse: jest.fn(),
         startPpiStreaming: jest.fn(),
         stopPpiStreaming: jest.fn(),
+        startMonitorForegroundService: jest.fn(),
+        updateMonitorForegroundService: jest.fn(),
+        stopMonitorForegroundService: jest.fn(),
     };
 
     const mockEventEmitter = {

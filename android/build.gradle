@@ -20,5 +20,10 @@ allprojects {
   }
 }
 
+// Android 13+ (API 33): required for POST_NOTIFICATIONS used by the monitor FGS
+ext {
+  minSdkVersion = 33
+}
+
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"

@@ -15,6 +15,8 @@ export class AblyService {
     private ably: Ably.Realtime | null = null;
     private isConnected = false;
     private presenceEntered = false;
+    private connectedUserId: number | null = null;
+    private connectedDeviceCode: string | null = null;
     private ablyTokenEndpoint: string;
     private connectionStatusCallback: (status: ConnectionStatus) => void;
 
@@ -29,6 +31,28 @@ export class AblyService {
     connectWithToken(authToken: string, userId: number, deviceCode: string) {
         console.log(`AblyService: 🚀 Connecting to Ably with token - userId: ${userId} (type: ${typeof userId}), deviceCode: ${deviceCode}`);
 
+        // Idempotent: avoid spawning orphan Realtime instances (presence / lock thrash).
+        if (
+            this.ably &&
+            this.isConnected &&
+            this.connectedUserId === userId &&
+            this.connectedDeviceCode === deviceCode
+        ) {
+            console.log("AblyService: ⏭️ Already connected for same user/device — skip");
+            return;
+        }
+
+        if (this.ably) {
+            this.ably.close();
+            this.ably = null;
+            this.isConnected = false;
+            this.presenceEntered = false;
+            this.connectedUserId = null;
+            this.connectedDeviceCode = null;
+        }
+
+        this.connectedUserId = userId;
+        this.connectedDeviceCode = deviceCode;
         this.ably = new Ably.Realtime({
             authUrl: this.ablyTokenEndpoint,
             authHeaders: {
@@ -56,37 +80,50 @@ export class AblyService {
                     console.log("AblyService: 🔍 Calling connectionStatusCallback with CONNECTED");
                     this.connectionStatusCallback(ConnectionStatus.CONNECTED);
 
-                    // Entra in presenza solo una volta per connessione
-                    if (!this.presenceEntered && this.ably) {
-                        this.presenceEntered = true; // Imposta subito per evitare chiamate multiple
-                        const channel = this.ably.channels.get(`private:${userId}`);
-                        channel.presence.enter(
-                            JSON.stringify({ deviceCode })
-                        ).then(() => {
-                            console.log(
-                                "AblyService: 🤝 Presence entered once:",
-                                deviceCode
-                            );
-                            // Forza un aggiornamento dello stato dopo presence
-                            setTimeout(() => {
-                                if (this.isConnected) {
-                                    this.connectionStatusCallback(ConnectionStatus.CONNECTED);
-                                }
-                            }, 1000);
-                        }).catch((err: any) => {
-                            console.error(
-                                "AblyService: ❌ Presence error:",
-                                err.message
-                            );
-                            this.presenceEntered = false; // Reset se errore
-                        });
+                    // Re-enter presence after every connected (including auto-reconnect).
+                    if (this.ably) {
+                        const shouldEnter = !this.presenceEntered;
+                        this.presenceEntered = true;
+                        if (shouldEnter) {
+                            const channel = this.ably.channels.get(`private:${userId}`);
+                            channel.presence.enter(
+                                JSON.stringify({ deviceCode })
+                            ).then(() => {
+                                console.log(
+                                    "AblyService: 🤝 Presence entered once:",
+                                    deviceCode
+                                );
+                                setTimeout(() => {
+                                    if (this.isConnected) {
+                                        this.connectionStatusCallback(ConnectionStatus.CONNECTED);
+                                    }
+                                }, 1000);
+                            }).catch((err: any) => {
+                                console.error(
+                                    "AblyService: ❌ Presence error:",
+                                    err.message
+                                );
+                                this.presenceEntered = false;
+                            });
+                        }
                     }
                     break;
 
-                case "failed":
                 case "disconnected":
+                    // Transient: Ably SDK auto-reconnects. Keep session; require presence re-enter on next connected.
                     this.isConnected = false;
-                    this.presenceEntered = false; // Reset quando disconnesso
+                    this.presenceEntered = false;
+                    console.warn(
+                        "AblyService: 🔌 Transient disconnect:",
+                        stateChange.reason?.message
+                    );
+                    this.connectionStatusCallback(ConnectionStatus.CONNECTING);
+                    break;
+
+                case "failed":
+                case "closed":
+                    this.isConnected = false;
+                    this.presenceEntered = false;
                     console.error(
                         "AblyService: 🚫 Connection issue:",
                         stateChange.reason?.message
@@ -178,7 +215,8 @@ export class AblyService {
             this.ably = null;
             this.isConnected = false;
             this.presenceEntered = false;
+            this.connectedUserId = null;
+            this.connectedDeviceCode = null;
         }
     }
 }
-

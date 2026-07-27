@@ -187,6 +187,7 @@ class PolarBleModule @JvmOverloads constructor(
         deviceManager.onDeviceDisconnected = { info ->
             streamManager.stopPpiStreaming()
             ftuManager.onDeviceDisconnected(info.deviceId)
+            MonitorForegroundService.stop(reactApplicationContext)
             sendEvent("onDeviceDisconnected", Arguments.createMap().apply {
                 putString("deviceId", info.deviceId)
             })
@@ -367,6 +368,57 @@ class PolarBleModule @JvmOverloads constructor(
         }
     }
 
+    /**
+     * Starts a connectedDevice foreground service so Ably + Polar keep working
+     * while the phone screen is locked.
+     */
+    @ReactMethod
+    fun startMonitorForegroundService(deviceName: String?, promise: Promise) {
+        try {
+            MonitorForegroundService.start(reactApplicationContext, deviceName)
+            promise.resolve(null)
+        } catch (e: Exception) {
+            Log.e(TAG, "startMonitorForegroundService failed: ${e.message}")
+            promise.reject("FGS_START_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun updateMonitorForegroundService(
+        deviceName: String?,
+        hr: Int,
+        hrv: Int,
+        lf: Int,
+        hf: Int,
+        promise: Promise
+    ) {
+        try {
+            MonitorForegroundService.update(
+                reactApplicationContext,
+                deviceName,
+                hr,
+                hrv,
+                lf,
+                hf
+            )
+            promise.resolve(null)
+        } catch (e: Exception) {
+            Log.e(TAG, "updateMonitorForegroundService failed: ${e.message}")
+            promise.reject("FGS_UPDATE_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun stopMonitorForegroundService(promise: Promise) {
+        try {
+            MonitorForegroundService.stop(reactApplicationContext)
+            promise.resolve(null)
+        } catch (e: Exception) {
+            Log.e(TAG, "stopMonitorForegroundService failed: ${e.message}")
+            promise.reject("FGS_STOP_ERROR", e.message)
+        }
+    }
+
     private fun sendEvent(eventName: String, params: WritableMap?) {
         reactApplicationContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
@@ -379,6 +431,7 @@ class PolarBleModule @JvmOverloads constructor(
         deviceManager.cleanup()
         streamManager.cleanup()
         ftuManager.cleanup()
+        MonitorForegroundService.stop(reactApplicationContext)
         if (apiLazy.isInitialized()) {
             api.shutDown()
         }

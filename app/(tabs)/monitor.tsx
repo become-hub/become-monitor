@@ -36,6 +36,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  PermissionsAndroid,
   Platform,
   ScrollView,
   StyleSheet,
@@ -102,6 +103,31 @@ export default function MonitorScreen() {
   const [hrv, setHrv] = useState(0);
   const [lfPower, setLfPower] = useState(0);
   const [hfPower, setHfPower] = useState(0);
+  const heartRateRef = useRef(0);
+  const hrvRef = useRef(0);
+  const lfPowerRef = useRef(0);
+  const hfPowerRef = useRef(0);
+  const connectedDeviceNameRef = useRef("");
+  const connectedDeviceIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    heartRateRef.current = heartRate;
+  }, [heartRate]);
+  useEffect(() => {
+    hrvRef.current = hrv;
+  }, [hrv]);
+  useEffect(() => {
+    lfPowerRef.current = lfPower;
+  }, [lfPower]);
+  useEffect(() => {
+    hfPowerRef.current = hfPower;
+  }, [hfPower]);
+  useEffect(() => {
+    connectedDeviceNameRef.current = connectedDeviceName;
+  }, [connectedDeviceName]);
+  useEffect(() => {
+    connectedDeviceIdRef.current = connectedDeviceId;
+  }, [connectedDeviceId]);
 
   // Stato per la notifica di autenticazione
   const [notification, setNotification] = useState<{
@@ -138,6 +164,12 @@ export default function MonitorScreen() {
   const ppiWindow = useRef<number[]>([]);
   const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const biometricInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Prevents overlapping launchAuthAndStream / Ably reconnect storms. */
+  const authStreamInFlightRef = useRef(false);
+  const streamReadyDeviceRef = useRef<string | null>(null);
+  /** Device currently going through auth/FTU/poll (survives until ready or disconnect). */
+  const authSessionDeviceRef = useRef<string | null>(null);
+  const pairingBlockedRef = useRef(false);
 
   useEffect(() => {
     // Inizializza Ably service
@@ -168,7 +200,11 @@ export default function MonitorScreen() {
       if (powered) {
         // Controlla se abbiamo dati di autenticazione salvati
         const storedAuthData = await StorageService.getAuthData();
-        if (storedAuthData && storedAuthData.deviceId) {
+        if (
+          storedAuthData &&
+          storedAuthData.deviceId &&
+          !pairingBlockedRef.current
+        ) {
           console.log(
             `Monitor: Tentativo riconnessione a ${
               storedAuthData.deviceName || storedAuthData.deviceId
@@ -246,6 +282,16 @@ export default function MonitorScreen() {
         StorageService.updateDeviceName(device.name);
         StorageService.updateDeviceId(device.deviceId);
 
+        // Skip auth/stream restart if already ready or in progress for this device
+        if (
+          pairingBlockedRef.current ||
+          streamReadyDeviceRef.current === device.deviceId ||
+          authSessionDeviceRef.current === device.deviceId ||
+          authStreamInFlightRef.current
+        ) {
+          return;
+        }
+
         // Avvia autenticazione e streaming
         launchAuthAndStream(device.deviceId);
       }
@@ -271,10 +317,15 @@ export default function MonitorScreen() {
         setConnectedDeviceIdInStore(null);
         setConnectedDeviceName("");
         setFoundDeviceName("");
+        authStreamInFlightRef.current = false;
+        streamReadyDeviceRef.current = null;
+        authSessionDeviceRef.current = null;
         if (pollInterval.current) {
           clearInterval(pollInterval.current);
+          pollInterval.current = null;
         }
         stopBiometricSending();
+        polarSdk.stopMonitorForegroundService().catch(() => {});
         ablyService.current?.close();
 
         // Reset stato del dispositivo
@@ -284,6 +335,10 @@ export default function MonitorScreen() {
 
     polarSdk.addEventListener("onPairingFailed", (payload: any) => {
       console.warn("Monitor: pairing BLE fallito", payload);
+      pairingBlockedRef.current = true;
+      authStreamInFlightRef.current = false;
+      streamReadyDeviceRef.current = null;
+      authSessionDeviceRef.current = null;
       Alert.alert(
         "Pairing Bluetooth fallito",
         "Il Polar rifiuta l'abbinamento (chiavi BLE non valide).\n\n1) Impostazioni → Bluetooth → dimentica «Polar 360»\n2) Factory reset del Polar 360 (in carica, reset nascosto)\n3) Riapri Become Monitor e accetta il popup di pairing"
@@ -386,6 +441,7 @@ export default function MonitorScreen() {
         clearInterval(pollInterval.current);
       }
       stopBiometricSending();
+      polarSdk.stopMonitorForegroundService().catch(() => {});
       ablyService.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -393,6 +449,25 @@ export default function MonitorScreen() {
 
   const setScanningState = (value: boolean) => {
     setScanning(value);
+  };
+
+  const ensureMonitorForegroundService = async () => {
+    if (Platform.OS !== "android") return;
+    try {
+      // Android 13+: notification permission required for a visible FGS notification
+      if (Platform.Version >= 33) {
+        await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+        );
+      }
+      await polarSdk.startMonitorForegroundService(
+        connectedDeviceNameRef.current ||
+          connectedDeviceIdRef.current ||
+          "Polar"
+      );
+    } catch (error: any) {
+      console.error("Monitor: FGS start failed:", error?.message);
+    }
   };
 
   const requestPermissions = async (): Promise<boolean> => {
@@ -455,6 +530,8 @@ export default function MonitorScreen() {
 
   const startScan = async () => {
     console.log("Monitor: 🔍 startScan chiamato");
+    // Manual scan = user intends a fresh pairing attempt after fixing bonds.
+    pairingBlockedRef.current = false;
 
     // PRIMA richiedi i permessi (indipendentemente dallo stato Bluetooth)
     console.log("Monitor: 🔐 Controllo permessi...");
@@ -551,6 +628,16 @@ export default function MonitorScreen() {
   };
 
   const launchAuthAndStream = async (deviceId: string) => {
+    if (
+      pairingBlockedRef.current ||
+      authStreamInFlightRef.current ||
+      streamReadyDeviceRef.current === deviceId ||
+      authSessionDeviceRef.current === deviceId
+    ) {
+      return;
+    }
+    authStreamInFlightRef.current = true;
+    authSessionDeviceRef.current = deviceId;
     try {
       // Step 1: Controlla se abbiamo dati di autenticazione salvati
       const storedAuthData = await StorageService.getAuthData();
@@ -596,6 +683,7 @@ export default function MonitorScreen() {
             console.log("✅ First Time Use ok");
           } catch (error: any) {
             console.error("Monitor: ❌ FTU fallito:", error?.message);
+            authSessionDeviceRef.current = null;
             setNotification({
               type: "error",
               message:
@@ -616,6 +704,8 @@ export default function MonitorScreen() {
 
           // Avvia invio periodico dei dati biometrici
           startBiometricSending();
+          streamReadyDeviceRef.current = deviceId;
+          await ensureMonitorForegroundService();
 
           return;
         } else {
@@ -657,7 +747,15 @@ export default function MonitorScreen() {
       }
 
       // Step 3: Polling per conferma autenticazione (solo se non avevamo token salvato valido)
+      if (pollInterval.current) {
+        clearInterval(pollInterval.current);
+        pollInterval.current = null;
+      }
+      let pollHandlingAuth = false;
       pollInterval.current = setInterval(async () => {
+        if (pollHandlingAuth || streamReadyDeviceRef.current === deviceId) {
+          return;
+        }
         const currentDeviceToken = await StorageService.getDeviceToken();
         console.log("🔄 POLLING ATTIVO - deviceToken:", currentDeviceToken);
         console.log(
@@ -693,6 +791,17 @@ export default function MonitorScreen() {
             );
 
             if (pollResponse.authenticated) {
+              if (pollHandlingAuth || streamReadyDeviceRef.current === deviceId) {
+                return;
+              }
+              pollHandlingAuth = true;
+              // Ferma il polling immediatamente per evitare connectWithToken ripetuti
+              if (pollInterval.current) {
+                clearInterval(pollInterval.current);
+                pollInterval.current = null;
+                console.log("⏸️ Polling fermato");
+              }
+
               console.log(
                 "Monitor: 🟢 Autenticato! User ID:",
                 pollResponse.userId
@@ -734,24 +843,6 @@ export default function MonitorScreen() {
                 pollResponse.deviceCode
               );
 
-              // Retry automatico per connessione Ably se non si connette entro 10 secondi
-              setTimeout(() => {
-                if (ablyStatus !== ConnectionStatus.CONNECTED) {
-                  console.log("🔧 Ably non connesso dopo 10s, retry...");
-                  ablyService.current?.connectWithToken(
-                    pollResponse.session,
-                    parseInt(pollResponse.userId),
-                    pollResponse.deviceCode
-                  );
-                }
-              }, 10000);
-
-              // Ferma il polling
-              if (pollInterval.current) {
-                clearInterval(pollInterval.current);
-                console.log("⏸️ Polling fermato");
-              }
-
               // First Time Use (obbligatorio per Polar 360) poi streaming PPI
               console.log("🩺 Verifica First Time Use...");
               try {
@@ -759,6 +850,7 @@ export default function MonitorScreen() {
                 console.log("✅ First Time Use ok");
               } catch (error: any) {
                 console.error("Monitor: ❌ FTU fallito:", error?.message);
+                authSessionDeviceRef.current = null;
                 setNotification({
                   type: "error",
                   message:
@@ -779,6 +871,8 @@ export default function MonitorScreen() {
 
               // Avvia invio periodico dei dati biometrici
               startBiometricSending();
+              streamReadyDeviceRef.current = deviceId;
+              await ensureMonitorForegroundService();
             } else {
               console.log("⏳ POLLING - authenticated: false");
             }
@@ -791,6 +885,8 @@ export default function MonitorScreen() {
       }, 5000);
     } catch (error) {
       console.error("Monitor: Errore autenticazione:", error);
+    } finally {
+      authStreamInFlightRef.current = false;
     }
   };
 
@@ -906,6 +1002,7 @@ export default function MonitorScreen() {
                   clearInterval(pollInterval.current);
                 }
                 stopBiometricSending();
+                polarSdk.stopMonitorForegroundService().catch(() => {});
                 ablyService.current?.close();
 
                 // Reset stato del dispositivo
@@ -948,13 +1045,21 @@ export default function MonitorScreen() {
     // Avvia invio periodico dei dati biometrici ogni secondo
     biometricInterval.current = setInterval(() => {
       const userStateBiometric = useUserStore.getState();
-      // Debug ridotto - solo se necessario
+      const hr = heartRateRef.current;
+      const currentHrv = hrvRef.current;
+      const lf = lfPowerRef.current;
+      const hf = hfPowerRef.current;
+      const deviceLabel =
+        connectedDeviceNameRef.current ||
+        connectedDeviceIdRef.current ||
+        "Polar";
+
       if (debugMode) {
         console.log("🔍 DEBUG BIOMETRIC SENDING - Controllo condizioni:");
         console.log("🔍 ablyService.current:", !!ablyService.current);
         console.log("🔍 userId:", userStateBiometric.userId);
         console.log("🔍 deviceCode:", userStateBiometric.deviceCode);
-        console.log("🔍 heartRate:", heartRate);
+        console.log("🔍 heartRate:", hr);
         console.log("🔍 ablyStatus:", ablyStatus);
       }
 
@@ -963,32 +1068,30 @@ export default function MonitorScreen() {
         userStateBiometric.authToken &&
         userStateBiometric.userId &&
         userStateBiometric.deviceCode &&
-        heartRate > 0
+        hr > 0
       ) {
         console.log("✅ BIOMETRIC SENDING - Invio dati ad Ably");
-        // Invia dati biometrici ogni secondo con nuovo formato
         const timestamp = new Date().toISOString();
         ablyService.current.sendMessage(
           userStateBiometric.userId,
           "heartRate",
           {
-            deviceId: connectedDeviceId,
-            hr: heartRate,
-            hrv: hrv > 0 ? hrv : null,
-            lfPower: lfPower > 0 ? lfPower : null,
-            hfPower: hfPower > 0 ? hfPower : null,
+            deviceId: connectedDeviceIdRef.current,
+            hr,
+            hrv: currentHrv > 0 ? currentHrv : null,
+            lfPower: lf > 0 ? lf : null,
+            hfPower: hf > 0 ? hf : null,
             date: timestamp,
           },
           userStateBiometric.deviceCode
         );
       } else {
-        // Log solo se il problema persiste o se è un problema critico
         const isCriticalIssue =
           !ablyService.current ||
           !userStateBiometric.authToken ||
           !userStateBiometric.userId ||
           !userStateBiometric.deviceCode;
-        const isHeartRateIssue = heartRate === 0;
+        const isHeartRateIssue = hr === 0;
 
         if (isCriticalIssue || (isHeartRateIssue && debugMode)) {
           console.log("❌ BIOMETRIC SENDING - Condizioni non soddisfatte:");
@@ -996,9 +1099,21 @@ export default function MonitorScreen() {
           console.log("  - authToken:", !!userStateBiometric.authToken);
           console.log("  - userId:", userStateBiometric.userId);
           console.log("  - deviceCode:", userStateBiometric.deviceCode);
-          console.log("  - heartRate:", heartRate);
+          console.log("  - heartRate:", hr);
           console.log("  - ablyStatus:", ablyStatus);
         }
+      }
+
+      if (connectedDeviceIdRef.current) {
+        polarSdk
+          .updateMonitorForegroundService(
+            deviceLabel,
+            hr,
+            currentHrv > 0 ? currentHrv : 0,
+            lf > 0 ? lf : 0,
+            hf > 0 ? hf : 0
+          )
+          .catch(() => {});
       }
     }, 1000); // Ogni secondo
   };
