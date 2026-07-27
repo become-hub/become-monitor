@@ -6,7 +6,7 @@
 import { AppFooter } from "@/components/app-footer";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
-import { API_BASE_URL } from "@/constants/constants";
+import { getApiBaseUrl } from "@/constants/constants";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
 import { AblyService, ConnectionStatus } from "@/services/ably-service";
@@ -78,7 +78,7 @@ export default function MonitorScreen() {
   } = useUserStore();
 
   // Settings store
-  const { debugMode } = useSettingsStore();
+  const { debugMode, developerMode } = useSettingsStore();
 
   // Bluetooth & Polar
   const [bluetoothPowered, setBluetoothPowered] = useState(false);
@@ -142,14 +142,16 @@ export default function MonitorScreen() {
   useEffect(() => {
     // Inizializza Ably service
     console.log("Monitor: 🔵 Inizializzazione AblyService...");
+    const apiBaseUrl = getApiBaseUrl();
     ablyService.current = new AblyService(
-      API_BASE_URL + "/services/ably",
+      apiBaseUrl + "/services/ably",
       (status) => {
         setAblyStatus(status);
         console.log("Monitor: 🔵 Ably status:", status);
         console.log("Monitor: 🔵 AblyService instance:", !!ablyService.current);
       }
     );
+
     console.log(
       "Monitor: 🔵 AblyService inizializzato:",
       !!ablyService.current
@@ -280,6 +282,14 @@ export default function MonitorScreen() {
       }
     );
 
+    polarSdk.addEventListener("onPairingFailed", (payload: any) => {
+      console.warn("Monitor: pairing BLE fallito", payload);
+      Alert.alert(
+        "Pairing Bluetooth fallito",
+        "Il Polar rifiuta l'abbinamento (chiavi BLE non valide).\n\n1) Impostazioni → Bluetooth → dimentica «Polar 360»\n2) Factory reset del Polar 360 (in carica, reset nascosto)\n3) Riapri Become Monitor e accetta il popup di pairing"
+      );
+    });
+
     polarSdk.addEventListener("onHeartRateReceived", (data: PolarHrData) => {
       console.log(`Monitor: 💓 HR=${data.hr} BPM`);
       setHeartRate(data.hr);
@@ -379,7 +389,7 @@ export default function MonitorScreen() {
       ablyService.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [developerMode]);
 
   const setScanningState = (value: boolean) => {
     setScanning(value);
@@ -579,7 +589,22 @@ export default function MonitorScreen() {
             storedAuthData.deviceCode
           );
 
-          // Avvia streaming PPI
+          // First Time Use (obbligatorio per Polar 360) poi streaming PPI
+          console.log("🩺 Verifica First Time Use...");
+          try {
+            await polarSdk.ensureFirstTimeUse(deviceId);
+            console.log("✅ First Time Use ok");
+          } catch (error: any) {
+            console.error("Monitor: ❌ FTU fallito:", error?.message);
+            setNotification({
+              type: "error",
+              message:
+                "Configura Polar 360 fallita — reset di fabbrica se già abbinato altrove",
+            });
+            setTimeout(() => setNotification(null), 8000);
+            return;
+          }
+
           console.log("💓 Avvio streaming PPI...");
           try {
             await polarSdk.startPpiStreaming(deviceId);
@@ -727,7 +752,22 @@ export default function MonitorScreen() {
                 console.log("⏸️ Polling fermato");
               }
 
-              // Avvia streaming PPI con Polar SDK
+              // First Time Use (obbligatorio per Polar 360) poi streaming PPI
+              console.log("🩺 Verifica First Time Use...");
+              try {
+                await polarSdk.ensureFirstTimeUse(deviceId);
+                console.log("✅ First Time Use ok");
+              } catch (error: any) {
+                console.error("Monitor: ❌ FTU fallito:", error?.message);
+                setNotification({
+                  type: "error",
+                  message:
+                    "Configura Polar 360 fallita — reset di fabbrica se già abbinato altrove",
+                });
+                setTimeout(() => setNotification(null), 8000);
+                return;
+              }
+
               console.log("💓 Avvio streaming PPI...");
               try {
                 await polarSdk.startPpiStreaming(deviceId);

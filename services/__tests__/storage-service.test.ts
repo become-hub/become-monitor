@@ -26,6 +26,7 @@ describe('StorageService', () => {
                 authToken: 'test-token',
                 userId: 123,
                 deviceCode: 'device-abc',
+                deviceToken: 'device-token-xyz',
                 expiresAt: Date.now() / 1000 + 3600, // 1 ora nel futuro
                 deviceName: 'Polar H10',
                 deviceId: 'polar-device-123'
@@ -46,6 +47,7 @@ describe('StorageService', () => {
                 authToken: 'test-token',
                 userId: 123,
                 deviceCode: 'device-abc',
+                deviceToken: 'device-token-xyz',
                 expiresAt: Date.now() / 1000 + 3600,
                 deviceName: 'Polar H10',
                 deviceId: 'polar-device-123'
@@ -64,6 +66,7 @@ describe('StorageService', () => {
                 authToken: 'test-token',
                 userId: 123,
                 deviceCode: 'device-abc',
+                deviceToken: 'device-token-xyz',
                 expiresAt: Date.now() / 1000 + 3600, // 1 ora nel futuro
                 deviceName: 'Polar H10',
                 deviceId: 'polar-device-123'
@@ -90,6 +93,7 @@ describe('StorageService', () => {
                 authToken: 'test-token',
                 userId: 123,
                 deviceCode: 'device-abc',
+                deviceToken: 'device-token-xyz',
                 expiresAt: Date.now() / 1000 - 3600, // 1 ora nel passato
                 deviceName: 'Polar H10',
                 deviceId: 'polar-device-123'
@@ -155,6 +159,7 @@ describe('StorageService', () => {
                 authToken: 'test-token',
                 userId: 123,
                 deviceCode: 'device-abc',
+                deviceToken: 'device-token-xyz',
                 expiresAt: Date.now() / 1000 + 3600,
                 deviceName: 'Polar H10',
                 deviceId: 'polar-device-123'
@@ -188,6 +193,7 @@ describe('StorageService', () => {
                 authToken: 'test-token',
                 userId: 123,
                 deviceCode: 'device-abc',
+                deviceToken: 'device-token-xyz',
                 expiresAt: Date.now() / 1000 + 3600,
                 deviceName: 'Polar H10',
                 deviceId: 'polar-device-123'

@@ -3,35 +3,57 @@
  * Verifica il wrapper TypeScript per il modulo nativo
  */
 
-// Mock del modulo nativo
+jest.mock('react-native', () => {
+    const mockPolarBleModule = {
+        checkBluetoothState: jest.fn(),
+        startScan: jest.fn(),
+        stopScan: jest.fn(),
+        connectToDevice: jest.fn(),
+        disconnectFromDevice: jest.fn(),
+        ensureFirstTimeUse: jest.fn(),
+        startPpiStreaming: jest.fn(),
+        stopPpiStreaming: jest.fn(),
+    };
+
+    const mockEventEmitter = {
+        addListener: jest.fn(() => ({
+            remove: jest.fn(),
+        })),
+    };
+
+    return {
+        NativeModules: {
+            PolarBleModule: mockPolarBleModule,
+        },
+        NativeEventEmitter: jest.fn(() => mockEventEmitter),
+        __mockPolarBleModule: mockPolarBleModule,
+        __mockEventEmitter: mockEventEmitter,
+    };
+});
+
+import { NativeModules } from 'react-native';
 import { polarSdk } from '../polar-ble-sdk';
 
-const mockPolarBleModule = {
-    checkBluetoothState: jest.fn(),
-    startScan: jest.fn(),
-    stopScan: jest.fn(),
-    connectToDevice: jest.fn(),
-    disconnectFromDevice: jest.fn(),
-    startPpiStreaming: jest.fn(),
-    stopPpiStreaming: jest.fn(),
+const mockPolarBleModule = NativeModules.PolarBleModule as {
+    checkBluetoothState: jest.Mock;
+    startScan: jest.Mock;
+    stopScan: jest.Mock;
+    connectToDevice: jest.Mock;
+    disconnectFromDevice: jest.Mock;
+    ensureFirstTimeUse: jest.Mock;
+    startPpiStreaming: jest.Mock;
+    stopPpiStreaming: jest.Mock;
 };
 
-const mockEventEmitter = {
-    addListener: jest.fn(() => ({
-        remove: jest.fn(),
-    })),
-};
-
-jest.mock('react-native', () => ({
-    NativeModules: {
-        PolarBleModule: mockPolarBleModule,
-    },
-    NativeEventEmitter: jest.fn(() => mockEventEmitter),
-}));
+// Access event emitter mock via the constructor call pattern
+import { NativeEventEmitter } from 'react-native';
+const mockEventEmitter = (NativeEventEmitter as unknown as jest.Mock)();
 
 describe('PolarBleSdk', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        // Re-wire addListener default after clearAllMocks
+        mockEventEmitter.addListener.mockReturnValue({ remove: jest.fn() });
     });
 
     describe('checkBluetoothState', () => {
@@ -102,6 +124,24 @@ describe('PolarBleSdk', () => {
             await polarSdk.disconnectFromDevice('ABC123');
 
             expect(mockPolarBleModule.disconnectFromDevice).toHaveBeenCalledWith('ABC123');
+        });
+    });
+
+    describe('ensureFirstTimeUse', () => {
+        it('chiama il metodo nativo con deviceId', async () => {
+            mockPolarBleModule.ensureFirstTimeUse.mockResolvedValueOnce(undefined);
+
+            await polarSdk.ensureFirstTimeUse('ABC123');
+
+            expect(mockPolarBleModule.ensureFirstTimeUse).toHaveBeenCalledWith('ABC123');
+        });
+
+        it('propaga errori FTU', async () => {
+            mockPolarBleModule.ensureFirstTimeUse.mockRejectedValueOnce(
+                new Error('FTU failed')
+            );
+
+            await expect(polarSdk.ensureFirstTimeUse('XYZ')).rejects.toThrow('FTU failed');
         });
     });
 
@@ -239,10 +279,11 @@ describe('PolarBleSdk', () => {
     });
 
     describe('Integration scenarios', () => {
-        it('gestisce flusso completo: scan → connect → stream', async () => {
+        it('gestisce flusso completo: scan → connect → ftu → stream', async () => {
             mockPolarBleModule.checkBluetoothState.mockResolvedValueOnce(true);
             mockPolarBleModule.startScan.mockResolvedValueOnce(undefined);
             mockPolarBleModule.connectToDevice.mockResolvedValueOnce(undefined);
+            mockPolarBleModule.ensureFirstTimeUse.mockResolvedValueOnce(undefined);
             mockPolarBleModule.startPpiStreaming.mockResolvedValueOnce(undefined);
 
             const btState = await polarSdk.checkBluetoothState();
@@ -250,10 +291,12 @@ describe('PolarBleSdk', () => {
 
             await polarSdk.startScan();
             await polarSdk.connectToDevice('POLAR-H10');
+            await polarSdk.ensureFirstTimeUse('POLAR-H10');
             await polarSdk.startPpiStreaming('POLAR-H10');
 
             expect(mockPolarBleModule.startScan).toHaveBeenCalled();
             expect(mockPolarBleModule.connectToDevice).toHaveBeenCalledWith('POLAR-H10');
+            expect(mockPolarBleModule.ensureFirstTimeUse).toHaveBeenCalledWith('POLAR-H10');
             expect(mockPolarBleModule.startPpiStreaming).toHaveBeenCalledWith('POLAR-H10');
         });
 
@@ -272,4 +315,3 @@ describe('PolarBleSdk', () => {
         });
     });
 });
-

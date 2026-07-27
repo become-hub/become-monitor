@@ -41,6 +41,7 @@ export type PolarEventType =
     | "onDeviceFound"
     | "onDeviceConnected"
     | "onDeviceDisconnected"
+    | "onPairingFailed"
     | "onHeartRateReceived"
     | "onPpiDataReceived"
     | "onPpiStreamError";
@@ -119,6 +120,14 @@ class PolarBleSdk {
     }
 
     /**
+     * Assicura First Time Use sul Polar 360 (idempotente).
+     * Da chiamare dopo la connessione e prima dello streaming.
+     */
+    async ensureFirstTimeUse(deviceId: string): Promise<void> {
+        return PolarBleModule.ensureFirstTimeUse(deviceId);
+    }
+
+    /**
      * Avvia lo streaming dei dati PPI (RR intervals)
      */
     async startPpiStreaming(deviceId: string): Promise<void> {
@@ -150,6 +159,15 @@ class PolarBleSdk {
     addEventListener(
         event: "onDeviceDisconnected",
         callback: (device: PolarDeviceInfo) => void
+    ): void;
+    addEventListener(
+        event: "onPairingFailed",
+        callback: (payload: {
+            deviceId: string;
+            connectedMs: number;
+            features: string;
+            removedBonds: number;
+        }) => void
     ): void;
     addEventListener(
         event: "onHeartRateReceived",

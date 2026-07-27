@@ -1,8 +1,11 @@
 package com.gabriele.muscogiuri.becomemonitor.polar
 
 import com.polar.sdk.api.PolarBleApi
-import io.reactivex.rxjava3.core.Observable
+import com.polar.sdk.api.model.PolarPpiData
+import io.reactivex.rxjava3.android.plugins.RxAndroidPlugins
+import io.reactivex.rxjava3.core.Flowable
 import io.reactivex.rxjava3.plugins.RxJavaPlugins
+import io.reactivex.rxjava3.schedulers.Schedulers
 import io.reactivex.rxjava3.schedulers.TestScheduler
 import org.junit.After
 import org.junit.Before
@@ -14,9 +17,6 @@ import org.mockito.junit.MockitoJUnitRunner
 import org.mockito.kotlin.*
 import java.util.concurrent.TimeUnit
 
-/**
- * Test unitari per PolarStreamManager
- */
 @RunWith(MockitoJUnitRunner::class)
 class PolarStreamManagerTest {
 
@@ -33,6 +33,8 @@ class PolarStreamManagerTest {
         RxJavaPlugins.setComputationSchedulerHandler { testScheduler }
         RxJavaPlugins.setIoSchedulerHandler { testScheduler }
         RxJavaPlugins.setNewThreadSchedulerHandler { testScheduler }
+        RxAndroidPlugins.setInitMainThreadSchedulerHandler { Schedulers.trampoline() }
+        RxAndroidPlugins.setMainThreadSchedulerHandler { Schedulers.trampoline() }
 
         streamManager = PolarStreamManager(mockApi)
     }
@@ -40,141 +42,87 @@ class PolarStreamManagerTest {
     @After
     fun tearDown() {
         RxJavaPlugins.reset()
+        RxAndroidPlugins.reset()
         streamManager.cleanup()
     }
 
     @Test
     fun `test startPpiStreaming emits PPI data`() {
-        // Arrange
         val deviceId = "TEST-123"
-        val testSettings = mock<com.polar.sdk.api.model.PolarSensorSetting>()
-        val testPpiData = mock<com.polar.sdk.api.model.PolarPpiData>()
+        val testPpiData = mock<PolarPpiData>()
         val mockSamples = listOf(
-            mock<com.polar.sdk.api.model.PolarPpiSample>(),
-            mock<com.polar.sdk.api.model.PolarPpiSample>()
+            mock<PolarPpiData.PolarPpiSample>(),
+            mock<PolarPpiData.PolarPpiSample>()
         )
-
         whenever(testPpiData.samples).thenReturn(mockSamples)
-
-        whenever(mockApi.requestStreamSettings(deviceId, PolarBleApi.PolarDeviceDataType.PPI))
-            .thenReturn(Observable.just(testSettings))
         whenever(mockApi.startPpiStreaming(deviceId))
-            .thenReturn(Observable.just(testPpiData).delay(1, TimeUnit.SECONDS, testScheduler))
+            .thenReturn(Flowable.just(testPpiData).delay(1, TimeUnit.SECONDS, testScheduler))
 
-        var receivedData: com.polar.sdk.api.model.PolarPpiData? = null
+        var receivedData: PolarPpiData? = null
         streamManager.onPpiDataReceived = { _, data ->
             receivedData = data
         }
 
-        // Act
-        val result = streamManager.startPpiStreaming(deviceId)
+        val observer = streamManager.startPpiStreaming(deviceId).test()
         testScheduler.advanceTimeBy(2, TimeUnit.SECONDS)
 
-        // Assert
-        assert(result.isSuccess)
+        observer.assertComplete()
         assert(receivedData != null)
-    }
-
-    @Test
-    fun `test startPpiStreaming handles PPI not available`() {
-        // Arrange
-        val deviceId = "TEST-123"
-        val testError = RuntimeException("PPI not available")
-
-        whenever(mockApi.requestStreamSettings(deviceId, PolarBleApi.PolarDeviceDataType.PPI))
-            .thenReturn(Observable.error(testError))
-
-        var errorReceived: Throwable? = null
-        streamManager.onPpiNotAvailable = { error ->
-            errorReceived = error
-        }
-
-        // Act
-        val result = streamManager.startPpiStreaming(deviceId)
-        testScheduler.triggerActions()
-
-        // Assert
-        assert(result.isSuccess) // Manager returns success but error is reported via callback
-        assert(errorReceived != null)
+        verify(mockApi).startPpiStreaming(deviceId)
+        verify(mockApi, never()).requestStreamSettings(any(), any())
     }
 
     @Test
     fun `test startPpiStreaming handles stream errors`() {
-        // Arrange
         val deviceId = "TEST-123"
-        val testSettings = mock<com.polar.sdk.api.model.PolarSensorSetting>()
         val testError = RuntimeException("Stream error")
-
-        whenever(mockApi.requestStreamSettings(deviceId, PolarBleApi.PolarDeviceDataType.PPI))
-            .thenReturn(Observable.just(testSettings))
         whenever(mockApi.startPpiStreaming(deviceId))
-            .thenReturn(Observable.error(testError))
+            .thenReturn(Flowable.error(testError))
 
         var errorReceived: Throwable? = null
         streamManager.onPpiStreamError = { error ->
             errorReceived = error
         }
 
-        // Act
-        val result = streamManager.startPpiStreaming(deviceId)
+        val observer = streamManager.startPpiStreaming(deviceId).test()
         testScheduler.triggerActions()
 
-        // Assert
-        assert(result.isSuccess)
+        observer.assertComplete()
         assert(errorReceived != null)
     }
 
     @Test
     fun `test stopPpiStreaming disposes subscription`() {
-        // Arrange
         val deviceId = "TEST-123"
-        val testSettings = mock<com.polar.sdk.api.model.PolarSensorSetting>()
-        val testPpiData = mock<com.polar.sdk.api.model.PolarPpiData>()
+        val testPpiData = mock<PolarPpiData>()
         whenever(testPpiData.samples).thenReturn(emptyList())
-
-        whenever(mockApi.requestStreamSettings(deviceId, PolarBleApi.PolarDeviceDataType.PPI))
-            .thenReturn(Observable.just(testSettings))
         whenever(mockApi.startPpiStreaming(deviceId))
-            .thenReturn(Observable.just(testPpiData))
+            .thenReturn(Flowable.just(testPpiData))
 
-        streamManager.startPpiStreaming(deviceId)
+        streamManager.startPpiStreaming(deviceId).test()
+        testScheduler.triggerActions()
 
-        // Act
         val result = streamManager.stopPpiStreaming()
-
-        // Assert
         assert(result.isSuccess)
     }
 
     @Test
     fun `test isStreaming returns false initially`() {
-        // Act
-        val result = streamManager.isStreaming()
-
-        // Assert
-        assert(!result)
+        assert(!streamManager.isStreaming())
     }
 
     @Test
     fun `test cleanup disposes resources`() {
-        // Arrange
         val deviceId = "TEST-123"
-        val testSettings = mock<com.polar.sdk.api.model.PolarSensorSetting>()
-        val testPpiData = mock<com.polar.sdk.api.model.PolarPpiData>()
+        val testPpiData = mock<PolarPpiData>()
         whenever(testPpiData.samples).thenReturn(emptyList())
-
-        whenever(mockApi.requestStreamSettings(deviceId, PolarBleApi.PolarDeviceDataType.PPI))
-            .thenReturn(Observable.just(testSettings))
         whenever(mockApi.startPpiStreaming(deviceId))
-            .thenReturn(Observable.just(testPpiData))
+            .thenReturn(Flowable.just(testPpiData))
 
-        streamManager.startPpiStreaming(deviceId)
-
-        // Act
+        streamManager.startPpiStreaming(deviceId).test()
+        testScheduler.triggerActions()
         streamManager.cleanup()
 
-        // Assert
         assert(!streamManager.isStreaming())
     }
 }
-
