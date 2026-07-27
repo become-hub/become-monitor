@@ -161,6 +161,10 @@ class PolarDeviceManager(private val api: PolarBleApi) {
      */
     fun connectToDevice(deviceId: String): Result<Unit> {
         return try {
+            if (connectedDeviceId == deviceId) {
+                Log.d(TAG, "Already connected to $deviceId — skip connect")
+                return Result.success(Unit)
+            }
             Log.d(TAG, "🔗 Connecting to $deviceId...")
             api.connectToDevice(deviceId)
             Result.success(Unit)

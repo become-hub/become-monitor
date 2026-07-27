@@ -8,6 +8,9 @@
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
   <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation"/>
   <uses-permission android:name="android.permission.INTERNET"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
@@ -36,5 +39,9 @@
         <data android:scheme="becomemonitor"/>
       </intent-filter>
     </activity>
+    <service
+      android:name=".MonitorForegroundService"
+      android:exported="false"
+      android:foregroundServiceType="connectedDevice"/>
   </application>
 </manifest>

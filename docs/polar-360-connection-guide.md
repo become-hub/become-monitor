@@ -7,9 +7,11 @@ Allineata alla documentazione ufficiale Polar BLE SDK
 ## Requisiti preliminari
 
 - Dispositivo Polar 360 carico.
-- Smartphone Android con Bluetooth attivo.
-- App Become Monitor installata.
+- **Smartphone Android 13 o superiore** (API 33+): versioni precedenti non consentono l'installazione dell'app.
+- Bluetooth attivo.
+- App Become Monitor installata (versione corrente: **1.0.0**).
 - Connessione Internet stabile (per autenticazione Become / Ably).
+- Consenso ai permessi richiesti: Bluetooth, notifiche (per lo streaming a schermo spento).
 - **Non** usare Polar Flow durante il collegamento con Become Monitor (chiudere Flow se aperta).
 - **Non** abbinare il Polar dalle Impostazioni Bluetooth di sistema: il pairing va fatto dall'app SDK.
 
@@ -25,12 +27,13 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Beco
 
 1. Assicurati di essere entro **1 metro** dal telefono (il Polar 360 verifica la prossimità in pairing).
 2. Apri l'app Become Monitor.
-3. Consenti all'app tutti i permessi Bluetooth richiesti da Android.
+3. Consenti all'app i permessi Bluetooth e, se richiesto, le **notifiche**.
 4. Clicca su **"Collega Polar 360"** / **"Cerca Dispositivo Polar"** per avviare la scansione.
 5. Al primo collegamento l'app:
    - completa il pairing BLE
    - esegue il **First Time Use** (configurazione dispositivo via SDK)
    - avvia lo streaming HR / PPI verso la piattaforma Become
+   - avvia un **servizio in primo piano** con notifica persistente (dispositivo collegato + HR, HRV, LF, HF aggiornati in tempo reale), così lo streaming continua anche a schermo bloccato
 
 ### Se il dispositivo non viene trovato
 
@@ -67,6 +70,8 @@ Quando tutti i LED diventano verdi, significa che:
 - Lo streaming dei dati biometrici dal Polar 360 alla piattaforma è in corso.
 
 **Importante:** durante tutta la procedura, il Polar 360 deve essere indossato.
+
+Durante lo streaming, la barra delle notifiche mostra il nome del Polar collegato e i quattro valori trasmessi (`HR · HRV · LF · HF`). Non chiudere/rimuovere quella notifica: indica che il monitor resta attivo in background.
 
 ## Disconnessione del dispositivo
 

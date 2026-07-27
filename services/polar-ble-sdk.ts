@@ -142,6 +142,37 @@ class PolarBleSdk {
     }
 
     /**
+     * Avvia un Foreground Service (connectedDevice) per tenere viva
+     * la connessione Polar/Ably a schermo bloccato.
+     */
+    async startMonitorForegroundService(deviceName?: string | null): Promise<void> {
+        return PolarBleModule.startMonitorForegroundService(deviceName ?? null);
+    }
+
+    /**
+     * Aggiorna la notifica FGS con dispositivo e metriche live.
+     */
+    async updateMonitorForegroundService(
+        deviceName: string | null | undefined,
+        hr: number,
+        hrv: number,
+        lf: number,
+        hf: number
+    ): Promise<void> {
+        return PolarBleModule.updateMonitorForegroundService(
+            deviceName ?? null,
+            hr,
+            hrv,
+            lf,
+            hf
+        );
+    }
+
+    async stopMonitorForegroundService(): Promise<void> {
+        return PolarBleModule.stopMonitorForegroundService();
+    }
+
+    /**
      * Ascolta gli eventi dal modulo nativo
      */
     addEventListener(

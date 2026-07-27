@@ -66,6 +66,34 @@ describe('AblyService', () => {
 
             expect(mockAbly.connection.on).toHaveBeenCalled();
         });
+
+        it('chiude la connessione precedente prima di crearne una nuova', () => {
+            ablyService.connectWithToken('test-token', 123, 'device-abc');
+            const first = mockAbly;
+
+            const secondAbly = {
+                connection: { on: jest.fn() },
+                channels: { get: jest.fn().mockReturnValue(mockChannel) },
+                close: jest.fn(),
+            };
+            (Ably.Realtime as unknown as jest.Mock).mockImplementationOnce(() => secondAbly);
+
+            ablyService.connectWithToken('test-token', 123, 'device-abc');
+
+            expect(first.close).toHaveBeenCalled();
+            expect(Ably.Realtime).toHaveBeenCalledTimes(2);
+        });
+
+        it('non ricrea Ably se già connesso per lo stesso user/device', () => {
+            ablyService.connectWithToken('test-token', 123, 'device-abc');
+            const onCallback = mockAbly.connection.on.mock.calls[0][0];
+            onCallback({ current: 'connected' });
+
+            (Ably.Realtime as unknown as jest.Mock).mockClear();
+            ablyService.connectWithToken('test-token', 123, 'device-abc');
+
+            expect(Ably.Realtime).not.toHaveBeenCalled();
+        });
     });
 
     describe('Connection state changes', () => {
@@ -89,11 +117,30 @@ describe('AblyService', () => {
             expect(mockChannel.presence.enter).toHaveBeenCalled();
         });
 
+        it('notifica CONNECTING su disconnect transient (auto-reconnect Ably)', () => {
+            ablyService.connectWithToken('test-token', 123, 'device-abc');
+
+            const onCallback = mockAbly.connection.on.mock.calls[0][0];
+            onCallback({ current: 'connected' });
+            onCallback({ current: 'disconnected', reason: { message: 'Websocket closed' } });
+
+            expect(statusCallback).toHaveBeenLastCalledWith(ConnectionStatus.CONNECTING);
+        });
+
         it('notifica DISCONNECTED quando la connessione fallisce', () => {
             ablyService.connectWithToken('test-token', 123, 'device-abc');
 
             const onCallback = mockAbly.connection.on.mock.calls[0][0];
             onCallback({ current: 'failed', reason: { message: 'Error' } });
+
+            expect(statusCallback).toHaveBeenCalledWith(ConnectionStatus.DISCONNECTED);
+        });
+
+        it('notifica DISCONNECTED su closed', () => {
+            ablyService.connectWithToken('test-token', 123, 'device-abc');
+
+            const onCallback = mockAbly.connection.on.mock.calls[0][0];
+            onCallback({ current: 'closed', reason: { message: 'Connection closed' } });
 
             expect(statusCallback).toHaveBeenCalledWith(ConnectionStatus.DISCONNECTED);
         });
