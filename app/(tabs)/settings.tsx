@@ -31,12 +31,17 @@ import packageJson from "../../package.json";
 export default function SettingsScreen() {
   const { theme, themePreference, updateThemePreference } = useTheme();
   const { strings } = useLocale();
-  const { debugMode, setDebugMode } = useSettingsStore();
+  const { debugMode, setDebugMode, developerMode, setDeveloperMode } =
+    useSettingsStore();
   const [autoConnect, setAutoConnect] = useState(true);
   const [dataSync, setDataSync] = useState(true);
   const [localDebugMode, setLocalDebugMode] = useState(debugMode);
+  const [localDeveloperMode, setLocalDeveloperMode] = useState(developerMode);
   const [password, setPassword] = useState("");
   const [showPasswordInput, setShowPasswordInput] = useState(false);
+  const [pendingMode, setPendingMode] = useState<"debug" | "developer" | null>(
+    null
+  );
   const [bluetoothEnabled, setBluetoothEnabled] = useState(false);
   const [notification, setNotification] = useState<{
     type: "success" | "error";
@@ -71,6 +76,10 @@ export default function SettingsScreen() {
     setLocalDebugMode(debugMode);
   }, [debugMode]);
 
+  useEffect(() => {
+    setLocalDeveloperMode(developerMode);
+  }, [developerMode]);
+
   const getCurrentDatePassword = () => {
     const now = new Date();
     const year = now.getFullYear();
@@ -81,11 +90,10 @@ export default function SettingsScreen() {
 
   const handleDebugModeToggle = (value: boolean) => {
     if (value) {
-      // Se stanno attivando il debug mode, mostra il campo password
-      setLocalDebugMode(true); // Imposta lo switch a "on" temporaneamente
+      setLocalDebugMode(true);
+      setPendingMode("debug");
       setShowPasswordInput(true);
     } else {
-      // Se stanno disattivando, chiedi conferma
       Alert.alert(
         "Disattiva Debug Mode",
         "Sei sicuro di voler disattivare la modalità debug?",
@@ -99,6 +107,35 @@ export default function SettingsScreen() {
             onPress: () => {
               setDebugMode(false);
               setShowPasswordInput(false);
+              setPendingMode(null);
+              setPassword("");
+            },
+          },
+        ]
+      );
+    }
+  };
+
+  const handleDeveloperModeToggle = (value: boolean) => {
+    if (value) {
+      setLocalDeveloperMode(true);
+      setPendingMode("developer");
+      setShowPasswordInput(true);
+    } else {
+      Alert.alert(
+        "Disattiva Developer Mode",
+        "Sei sicuro di voler disattivare la modalità developer?",
+        [
+          {
+            text: "Annulla",
+            style: "cancel",
+          },
+          {
+            text: "Disattiva",
+            onPress: () => {
+              setDeveloperMode(false);
+              setShowPasswordInput(false);
+              setPendingMode(null);
               setPassword("");
             },
           },
@@ -110,13 +147,18 @@ export default function SettingsScreen() {
   const handlePasswordSubmit = () => {
     const correctPassword = getCurrentDatePassword();
     if (password === correctPassword) {
-      setDebugMode(true);
-      setLocalDebugMode(true);
+      if (pendingMode === "developer") {
+        setDeveloperMode(true);
+        setLocalDeveloperMode(true);
+        setNotification({ type: "success", message: "Developer mode attivato" });
+      } else {
+        setDebugMode(true);
+        setLocalDebugMode(true);
+        setNotification({ type: "success", message: "Debug mode attivato" });
+      }
       setShowPasswordInput(false);
+      setPendingMode(null);
       setPassword("");
-
-      // Mostra notifica di successo
-      setNotification({ type: "success", message: "Debug mode attivato" });
 
       // Auto-close SOLO dopo 5 secondi per il successo
       setTimeout(() => {
@@ -124,7 +166,12 @@ export default function SettingsScreen() {
       }, 5000);
     } else {
       setPassword("");
-      setLocalDebugMode(false); // Ripristina lo switch
+      if (pendingMode === "developer") {
+        setLocalDeveloperMode(false);
+      } else {
+        setLocalDebugMode(false);
+      }
+      setPendingMode(null);
 
       // Mostra notifica di errore (NON si chiude automaticamente)
       setNotification({ type: "error", message: "Password non corretta" });
@@ -134,7 +181,12 @@ export default function SettingsScreen() {
   const handlePasswordCancel = () => {
     setShowPasswordInput(false);
     setPassword("");
-    setLocalDebugMode(false); // Ripristina lo switch
+    if (pendingMode === "developer") {
+      setLocalDeveloperMode(false);
+    } else {
+      setLocalDebugMode(false);
+    }
+    setPendingMode(null);
   };
 
   const handleBluetoothToggle = async (value: boolean) => {
@@ -440,11 +492,31 @@ export default function SettingsScreen() {
             />
           </ThemedView>
 
+          <ThemedView style={styles.settingItem}>
+            <View style={styles.settingContent}>
+              <ThemedText style={styles.settingLabel}>Developer Mode</ThemedText>
+              <ThemedText style={styles.settingDescription}>
+                Route API calls to staging environment
+              </ThemedText>
+            </View>
+            <Switch
+              value={localDeveloperMode}
+              onValueChange={handleDeveloperModeToggle}
+              trackColor={{
+                false: "#767577",
+                true: Colors[theme].tint,
+              }}
+              thumbColor={localDeveloperMode ? "#fff" : "#f4f3f4"}
+            />
+          </ThemedView>
+
           {/* Password Input per Debug Mode */}
           {showPasswordInput && (
             <ThemedView style={styles.passwordContainer}>
               <ThemedText style={styles.passwordLabel}>
-                Inserisci la password per attivare il debug mode:
+                Inserisci la password per attivare{" "}
+                {pendingMode === "developer" ? "il developer mode" : "il debug mode"}
+                :
               </ThemedText>
               <TextInput
                 style={[

@@ -3,6 +3,14 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
+def packageJsonText = file("$projectRoot/package.json").text
+def versionMatcher = packageJsonText =~ /"version"\s*:\s*"([^"]+)"/
+def appVersionName = versionMatcher.find() ? versionMatcher.group(1) : "1.0.0"
+def versionParts = appVersionName.tokenize('.').collect { it as Integer }
+while (versionParts.size() < 3) {
+    versionParts << 0
+}
+def appVersionCode = (versionParts[0] * 10000) + (versionParts[1] * 100) + versionParts[2]
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -92,10 +100,13 @@ android {
         applicationId 'com.gabriele.muscogiuri.becomemonitor'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        versionCode appVersionCode
+        versionName appVersionName
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+    }
+    testOptions {
+        unitTests.returnDefaultValues = true
     }
     signingConfigs {
         debug {
@@ -157,7 +168,7 @@ dependencies {
     implementation("com.facebook.react:react-android")
 
     // Polar SDK
-    implementation 'com.github.polarofficial:polar-ble-sdk:5.5.0'
+    implementation 'com.github.polarofficial:polar-ble-sdk:5.16.0'
 
     // RxJava (richiesto da Polar SDK)
     implementation 'io.reactivex.rxjava3:rxjava:3.1.5'

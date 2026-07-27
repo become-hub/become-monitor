@@ -1,46 +1,66 @@
 package com.gabriele.muscogiuri.becomemonitor
 
-import android.app.Activity
 import android.util.Log
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.gabriele.muscogiuri.becomemonitor.bluetooth.BluetoothManager
 import com.gabriele.muscogiuri.becomemonitor.polar.PolarDeviceManager
+import com.gabriele.muscogiuri.becomemonitor.polar.PolarFtuManager
 import com.gabriele.muscogiuri.becomemonitor.polar.PolarStreamManager
 import com.polar.sdk.api.PolarBleApi
 import com.polar.sdk.api.PolarBleApiDefaultImpl
-import com.polar.sdk.api.model.PolarDeviceInfo
-import com.polar.sdk.api.model.PolarHrData
-import com.polar.sdk.api.model.PolarPpiData
+import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
+import io.reactivex.rxjava3.disposables.CompositeDisposable
+import io.reactivex.rxjava3.schedulers.Schedulers
+import java.util.concurrent.TimeUnit
 
-class PolarBleModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
+class PolarBleModule @JvmOverloads constructor(
+    reactContext: ReactApplicationContext,
+    bluetoothManagerOverride: BluetoothManager? = null,
+    deviceManagerOverride: PolarDeviceManager? = null,
+    streamManagerOverride: PolarStreamManager? = null,
+    ftuManagerOverride: PolarFtuManager? = null,
+    apiOverride: PolarBleApi? = null,
+) : ReactContextBaseJavaModule(reactContext) {
 
     companion object {
         private const val TAG = "PolarBleModule"
     }
 
-    private val api: PolarBleApi by lazy {
-        PolarBleApiDefaultImpl.defaultImplementation(
+    private val apiLazy: Lazy<PolarBleApi> = lazy {
+        apiOverride ?: PolarBleApiDefaultImpl.defaultImplementation(
             reactContext.applicationContext,
             setOf(
                 PolarBleApi.PolarBleSdkFeature.FEATURE_HR,
                 PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_ONLINE_STREAMING,
-                PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_SDK_MODE
+                PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_SDK_MODE,
+                PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_DEVICE_TIME_SETUP,
+                PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_FILE_TRANSFER
             )
-        )
+        ).also { polarApi ->
+            // Auto-reconnect hammers a broken LE bond (SMP_PAIR_AUTH_FAIL → GATT 22 loop).
+            polarApi.setAutomaticReconnection(false)
+        }
     }
+    private val api: PolarBleApi get() = apiLazy.value
 
     private val bluetoothManager: BluetoothManager by lazy {
-        BluetoothManager(reactContext.applicationContext)
+        bluetoothManagerOverride ?: BluetoothManager(reactContext.applicationContext)
     }
 
     private val deviceManager: PolarDeviceManager by lazy {
-        PolarDeviceManager(api)
+        deviceManagerOverride ?: PolarDeviceManager(api)
     }
 
     private val streamManager: PolarStreamManager by lazy {
-        PolarStreamManager(api)
+        streamManagerOverride ?: PolarStreamManager(api)
     }
+
+    private val ftuManager: PolarFtuManager by lazy {
+        ftuManagerOverride ?: PolarFtuManager(api)
+    }
+
+    private val disposables = CompositeDisposable()
 
     init {
         setupCallbacks()
@@ -166,9 +186,29 @@ class PolarBleModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
         // Setup device disconnected callback
         deviceManager.onDeviceDisconnected = { info ->
             streamManager.stopPpiStreaming()
+            ftuManager.onDeviceDisconnected(info.deviceId)
             sendEvent("onDeviceDisconnected", Arguments.createMap().apply {
                 putString("deviceId", info.deviceId)
             })
+        }
+
+        deviceManager.onPairingLikelyFailed = { deviceId, connectedMs, features ->
+            val removed = bluetoothManager.removePolarBonds(deviceId)
+            Log.w(
+                TAG,
+                "Pairing likely failed for $deviceId after ${connectedMs}ms " +
+                    "(features=$features, removedBonds=$removed)"
+            )
+            sendEvent("onPairingFailed", Arguments.createMap().apply {
+                putString("deviceId", deviceId)
+                putDouble("connectedMs", connectedMs.toDouble())
+                putString("features", features.joinToString(","))
+                putInt("removedBonds", removed)
+            })
+        }
+
+        deviceManager.onFeatureReady = { deviceId, feature ->
+            ftuManager.onFeatureReady(deviceId, feature)
         }
 
         // Setup heart rate callback
@@ -264,14 +304,51 @@ class PolarBleModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
         }
     }
 
+    /**
+     * Assicura che First Time Use sia completato sul Polar 360 prima dello streaming.
+     * Idempotente: se FTU è già fatto, resolve subito.
+     */
+    @ReactMethod
+    fun ensureFirstTimeUse(deviceId: String, promise: Promise) {
+        Log.d(TAG, "ensureFirstTimeUse for $deviceId")
+        val disposable = ftuManager.ensureFirstTimeUse(deviceId)
+            .subscribeOn(Schedulers.io())
+            .observeOn(AndroidSchedulers.mainThread())
+            .timeout(60, TimeUnit.SECONDS)
+            .subscribe({
+                Log.d(TAG, "ensureFirstTimeUse success for $deviceId")
+                promise.resolve(null)
+            }, { error ->
+                Log.e(TAG, "ensureFirstTimeUse failed for $deviceId: ${error.message}")
+                val code = when {
+                    error.message?.contains("Timeout", ignoreCase = true) == true ||
+                        error is java.util.concurrent.TimeoutException -> "FTU_TIMEOUT"
+                    else -> "FTU_FAILED"
+                }
+                promise.reject(
+                    code,
+                    error.message
+                        ?: "Configura Polar 360 fallita — reset di fabbrica se già abbinato altrove"
+                )
+            })
+        disposables.add(disposable)
+    }
+
     @ReactMethod
     fun startPpiStreaming(deviceId: String, promise: Promise) {
         try {
-            streamManager.startPpiStreaming(deviceId)
-                .onSuccess { promise.resolve(null) }
-                .onFailure { error ->
-                    promise.reject("PPI_STREAM_ERROR", error.message)
-                }
+            val disposable = streamManager.startPpiStreaming(deviceId)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe({
+                    promise.resolve(null)
+                }, { error ->
+                    promise.reject(
+                        "PPI_STREAM_ERROR",
+                        "${error.javaClass.simpleName}: ${error.message}"
+                    )
+                })
+            disposables.add(disposable)
         } catch (e: Exception) {
             promise.reject("PPI_STREAM_ERROR", e.message)
         }
@@ -296,13 +373,14 @@ class PolarBleModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
             .emit(eventName, params)
     }
 
-
-
     override fun onCatalystInstanceDestroy() {
         super.onCatalystInstanceDestroy()
+        disposables.clear()
         deviceManager.cleanup()
         streamManager.cleanup()
-        api.shutDown()
+        ftuManager.cleanup()
+        if (apiLazy.isInitialized()) {
+            api.shutDown()
+        }
     }
 }
-

@@ -21,6 +21,8 @@ class PolarDeviceManager(private val api: PolarBleApi) {
 
     private var scanDisposable: Disposable? = null
     private var connectedDeviceId: String? = null
+    private var connectedAtMs: Long? = null
+    private val readyFeatures = mutableSetOf<PolarBleApi.PolarBleSdkFeature>()
 
     // Callbacks
     var onDeviceFound: ((PolarDeviceInfo) -> Unit)? = null
@@ -28,7 +30,10 @@ class PolarDeviceManager(private val api: PolarBleApi) {
     var onDeviceDisconnected: ((PolarDeviceInfo) -> Unit)? = null
     var onHeartRateReceived: ((String, PolarHrData.PolarHrSample) -> Unit)? = null
     var onBluetoothStateChanged: ((Boolean) -> Unit)? = null
+    var onFeatureReady: ((String, PolarBleApi.PolarBleSdkFeature) -> Unit)? = null
     var onScanError: ((Throwable) -> Unit)? = null
+    /** Fired when connection drops quickly with only unencrypted HR ready (pairing failure). */
+    var onPairingLikelyFailed: ((deviceId: String, connectedMs: Long, features: Set<String>) -> Unit)? = null
 
     init {
         setupApiCallback()
@@ -47,19 +52,63 @@ class PolarDeviceManager(private val api: PolarBleApi) {
 
             override fun deviceConnected(info: PolarDeviceInfo) {
                 connectedDeviceId = info.deviceId
+                connectedAtMs = System.currentTimeMillis()
+                readyFeatures.clear()
                 Log.d(TAG, "✅ Connected: ${info.deviceId}")
                 onDeviceConnected?.invoke(info)
             }
 
             override fun deviceDisconnected(info: PolarDeviceInfo) {
+                val connectedMs = connectedAtMs?.let { System.currentTimeMillis() - it }
+                val featureNames = readyFeatures.map { it.name }.toSet()
+                val hasEncryptedFeature = readyFeatures.any {
+                    it == PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_FILE_TRANSFER ||
+                        it == PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_DEVICE_TIME_SETUP
+                }
                 Log.d(TAG, "⚠️ Disconnected: ${info.deviceId}")
+                if (
+                    connectedMs != null &&
+                    connectedMs < 8_000 &&
+                    !hasEncryptedFeature
+                ) {
+                    onPairingLikelyFailed?.invoke(info.deviceId, connectedMs, featureNames)
+                }
                 connectedDeviceId = null
+                connectedAtMs = null
+                readyFeatures.clear()
                 onDeviceDisconnected?.invoke(info)
+            }
+
+            override fun bleSdkFeatureReady(
+                identifier: String,
+                feature: PolarBleApi.PolarBleSdkFeature
+            ) {
+                readyFeatures.add(feature)
+                Log.d(TAG, "Feature ready: $feature for $identifier")
+                onFeatureReady?.invoke(identifier, feature)
+            }
+
+            override fun deviceConnecting(polarDeviceInfo: PolarDeviceInfo) {
+                Log.d(TAG, "Connecting: ${polarDeviceInfo.deviceId}")
             }
 
             override fun hrNotificationReceived(identifier: String, data: PolarHrData.PolarHrSample) {
                 Log.d(TAG, "💓 HR: ${data.hr} BPM")
                 onHeartRateReceived?.invoke(identifier, data)
+            }
+
+            override fun disInformationReceived(
+                identifier: String,
+                disInfo: com.polar.androidcommunications.api.ble.model.DisInfo
+            ) {
+                // unused
+            }
+
+            override fun htsNotificationReceived(
+                identifier: String,
+                data: com.polar.sdk.api.model.PolarHealthThermometerData
+            ) {
+                // unused
             }
         })
     }
@@ -155,4 +204,3 @@ class PolarDeviceManager(private val api: PolarBleApi) {
         connectedDeviceId = null
     }
 }
-

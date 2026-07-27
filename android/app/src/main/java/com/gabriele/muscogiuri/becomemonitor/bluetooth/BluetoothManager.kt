@@ -3,10 +3,12 @@ package com.gabriele.muscogiuri.becomemonitor.bluetooth
 import android.Manifest
 import android.app.Activity
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
@@ -17,9 +19,16 @@ import androidx.core.content.ContextCompat
 class BluetoothManager(private val context: Context) {
 
     companion object {
+        private const val TAG = "BluetoothManager"
         private const val REQUEST_ENABLE_BT = 1000
         private const val REQUEST_BLUETOOTH_PERMISSIONS = 1001
     }
+
+    data class BondInfo(
+        val address: String,
+        val name: String?,
+        val bondState: Int
+    )
 
     private val bluetoothManager: BluetoothManager by lazy {
         context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -32,13 +41,21 @@ class BluetoothManager(private val context: Context) {
      * Verifica se il Bluetooth è acceso
      * @return true se il Bluetooth è acceso, false altrimenti
      */
-    fun isBluetoothEnabled(): Boolean = bluetoothAdapter?.isEnabled ?: false
+    fun isBluetoothEnabled(): Boolean = try {
+        bluetoothAdapter?.isEnabled ?: false
+    } catch (_: Exception) {
+        false
+    }
 
     /**
      * Verifica se il Bluetooth è supportato sul dispositivo
      * @return true se il Bluetooth è supportato, false altrimenti
      */
-    fun isBluetoothSupported(): Boolean = bluetoothAdapter != null
+    fun isBluetoothSupported(): Boolean = try {
+        bluetoothAdapter != null
+    } catch (_: Exception) {
+        false
+    }
 
     /**
      * Ottiene l'indirizzo MAC del Bluetooth adapter
@@ -168,6 +185,63 @@ class BluetoothManager(private val context: Context) {
         }
     }
 
-    // Rimosso: metodi alternativi e permessi speciali per lo spegnimento
+    /**
+     * Bonded devices that look like the given Polar (by name / deviceId suffix).
+     */
+    fun findPolarBonds(deviceIdHint: String?): List<BondInfo> {
+        if (!hasBluetoothPermissions()) return emptyList()
+        val adapter = bluetoothAdapter ?: return emptyList()
+        val hint = deviceIdHint?.uppercase().orEmpty()
+        return try {
+            adapter.bondedDevices.orEmpty()
+                .filter { device ->
+                    val name = device.name.orEmpty()
+                    val addr = device.address.orEmpty().replace(":", "").uppercase()
+                    name.contains("Polar", ignoreCase = true) ||
+                        (hint.isNotEmpty() && (name.contains(hint, ignoreCase = true) ||
+                            addr.endsWith(hint.takeLast(6))))
+                }
+                .map { BondInfo(it.address, it.name, it.bondState) }
+        } catch (e: SecurityException) {
+            Log.w(TAG, "findPolarBonds: $e")
+            emptyList()
+        }
+    }
+
+    /**
+     * Removes phone-side LE bond for matching Polar devices (stale keys → SMP_PAIR_AUTH_FAIL).
+     * @return number of removeBond invocations that reported success
+     */
+    fun removePolarBonds(deviceIdHint: String?): Int {
+        if (!hasBluetoothPermissions()) return 0
+        val adapter = bluetoothAdapter ?: return 0
+        val hint = deviceIdHint?.uppercase().orEmpty()
+        var removed = 0
+        try {
+            val targets = adapter.bondedDevices.orEmpty().filter { device ->
+                val name = device.name.orEmpty()
+                val addr = device.address.orEmpty().replace(":", "").uppercase()
+                name.contains("Polar", ignoreCase = true) ||
+                    (hint.isNotEmpty() && (name.contains(hint, ignoreCase = true) ||
+                        addr.endsWith(hint.takeLast(6))))
+            }
+            for (device in targets) {
+                if (removeBond(device)) removed++
+            }
+        } catch (e: SecurityException) {
+            Log.w(TAG, "removePolarBonds: $e")
+        }
+        return removed
+    }
+
+    private fun removeBond(device: BluetoothDevice): Boolean {
+        return try {
+            val method = device.javaClass.getMethod("removeBond")
+            method.invoke(device) as Boolean
+        } catch (e: Exception) {
+            Log.w(TAG, "removeBond failed for ${device.address}: ${e.message}")
+            false
+        }
+    }
 }
 

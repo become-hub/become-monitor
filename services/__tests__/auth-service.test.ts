@@ -4,6 +4,8 @@
  */
 
 import { AuthService } from '../auth-service';
+import { API_PRODUCTION_URL, API_STAGING_URL } from '@/constants/constants';
+import { useSettingsStore } from '@/stores/settings-store';
 
 describe('AuthService', () => {
     let authService: AuthService;
@@ -13,6 +15,7 @@ describe('AuthService', () => {
         authService = new AuthService();
         mockFetch = jest.fn();
         global.fetch = mockFetch;
+        useSettingsStore.setState({ debugMode: false, developerMode: false });
         jest.clearAllMocks();
     });
 
@@ -33,7 +36,7 @@ describe('AuthService', () => {
 
             expect(result).toEqual(mockResponse);
             expect(global.fetch).toHaveBeenCalledWith(
-                'https://production-api25.become-hub.com/auth/device/start'
+                `${API_PRODUCTION_URL}/auth/device/start`
             );
         });
 
@@ -75,7 +78,7 @@ describe('AuthService', () => {
 
             expect(result).toEqual(mockResponse);
             expect(global.fetch).toHaveBeenCalledWith(
-                'https://production-api25.become-hub.com/auth/device/poll?deviceToken=token-123'
+                `${API_PRODUCTION_URL}/auth/device/pool?deviceToken=token-123`
             );
         });
 
@@ -204,6 +207,47 @@ describe('AuthService', () => {
             const poll2 = await authService.pollDeviceAuth(start!.deviceToken);
             expect(poll2?.authenticated).toBe(true);
             expect(poll2?.userId).toBe('456');
+        });
+    });
+
+    describe('endpoint resolution by developerMode', () => {
+        it('usa staging quando developerMode è attiva', async () => {
+            useSettingsStore.setState({ developerMode: true });
+
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    code: 'S1',
+                    deviceToken: 'token-staging',
+                    expiresAt: 1234567890,
+                }),
+            });
+
+            await authService.startDeviceAuth();
+
+            expect(global.fetch).toHaveBeenCalledWith(
+                `${API_STAGING_URL}/auth/device/start`
+            );
+        });
+
+        it('torna a production quando developerMode è disattivata', async () => {
+            useSettingsStore.setState({ developerMode: true });
+            useSettingsStore.setState({ developerMode: false });
+
+            mockFetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    code: 'P1',
+                    deviceToken: 'token-production',
+                    expiresAt: 1234567890,
+                }),
+            });
+
+            await authService.startDeviceAuth();
+
+            expect(global.fetch).toHaveBeenCalledWith(
+                `${API_PRODUCTION_URL}/auth/device/start`
+            );
         });
     });
 });

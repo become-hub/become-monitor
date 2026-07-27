@@ -1,8 +1,11 @@
 package com.gabriele.muscogiuri.becomemonitor.polar
 
 import com.polar.sdk.api.PolarBleApi
-import io.reactivex.rxjava3.core.Observable
+import com.polar.sdk.api.model.PolarDeviceInfo
+import io.reactivex.rxjava3.android.plugins.RxAndroidPlugins
+import io.reactivex.rxjava3.core.Flowable
 import io.reactivex.rxjava3.plugins.RxJavaPlugins
+import io.reactivex.rxjava3.schedulers.Schedulers
 import io.reactivex.rxjava3.schedulers.TestScheduler
 import org.junit.After
 import org.junit.Before
@@ -33,6 +36,8 @@ class PolarDeviceManagerTest {
         RxJavaPlugins.setComputationSchedulerHandler { testScheduler }
         RxJavaPlugins.setIoSchedulerHandler { testScheduler }
         RxJavaPlugins.setNewThreadSchedulerHandler { testScheduler }
+        RxAndroidPlugins.setInitMainThreadSchedulerHandler { Schedulers.trampoline() }
+        RxAndroidPlugins.setMainThreadSchedulerHandler { Schedulers.trampoline() }
 
         deviceManager = PolarDeviceManager(mockApi)
     }
@@ -40,21 +45,21 @@ class PolarDeviceManagerTest {
     @After
     fun tearDown() {
         RxJavaPlugins.reset()
+        RxAndroidPlugins.reset()
         deviceManager.cleanup()
     }
 
     @Test
     fun `test startScan success`() {
         // Arrange
-        val mockDeviceInfo = mock<com.polar.sdk.api.model.PolarDeviceInfo>()
+        val mockDeviceInfo = mock<PolarDeviceInfo>()
         whenever(mockDeviceInfo.deviceId).thenReturn("TEST-123")
         whenever(mockDeviceInfo.name).thenReturn("Polar H10")
-        whenever(mockDeviceInfo.rssi).thenReturn(-60)
 
         whenever(mockApi.searchForDevice())
-            .thenReturn(Observable.just(mockDeviceInfo).delay(1, TimeUnit.SECONDS, testScheduler))
+            .thenReturn(Flowable.just(mockDeviceInfo).delay(1, TimeUnit.SECONDS, testScheduler))
 
-        var foundDevice: com.polar.sdk.api.model.PolarDeviceInfo? = null
+        var foundDevice: PolarDeviceInfo? = null
         deviceManager.onDeviceFound = { device ->
             foundDevice = device
         }
@@ -74,7 +79,7 @@ class PolarDeviceManagerTest {
         // Arrange
         val testError = RuntimeException("Scan failed")
         whenever(mockApi.searchForDevice())
-            .thenReturn(Observable.error(testError))
+            .thenReturn(Flowable.error(testError))
 
         var errorReceived: Throwable? = null
         deviceManager.onScanError = { error ->
@@ -93,9 +98,9 @@ class PolarDeviceManagerTest {
     @Test
     fun `test stopScan disposes subscription`() {
         // Arrange
-        val mockDeviceInfo = mock<com.polar.sdk.api.model.PolarDeviceInfo>()
+        val mockDeviceInfo = mock<PolarDeviceInfo>()
         whenever(mockApi.searchForDevice())
-            .thenReturn(Observable.just(mockDeviceInfo))
+            .thenReturn(Flowable.just(mockDeviceInfo))
 
         deviceManager.startScan()
 
@@ -183,16 +188,9 @@ class PolarDeviceManagerTest {
     @Test
     fun `test cleanup disposes resources`() {
         // Arrange
-        val testDeviceInfo = PolarDeviceInfo(
-            deviceId = "TEST-123",
-            address = "00:11:22:33:44:55",
-            rssi = -60,
-            name = "Polar H10",
-            deviceType = "H10"
-        )
-
+        val testDeviceInfo = mock<PolarDeviceInfo>()
         whenever(mockApi.searchForDevice())
-            .thenReturn(Observable.just(testDeviceInfo))
+            .thenReturn(Flowable.just(testDeviceInfo))
 
         deviceManager.startScan()
 
@@ -203,4 +201,3 @@ class PolarDeviceManagerTest {
         assert(!deviceManager.isDeviceConnected())
     }
 }
-
