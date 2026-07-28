@@ -216,7 +216,7 @@ export default function SettingsScreen() {
 
   const handleAbout = () => {
     Alert.alert(
-      "About Become Monitor",
+      "About Augmented Monitor",
       `Version ${packageJson.version}\n\nProfessional HRV monitoring solution for athletes and health professionals.\n\n© 2025 Become Hub`,
       [{ text: "OK" }]
     );

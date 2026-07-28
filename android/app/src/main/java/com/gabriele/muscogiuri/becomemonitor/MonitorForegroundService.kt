@@ -180,7 +180,7 @@ class MonitorForegroundService : Service() {
             launchIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val title = deviceName.ifBlank { "Become Monitor" }
+        val title = deviceName.ifBlank { "Augmented Monitor" }
         val body = formatContentText(heartRate, hrv, lfPower, hfPower)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)

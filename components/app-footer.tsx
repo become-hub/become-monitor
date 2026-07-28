@@ -7,7 +7,7 @@ export function AppFooter() {
   return (
     <ThemedView style={styles.footer}>
       <ThemedText style={styles.footerText}>
-        Become Monitor v{packageJson.version}
+        Augmented Monitor v{packageJson.version}
         {"\n"}
         Professional HRV Monitoring Solution
       </ThemedText>
