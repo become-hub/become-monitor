@@ -25,9 +25,9 @@ class MonitorForegroundService : Service() {
         private const val CHANNEL_ID = "become_monitor_streaming"
         private const val NOTIFICATION_ID = 3601
 
-        const val ACTION_START = "com.gabriele.muscogiuri.becomemonitor.action.START_MONITOR_FGS"
-        const val ACTION_STOP = "com.gabriele.muscogiuri.becomemonitor.action.STOP_MONITOR_FGS"
-        const val ACTION_UPDATE = "com.gabriele.muscogiuri.becomemonitor.action.UPDATE_MONITOR_FGS"
+        const val ACTION_START = "com.discoverbecome.augmentedmonitor.action.START_MONITOR_FGS"
+        const val ACTION_STOP = "com.discoverbecome.augmentedmonitor.action.STOP_MONITOR_FGS"
+        const val ACTION_UPDATE = "com.discoverbecome.augmentedmonitor.action.UPDATE_MONITOR_FGS"
 
         const val EXTRA_DEVICE_NAME = "deviceName"
         const val EXTRA_HR = "hr"
