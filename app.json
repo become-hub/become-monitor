@@ -64,6 +64,14 @@
           ],
           "bluetoothAlwaysPermission": "Questa app ha bisogno del Bluetooth per comunicare con dispositivi BLE"
         }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "organization": "stridegate",
+          "project": "react-native"
+        }
       ]
     ],
     "experiments": {
