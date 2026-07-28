@@ -32,6 +32,12 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+
+# Sentry build credentials (auth tokens) — keep local / CI secrets only
+sentry.properties
+**/sentry.properties
+.env.sentry-build-plugin
 
 # typescript
 *.tsbuildinfo

@@ -8,6 +8,9 @@ import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
 
 import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
+import { initSentry, Sentry } from "@/services/sentry";
+
+initSentry();
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -32,10 +35,12 @@ function AppContent() {
   );
 }
 
-export default function RootLayout() {
+function RootLayout() {
   return (
     <ThemeProvider>
       <AppContent />
     </ThemeProvider>
   );
 }
+
+export default Sentry.wrap(RootLayout);
