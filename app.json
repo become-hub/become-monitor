@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Become Monitor",
+    "name": "Augmented Monitor",
     "slug": "become-monitor",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -34,7 +34,7 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION"
       ],
-      "package": "com.gabriele.muscogiuri.becomemonitor"
+      "package": "com.discoverbecome.augmentedmonitor"
     },
     "web": {
       "output": "static",

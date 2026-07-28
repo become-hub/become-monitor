@@ -356,7 +356,7 @@ export default function MonitorScreen() {
       authSessionDeviceRef.current = null;
       Alert.alert(
         "Pairing Bluetooth fallito",
-        "Il Polar rifiuta l'abbinamento (chiavi BLE non valide).\n\n1) Impostazioni → Bluetooth → dimentica «Polar 360»\n2) Factory reset del Polar 360 (in carica, reset nascosto)\n3) Riapri Become Monitor e accetta il popup di pairing"
+        "Il Polar rifiuta l'abbinamento (chiavi BLE non valide).\n\n1) Impostazioni → Bluetooth → dimentica «Polar 360»\n2) Factory reset del Polar 360 (in carica, reset nascosto)\n3) Riapri Augmented Monitor e accetta il popup di pairing"
       );
     });
 
