@@ -89,6 +89,45 @@ export interface LocaleStrings {
         polar360ConnectionGuide: string;
         polar360GuideDescription: string;
         viewPolar360Guide: string;
+        deviceComparison: string;
+        deviceComparisonIntro: string;
+        signalThemeSensing: string;
+        signalThemeSensingDesc: string;
+        signalThemeCardiac: string;
+        signalThemeCardiacDesc: string;
+        signalThemeRaw: string;
+        signalThemeRawDesc: string;
+        signalThemeAppUsage: string;
+        signalThemeAppUsageDesc: string;
+        signalMetric: string;
+        signalPolar360: string;
+        signalPolarLoop: string;
+        signalNotes: string;
+        signalUsedInApp: string;
+        signalUsedYes: string;
+        signalUsedNo: string;
+        signalUsedDerived: string;
+        signalUsedNa: string;
+        signalSensingPrinciple: string;
+        signalEcg: string;
+        signalHr: string;
+        signalPpi: string;
+        signalHrvRmssd: string;
+        signalLfHf: string;
+        signalRawPpg: string;
+        signalAcc: string;
+        signalSkinTemp: string;
+        signalFtu: string;
+        signalNoteSensing: string;
+        signalNoteEcg: string;
+        signalNoteHr: string;
+        signalNotePpi: string;
+        signalNoteHrv: string;
+        signalNoteLfHf: string;
+        signalNoteRawPpg: string;
+        signalNoteAcc: string;
+        signalNoteSkinTemp: string;
+        signalNoteFtu: string;
         resources: string;
         becomeHubWebsite: string;
         becomeSupport: string;
@@ -189,8 +228,8 @@ export const translations: Record<Language, LocaleStrings> = {
             appOverview: 'Panoramica App',
             appOverviewDescription: 'Augmented Monitor è un\'app professionale per il monitoraggio della variabilità della frequenza cardiaca (HRV) progettata per atleti, professionisti della salute ed entusiasti del benessere.',
             deviceConnection: 'Connessione Dispositivo',
-            deviceConnectionDescription: 'Collega un Polar 360 via Bluetooth per iniziare il monitoraggio in tempo reale (HR/HRV).',
-            polar360SetupGuide: 'Guida Setup Polar 360',
+            deviceConnectionDescription: 'Collega un Polar 360 o Polar Loop Gen 2 via Bluetooth per iniziare il monitoraggio in tempo reale (HR/HRV). Scegli il dispositivo dall\'elenco dopo la scansione.',
+            polar360SetupGuide: 'Guida Setup Polar',
             keyFeatures: 'Caratteristiche Principali',
             heartRateMonitoring: 'Monitoraggio Frequenza Cardiaca',
             heartRateMonitoringDescription: 'Tracciamento della frequenza cardiaca in tempo reale con rilevamento del contatto e indicatori di qualità del segnale.',
@@ -202,11 +241,50 @@ export const translations: Record<Language, LocaleStrings> = {
             hrvMetrics: 'Metriche HRV',
             hrvMetricsDescription: '• RMSSD (Root Mean Square of Successive Differences)\n• Potenza LF (Low Frequency)\n• Potenza HF (High Frequency)\n• Analisi finestra scorrevole di 30 secondi',
             supportedDevices: 'Dispositivi Supportati',
-            supportedDevicesDescription: '• Polar 360 (unico dispositivo supportato al momento)',
+            supportedDevicesDescription: '• Polar 360\n• Polar Loop Gen 2\n\nEntrambi usano PPG ottico (non ECG). Fasce petto come H10 non sono integrate in questa app.',
             deviceGuides: 'Guide Connessione Dispositivi',
-            polar360ConnectionGuide: 'Guida Connessione Polar 360',
-            polar360GuideDescription: 'Guida completa passo-passo per collegare il tuo dispositivo Polar 360 a Augmented Monitor, inclusi setup iniziale, risoluzione problemi e autenticazione.',
-            viewPolar360Guide: 'Visualizza Guida Polar 360',
+            polar360ConnectionGuide: 'Guida Connessione Polar',
+            polar360GuideDescription: 'Guida passo-passo per Polar 360 e Loop Gen 2: scansione, selezione dispositivo, FTU, autenticazione Become e streaming.',
+            viewPolar360Guide: 'Visualizza Guida Polar',
+            deviceComparison: 'Confronto dispositivi',
+            deviceComparisonIntro: 'Differenze scientifiche tra i Polar integrati (profilo SDK condiviso). Espandi un tema per la tabella.',
+            signalThemeSensing: 'Sensing e FTU',
+            signalThemeSensingDesc: 'Principio di misura e First Time Use obbligatorio.',
+            signalThemeCardiac: 'Intervalli cardiaci e HRV',
+            signalThemeCardiacDesc: 'HR, PPI e metriche derivate in-app.',
+            signalThemeRaw: 'Segnali grezzi SDK',
+            signalThemeRawDesc: 'PPG grezzo, accelerometro e temperatura cute disponibili via SDK.',
+            signalThemeAppUsage: 'Cosa usa Augmented Monitor',
+            signalThemeAppUsageDesc: 'Segnali streammati e metriche calcolate oggi nell\'app.',
+            signalMetric: 'Segnale / metrica',
+            signalPolar360: 'Polar 360',
+            signalPolarLoop: 'Polar Loop Gen 2',
+            signalNotes: 'Note scientifiche',
+            signalUsedInApp: 'In app',
+            signalUsedYes: 'Sì',
+            signalUsedNo: 'No',
+            signalUsedDerived: 'Derivata',
+            signalUsedNa: '—',
+            signalSensingPrinciple: 'Principio di sensing',
+            signalEcg: 'ECG',
+            signalHr: 'HR (BPM)',
+            signalPpi: 'PPI / PP interval',
+            signalHrvRmssd: 'HRV (RMSSD)',
+            signalLfHf: 'LF / HF power',
+            signalRawPpg: 'PPG grezzo',
+            signalAcc: 'Accelerometro',
+            signalSkinTemp: 'Temperatura cute',
+            signalFtu: 'FTU obbligatorio',
+            signalNoteSensing: 'PPG ottico a LED verde — non è ECG a contatto toracico.',
+            signalNoteEcg: 'ECG tipico di fascia petto (es. H10); non supportato su questi wristband né in app.',
+            signalNoteHr: 'Battiti/minuto stimati da PPG (online streaming).',
+            signalNotePpi: 'Intervallo pulse-to-pulse (ms) da PPG; base per HRV time-domain.',
+            signalNoteHrv: 'Calcolo app (RMSSD) su finestra RR/PPI — non metrica nativa device.',
+            signalNoteLfHf: 'Stima spettrale in-app su finestra di intervalli RR.',
+            signalNoteRawPpg: 'Segnale AFE grezzo (es. ~22 Hz, 24 bit); richiede resampling. Non streammato in UI.',
+            signalNoteAcc: 'Movimento / activity (~50 Hz, ±8 g tipico). Non usato in UI corrente.',
+            signalNoteSkinTemp: 'Skin temperature (1–4 Hz). Non usato in UI corrente.',
+            signalNoteFtu: 'Dati antropometrici via SDK prima delle misure 24/7; poi restart device.',
             resources: 'Risorse',
             becomeHubWebsite: 'Sito Web Become Hub',
             becomeSupport: 'Supporto Become',
@@ -303,8 +381,8 @@ export const translations: Record<Language, LocaleStrings> = {
             appOverview: 'App Overview',
             appOverviewDescription: 'Augmented Monitor is a professional heart rate variability (HRV) monitoring app designed for athletes, health professionals, and wellness enthusiasts.',
             deviceConnection: 'Device Connection',
-            deviceConnectionDescription: 'Connect a Polar 360 via Bluetooth to start real-time monitoring (HR/HRV).',
-            polar360SetupGuide: 'Polar 360 Setup Guide',
+            deviceConnectionDescription: 'Connect a Polar 360 or Polar Loop Gen 2 via Bluetooth to start real-time monitoring (HR/HRV). Select the device from the list after scanning.',
+            polar360SetupGuide: 'Polar Setup Guide',
             keyFeatures: 'Key Features',
             heartRateMonitoring: 'Heart Rate Monitoring',
             heartRateMonitoringDescription: 'Real-time heart rate tracking with contact detection and signal quality indicators.',
@@ -316,11 +394,50 @@ export const translations: Record<Language, LocaleStrings> = {
             hrvMetrics: 'HRV Metrics',
             hrvMetricsDescription: '• RMSSD (Root Mean Square of Successive Differences)\n• LF Power (Low Frequency)\n• HF Power (High Frequency)\n• 30-second rolling window analysis',
             supportedDevices: 'Supported Devices',
-            supportedDevicesDescription: '• Polar 360 (only supported device at this time)',
+            supportedDevicesDescription: '• Polar 360\n• Polar Loop Gen 2\n\nBoth use optical PPG (not ECG). Chest straps such as H10 are not integrated in this app.',
             deviceGuides: 'Device Connection Guides',
-            polar360ConnectionGuide: 'Polar 360 Connection Guide',
-            polar360GuideDescription: 'Complete step-by-step guide for connecting your Polar 360 device to Augmented Monitor, including initial setup, troubleshooting, and authentication.',
-            viewPolar360Guide: 'View Polar 360 Guide',
+            polar360ConnectionGuide: 'Polar Connection Guide',
+            polar360GuideDescription: 'Step-by-step guide for Polar 360 and Loop Gen 2: scan, device selection, FTU, Become auth, and streaming.',
+            viewPolar360Guide: 'View Polar Guide',
+            deviceComparison: 'Device comparison',
+            deviceComparisonIntro: 'Scientific differences between integrated Polar devices (shared SDK profile). Expand a theme for the table.',
+            signalThemeSensing: 'Sensing and FTU',
+            signalThemeSensingDesc: 'Measurement principle and required First Time Use.',
+            signalThemeCardiac: 'Cardiac intervals and HRV',
+            signalThemeCardiacDesc: 'HR, PPI, and in-app derived metrics.',
+            signalThemeRaw: 'Raw SDK signals',
+            signalThemeRawDesc: 'Raw PPG, accelerometer, and skin temperature available via SDK.',
+            signalThemeAppUsage: 'What Augmented Monitor uses',
+            signalThemeAppUsageDesc: 'Signals streamed and metrics computed in the app today.',
+            signalMetric: 'Signal / metric',
+            signalPolar360: 'Polar 360',
+            signalPolarLoop: 'Polar Loop Gen 2',
+            signalNotes: 'Scientific notes',
+            signalUsedInApp: 'In app',
+            signalUsedYes: 'Yes',
+            signalUsedNo: 'No',
+            signalUsedDerived: 'Derived',
+            signalUsedNa: '—',
+            signalSensingPrinciple: 'Sensing principle',
+            signalEcg: 'ECG',
+            signalHr: 'HR (BPM)',
+            signalPpi: 'PPI / PP interval',
+            signalHrvRmssd: 'HRV (RMSSD)',
+            signalLfHf: 'LF / HF power',
+            signalRawPpg: 'Raw PPG',
+            signalAcc: 'Accelerometer',
+            signalSkinTemp: 'Skin temperature',
+            signalFtu: 'FTU required',
+            signalNoteSensing: 'Green-LED optical PPG — not chest-contact ECG.',
+            signalNoteEcg: 'ECG is typical of chest straps (e.g. H10); not supported on these wristbands or in-app.',
+            signalNoteHr: 'Beats per minute estimated from PPG (online streaming).',
+            signalNotePpi: 'Pulse-to-pulse interval (ms) from PPG; basis for time-domain HRV.',
+            signalNoteHrv: 'App calculation (RMSSD) on an RR/PPI window — not a native device metric.',
+            signalNoteLfHf: 'In-app spectral estimate on an RR-interval window.',
+            signalNoteRawPpg: 'Raw AFE signal (e.g. ~22 Hz, 24-bit); needs resampling. Not streamed in UI.',
+            signalNoteAcc: 'Motion / activity (~50 Hz, ±8 g typical). Not used in current UI.',
+            signalNoteSkinTemp: 'Skin temperature (1–4 Hz). Not used in current UI.',
+            signalNoteFtu: 'Anthropometric data via SDK before 24/7 measures; then device restart.',
             resources: 'Resources',
             becomeHubWebsite: 'Become Hub Website',
             becomeSupport: 'Become Support',

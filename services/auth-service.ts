@@ -96,21 +96,32 @@ export class AuthService {
     /**
      * Controlla se ci sono dati di autenticazione salvati e validi
      */
-    async getStoredAuthData(): Promise<StoredAuthData | null> {
+    async getStoredAuthData(deviceId?: string): Promise<StoredAuthData | null> {
+        if (deviceId) {
+            return await StorageService.getAuthDataForDevice(deviceId);
+        }
         return await StorageService.getAuthData();
     }
 
     /**
-     * Salva i dati di autenticazione completati
+     * Salva i dati di autenticazione completati (per deviceId se presente)
      */
     async saveAuthData(authData: StoredAuthData): Promise<void> {
+        if (authData.deviceId) {
+            await StorageService.saveAuthDataForDevice(authData.deviceId, authData);
+            return;
+        }
         await StorageService.saveAuthData(authData);
     }
 
     /**
-     * Cancella i dati di autenticazione salvati
+     * Cancella i dati di autenticazione salvati (tutti o per device)
      */
-    async clearAuthData(): Promise<void> {
+    async clearAuthData(deviceId?: string): Promise<void> {
+        if (deviceId) {
+            await StorageService.clearAuthDataForDevice(deviceId);
+            return;
+        }
         await StorageService.clearAuthData();
     }
 
@@ -146,15 +157,15 @@ export class AuthService {
     }
 
     /**
-     * Avvia il flusso di autenticazione con controllo token salvato
+     * Avvia il flusso di autenticazione con controllo token salvato (opz. per device)
      */
-    async startAuthFlow(): Promise<{
+    async startAuthFlow(deviceId?: string): Promise<{
         needsAuth: boolean;
         storedData?: StoredAuthData;
         newAuthResponse?: DeviceStartResponse;
     }> {
         // Prima controlla se abbiamo dati salvati validi
-        const storedData = await this.getStoredAuthData();
+        const storedData = await this.getStoredAuthData(deviceId);
         if (storedData) {
             console.log("AuthService: Found stored auth data, validating with server...");
 
@@ -169,8 +180,8 @@ export class AuthService {
                 };
             } else {
                 console.log("AuthService: Token is invalid, clearing stored data and starting new auth flow");
-                // Token non valido, cancella i dati salvati
-                await this.clearAuthData();
+                // Token non valido, cancella i dati salvati (solo per quel device se noto)
+                await this.clearAuthData(deviceId || storedData.deviceId);
             }
         }
 
