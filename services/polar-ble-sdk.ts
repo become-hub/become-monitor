@@ -122,9 +122,16 @@ class PolarBleSdk {
     /**
      * Assicura First Time Use sul Polar 360 (idempotente).
      * Da chiamare dopo la connessione e prima dello streaming.
+     * @returns performed=true se FTU è stato appena eseguito (device in restart).
      */
-    async ensureFirstTimeUse(deviceId: string): Promise<void> {
-        return PolarBleModule.ensureFirstTimeUse(deviceId);
+    async ensureFirstTimeUse(
+        deviceId: string
+    ): Promise<{ performed: boolean }> {
+        const result = await PolarBleModule.ensureFirstTimeUse(deviceId);
+        if (result && typeof result === "object" && "performed" in result) {
+            return { performed: !!result.performed };
+        }
+        return { performed: false };
     }
 
     /**

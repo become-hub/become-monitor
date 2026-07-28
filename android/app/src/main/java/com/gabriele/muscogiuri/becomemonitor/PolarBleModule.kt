@@ -307,7 +307,8 @@ class PolarBleModule @JvmOverloads constructor(
 
     /**
      * Assicura che First Time Use sia completato sul Polar 360 prima dello streaming.
-     * Idempotente: se FTU è già fatto, resolve subito.
+     * Idempotente: se FTU è già fatto, resolve con performed=false.
+     * Se FTU viene eseguito ora, resolve con performed=true (device in restart).
      */
     @ReactMethod
     fun ensureFirstTimeUse(deviceId: String, promise: Promise) {
@@ -315,10 +316,12 @@ class PolarBleModule @JvmOverloads constructor(
         val disposable = ftuManager.ensureFirstTimeUse(deviceId)
             .subscribeOn(Schedulers.io())
             .observeOn(AndroidSchedulers.mainThread())
-            .timeout(60, TimeUnit.SECONDS)
-            .subscribe({
-                Log.d(TAG, "ensureFirstTimeUse success for $deviceId")
-                promise.resolve(null)
+            .timeout(90, TimeUnit.SECONDS)
+            .subscribe({ performed ->
+                Log.d(TAG, "ensureFirstTimeUse success for $deviceId performed=$performed")
+                promise.resolve(Arguments.createMap().apply {
+                    putBoolean("performed", performed)
+                })
             }, { error ->
                 Log.e(TAG, "ensureFirstTimeUse failed for $deviceId: ${error.message}")
                 val code = when {

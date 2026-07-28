@@ -15,6 +15,11 @@ import java.util.concurrent.TimeUnit
 /**
  * Gestisce First Time Use (FTU) per Polar 360 secondo Polar BLE SDK.
  * Idempotente: se FTU è già fatto, completa senza riscrivere la config.
+ *
+ * Dopo doFirstTimeUse il Polar 360 deve riavviarsi per uscire dall'animazione
+ * "Waiting for First time use" e abilitare le misure: emettiamo doRestart e
+ * segnaliamo [performed]=true così il JS non avvia lo streaming sulla connessione
+ * che sta per chiudersi.
  */
 class PolarFtuManager(private val api: PolarBleApi) {
 
@@ -33,6 +38,7 @@ class PolarFtuManager(private val api: PolarBleApi) {
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'"))
 
             return PolarFirstTimeUseConfig(
+                // TODO: ricordiamoci di settare questi valori dagli input dell'app Become!
                 gender = PolarFirstTimeUseConfig.Gender.MALE,
                 birthDate = birthDate,
                 height = 175f,
@@ -72,8 +78,9 @@ class PolarFtuManager(private val api: PolarBleApi) {
 
     /**
      * Attende le feature necessarie, verifica FTU e lo esegue se mancante.
+     * @return Single true se FTU è stato appena eseguito (e restart richiesto).
      */
-    fun ensureFirstTimeUse(deviceId: String): Completable {
+    fun ensureFirstTimeUse(deviceId: String): Single<Boolean> {
         return waitForFeature(deviceId, PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_FILE_TRANSFER)
             .andThen(
                 waitForFeature(
@@ -82,13 +89,22 @@ class PolarFtuManager(private val api: PolarBleApi) {
                 )
             )
             .andThen(
-                Completable.defer {
+                Single.defer {
                     api.isFtuDone(deviceId)
-                        .flatMapCompletable { done ->
+                        .flatMap { done ->
                             if (done) {
-                                Completable.complete()
+                                Single.just(false)
                             } else {
                                 api.doFirstTimeUse(deviceId, defaultFtuConfig())
+                                    .andThen(
+                                        Completable.defer {
+                                            api.doRestart(deviceId)
+                                                // Restart può fallire se il device si è già
+                                                // disconnesso da solo dopo FTU: non bloccare.
+                                                .onErrorComplete()
+                                        }
+                                    )
+                                    .andThen(Single.just(true))
                             }
                         }
                 }

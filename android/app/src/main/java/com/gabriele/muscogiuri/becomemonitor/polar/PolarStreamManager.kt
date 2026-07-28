@@ -7,6 +7,9 @@ import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.core.Completable
 import io.reactivex.rxjava3.disposables.Disposable
 import io.reactivex.rxjava3.schedulers.Schedulers
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * PolarStreamManager
@@ -20,16 +23,19 @@ class PolarStreamManager(private val api: PolarBleApi) {
 
     companion object {
         private const val TAG = "PolarStreamManager"
+        private const val FIRST_SAMPLE_TIMEOUT_SECONDS = 45L
     }
 
     private var ppiDisposable: Disposable? = null
+    private var firstSampleTimeoutDisposable: Disposable? = null
 
     var onPpiDataReceived: ((String, PolarPpiData) -> Unit)? = null
     var onPpiStreamError: ((Throwable) -> Unit)? = null
 
     /**
-     * Avvia lo streaming PPI. Completa quando la subscription è attiva;
-     * errori di stream successivi arrivano via onPpiStreamError.
+     * Avvia lo streaming PPI. Completa al **primo campione** (o errore/timeout),
+     * così il chiamante sa se il device sta davvero misurando.
+     * La subscription resta attiva dopo il complete.
      */
     fun startPpiStreaming(deviceId: String): Completable {
         return Completable.create { emitter ->
@@ -37,8 +43,24 @@ class PolarStreamManager(private val api: PolarBleApi) {
                 if (ppiDisposable?.isDisposed == false) {
                     ppiDisposable?.dispose()
                 }
+                firstSampleTimeoutDisposable?.dispose()
 
                 Log.d(TAG, "📊 Starting PPI stream for $deviceId...")
+                val settled = AtomicBoolean(false)
+
+                fun completeOnce() {
+                    if (settled.compareAndSet(false, true) && !emitter.isDisposed) {
+                        firstSampleTimeoutDisposable?.dispose()
+                        emitter.onComplete()
+                    }
+                }
+
+                fun errorOnce(error: Throwable) {
+                    if (settled.compareAndSet(false, true) && !emitter.isDisposed) {
+                        firstSampleTimeoutDisposable?.dispose()
+                        emitter.onError(error)
+                    }
+                }
 
                 ppiDisposable = api.startPpiStreaming(deviceId)
                     .subscribeOn(Schedulers.io())
@@ -46,14 +68,28 @@ class PolarStreamManager(private val api: PolarBleApi) {
                     .subscribe({ ppiData ->
                         Log.d(TAG, "📊 PPI Data: ${ppiData.samples.size} samples")
                         onPpiDataReceived?.invoke(deviceId, ppiData)
+                        completeOnce()
                     }, { error ->
-                        Log.e(TAG, "❌ PPI stream error: ${error.javaClass.simpleName}: ${error.message}")
+                        Log.e(
+                            TAG,
+                            "❌ PPI stream error: ${error.javaClass.simpleName}: ${error.message}"
+                        )
                         onPpiStreamError?.invoke(error)
+                        errorOnce(error)
                     })
 
-                if (!emitter.isDisposed) {
-                    emitter.onComplete()
-                }
+                firstSampleTimeoutDisposable = Completable.timer(
+                    FIRST_SAMPLE_TIMEOUT_SECONDS,
+                    TimeUnit.SECONDS
+                )
+                    .subscribe({
+                        ppiDisposable?.dispose()
+                        errorOnce(
+                            TimeoutException(
+                                "Nessun campione PPI entro ${FIRST_SAMPLE_TIMEOUT_SECONDS}s"
+                            )
+                        )
+                    }, { /* ignore */ })
             } catch (e: Exception) {
                 Log.e(TAG, "❌ PPI stream exception: ${e.message}")
                 if (!emitter.isDisposed) {
@@ -65,6 +101,8 @@ class PolarStreamManager(private val api: PolarBleApi) {
 
     fun stopPpiStreaming(): Result<Unit> {
         return try {
+            firstSampleTimeoutDisposable?.dispose()
+            firstSampleTimeoutDisposable = null
             ppiDisposable?.dispose()
             ppiDisposable = null
             Log.d(TAG, "PPI streaming stopped")
@@ -78,6 +116,8 @@ class PolarStreamManager(private val api: PolarBleApi) {
     fun isStreaming(): Boolean = ppiDisposable?.isDisposed == false
 
     fun cleanup() {
+        firstSampleTimeoutDisposable?.dispose()
+        firstSampleTimeoutDisposable = null
         ppiDisposable?.dispose()
         ppiDisposable = null
     }

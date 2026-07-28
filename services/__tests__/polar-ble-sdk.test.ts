@@ -132,7 +132,9 @@ describe('PolarBleSdk', () => {
 
     describe('ensureFirstTimeUse', () => {
         it('chiama il metodo nativo con deviceId', async () => {
-            mockPolarBleModule.ensureFirstTimeUse.mockResolvedValueOnce(undefined);
+            mockPolarBleModule.ensureFirstTimeUse.mockResolvedValueOnce({
+                performed: false,
+            });
 
             await polarSdk.ensureFirstTimeUse('ABC123');
 
@@ -145,6 +147,15 @@ describe('PolarBleSdk', () => {
             );
 
             await expect(polarSdk.ensureFirstTimeUse('XYZ')).rejects.toThrow('FTU failed');
+        });
+
+        it('restituisce performed=true quando FTU è appena eseguito', async () => {
+            mockPolarBleModule.ensureFirstTimeUse.mockResolvedValueOnce({
+                performed: true,
+            });
+
+            const result = await polarSdk.ensureFirstTimeUse('ABC123');
+            expect(result.performed).toBe(true);
         });
     });
 
@@ -286,7 +297,9 @@ describe('PolarBleSdk', () => {
             mockPolarBleModule.checkBluetoothState.mockResolvedValueOnce(true);
             mockPolarBleModule.startScan.mockResolvedValueOnce(undefined);
             mockPolarBleModule.connectToDevice.mockResolvedValueOnce(undefined);
-            mockPolarBleModule.ensureFirstTimeUse.mockResolvedValueOnce(undefined);
+            mockPolarBleModule.ensureFirstTimeUse.mockResolvedValueOnce({
+                performed: false,
+            });
             mockPolarBleModule.startPpiStreaming.mockResolvedValueOnce(undefined);
 
             const btState = await polarSdk.checkBluetoothState();

@@ -31,8 +31,8 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Beco
 4. Clicca su **"Collega Polar 360"** / **"Cerca Dispositivo Polar"** per avviare la scansione.
 5. Al primo collegamento l'app:
    - completa il pairing BLE
-   - esegue il **First Time Use** (configurazione dispositivo via SDK)
-   - avvia lo streaming HR / PPI verso la piattaforma Become
+   - esegue il **First Time Use** (configurazione dispositivo via SDK) e, se necessario, **riavvia** il Polar
+   - alla riconnessione avvia lo streaming HR / PPI verso la piattaforma Become
    - avvia un **servizio in primo piano** con notifica persistente (dispositivo collegato + HR, HRV, LF, HF aggiornati in tempo reale), così lo streaming continua anche a schermo bloccato
 
 ### Se il dispositivo non viene trovato
@@ -61,6 +61,7 @@ Una volta completata l'associazione, sull'app Become Monitor apparirà un popup 
 - L'inserimento dei 4 codici di accesso avviene solo la prima volta.
 - Dopo la connessione iniziale, l'app Become Monitor riconoscerà automaticamente il dispositivo alle connessioni successive.
 - Il First Time Use sul Polar viene eseguito solo se non è già stato completato (`isFtuDone`).
+- Dopo un FTU appena eseguito il Polar **si riavvia**; i LED smettono l'animazione "Waiting for First time use" solo dopo quel riavvio. L'app riparte con scan/riconnessione automatica e poi lo streaming.
 
 ## 4. Stato della connessione
 

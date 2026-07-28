@@ -170,6 +170,8 @@ export default function MonitorScreen() {
   /** Device currently going through auth/FTU/poll (survives until ready or disconnect). */
   const authSessionDeviceRef = useRef<string | null>(null);
   const pairingBlockedRef = useRef(false);
+  /** After fresh FTU the Polar restarts; wait for next connect before PPI. */
+  const pendingPostFtuReconnectRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Inizializza Ably service
@@ -302,11 +304,23 @@ export default function MonitorScreen() {
       (device: PolarDeviceInfo) => {
         console.log("Monitor: ⚠️ Dispositivo disconnesso");
 
-        // Mostra notifica di disconnessione
-        setNotification({
-          type: "error",
-          message: `Dispositivo disconnesso`,
-        });
+        const expectedFtuRestart =
+          pendingPostFtuReconnectRef.current === device.deviceId;
+
+        if (expectedFtuRestart) {
+          setNotification({
+            type: "success",
+            message: "Polar riavviato dopo configurazione — riconnessione…",
+          });
+          // Bond already exists: scan+auto-connect when the Polar advertises again.
+          polarSdk.startScan().catch(() => {});
+          setScanningState(true);
+        } else {
+          setNotification({
+            type: "error",
+            message: `Dispositivo disconnesso`,
+          });
+        }
 
         // Auto-close dopo 5 secondi
         setTimeout(() => {
@@ -320,6 +334,7 @@ export default function MonitorScreen() {
         authStreamInFlightRef.current = false;
         streamReadyDeviceRef.current = null;
         authSessionDeviceRef.current = null;
+        pendingPostFtuReconnectRef.current = null;
         if (pollInterval.current) {
           clearInterval(pollInterval.current);
           pollInterval.current = null;
@@ -639,6 +654,35 @@ export default function MonitorScreen() {
     authStreamInFlightRef.current = true;
     authSessionDeviceRef.current = deviceId;
     try {
+      // FTU prima di auth/streaming: se appena eseguito, il Polar riavvia e
+      // riprenderemo auth+PPI alla prossima onDeviceConnected.
+      console.log("🩺 Verifica First Time Use...");
+      try {
+        const ftuResult = await polarSdk.ensureFirstTimeUse(deviceId);
+        console.log("✅ First Time Use ok", ftuResult);
+        if (ftuResult.performed) {
+          pendingPostFtuReconnectRef.current = deviceId;
+          authSessionDeviceRef.current = null;
+          setNotification({
+            type: "success",
+            message:
+              "Polar configurato — riavvio in corso. Ricollega se non riparte da solo.",
+          });
+          setTimeout(() => setNotification(null), 8000);
+          return;
+        }
+      } catch (error: any) {
+        console.error("Monitor: ❌ FTU fallito:", error?.message);
+        authSessionDeviceRef.current = null;
+        setNotification({
+          type: "error",
+          message:
+            "Configura Polar 360 fallita — reset di fabbrica se già abbinato altrove",
+        });
+        setTimeout(() => setNotification(null), 8000);
+        return;
+      }
+
       // Step 1: Controlla se abbiamo dati di autenticazione salvati
       const storedAuthData = await StorageService.getAuthData();
 
@@ -675,23 +719,6 @@ export default function MonitorScreen() {
             storedAuthData.userId,
             storedAuthData.deviceCode
           );
-
-          // First Time Use (obbligatorio per Polar 360) poi streaming PPI
-          console.log("🩺 Verifica First Time Use...");
-          try {
-            await polarSdk.ensureFirstTimeUse(deviceId);
-            console.log("✅ First Time Use ok");
-          } catch (error: any) {
-            console.error("Monitor: ❌ FTU fallito:", error?.message);
-            authSessionDeviceRef.current = null;
-            setNotification({
-              type: "error",
-              message:
-                "Configura Polar 360 fallita — reset di fabbrica se già abbinato altrove",
-            });
-            setTimeout(() => setNotification(null), 8000);
-            return;
-          }
 
           console.log("💓 Avvio streaming PPI...");
           try {
@@ -842,23 +869,6 @@ export default function MonitorScreen() {
                 parseInt(pollResponse.userId),
                 pollResponse.deviceCode
               );
-
-              // First Time Use (obbligatorio per Polar 360) poi streaming PPI
-              console.log("🩺 Verifica First Time Use...");
-              try {
-                await polarSdk.ensureFirstTimeUse(deviceId);
-                console.log("✅ First Time Use ok");
-              } catch (error: any) {
-                console.error("Monitor: ❌ FTU fallito:", error?.message);
-                authSessionDeviceRef.current = null;
-                setNotification({
-                  type: "error",
-                  message:
-                    "Configura Polar 360 fallita — reset di fabbrica se già abbinato altrove",
-                });
-                setTimeout(() => setNotification(null), 8000);
-                return;
-              }
 
               console.log("💓 Avvio streaming PPI...");
               try {

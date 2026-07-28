@@ -87,7 +87,7 @@ class PolarStreamManagerTest {
         val observer = streamManager.startPpiStreaming(deviceId).test()
         testScheduler.triggerActions()
 
-        observer.assertComplete()
+        observer.assertError { true }
         assert(errorReceived != null)
     }
 

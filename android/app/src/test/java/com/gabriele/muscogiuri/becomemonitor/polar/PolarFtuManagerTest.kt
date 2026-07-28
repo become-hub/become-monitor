@@ -62,8 +62,10 @@ class PolarFtuManagerTest {
         val testObserver = ftuManager.ensureFirstTimeUse(deviceId).test()
         testObserver.assertComplete()
         testObserver.assertNoErrors()
+        testObserver.assertValue(false)
 
         verify(mockApi, never()).doFirstTimeUse(any(), any())
+        verify(mockApi, never()).doRestart(any())
     }
 
     @Test
@@ -83,12 +85,15 @@ class PolarFtuManagerTest {
         ).thenReturn(true)
         whenever(mockApi.isFtuDone(deviceId)).thenReturn(Single.just(false))
         whenever(mockApi.doFirstTimeUse(eq(deviceId), any())).thenReturn(Completable.complete())
+        whenever(mockApi.doRestart(deviceId)).thenReturn(Completable.complete())
 
         val testObserver = ftuManager.ensureFirstTimeUse(deviceId).test()
         testObserver.assertComplete()
         testObserver.assertNoErrors()
+        testObserver.assertValue(true)
 
         verify(mockApi).doFirstTimeUse(eq(deviceId), any<PolarFirstTimeUseConfig>())
+        verify(mockApi).doRestart(deviceId)
     }
 
     @Test
@@ -122,6 +127,7 @@ class PolarFtuManagerTest {
 
         testObserver.assertComplete()
         testObserver.assertNoErrors()
+        testObserver.assertValue(false)
     }
 
     @Test
