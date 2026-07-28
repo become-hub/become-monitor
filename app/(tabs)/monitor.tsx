@@ -18,6 +18,10 @@ import {
   PolarPpiData,
   polarSdk,
 } from "@/services/polar-ble-sdk";
+import {
+  ensurePolarReady,
+  startPpiStreamingWithFallback,
+} from "@/services/polar-device-setup";
 import { StorageService, StoredAuthData } from "@/services/storage-service";
 import { useScanStore } from "@/stores/scan-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -657,22 +661,21 @@ export default function MonitorScreen() {
       // FTU prima di auth/streaming: se appena eseguito, il Polar riavvia e
       // riprenderemo auth+PPI alla prossima onDeviceConnected.
       console.log("🩺 Verifica First Time Use...");
-      try {
-        const ftuResult = await polarSdk.ensureFirstTimeUse(deviceId);
-        console.log("✅ First Time Use ok", ftuResult);
-        if (ftuResult.performed) {
-          pendingPostFtuReconnectRef.current = deviceId;
-          authSessionDeviceRef.current = null;
-          setNotification({
-            type: "success",
-            message:
-              "Polar configurato — riavvio in corso. Ricollega se non riparte da solo.",
-          });
-          setTimeout(() => setNotification(null), 8000);
-          return;
-        }
-      } catch (error: any) {
-        console.error("Monitor: ❌ FTU fallito:", error?.message);
+      const polarReady = await ensurePolarReady(deviceId, polarSdk);
+      if (polarReady.status === "deferred") {
+        console.log("✅ First Time Use ok (restart pending)");
+        pendingPostFtuReconnectRef.current = deviceId;
+        authSessionDeviceRef.current = null;
+        setNotification({
+          type: "success",
+          message:
+            "Polar configurato — riavvio in corso. Ricollega se non riparte da solo.",
+        });
+        setTimeout(() => setNotification(null), 8000);
+        return;
+      }
+      if (polarReady.status === "failed") {
+        console.error("Monitor: ❌ FTU fallito:", polarReady.error);
         authSessionDeviceRef.current = null;
         setNotification({
           type: "error",
@@ -682,6 +685,7 @@ export default function MonitorScreen() {
         setTimeout(() => setNotification(null), 8000);
         return;
       }
+      console.log("✅ First Time Use ok");
 
       // Step 1: Controlla se abbiamo dati di autenticazione salvati
       const storedAuthData = await StorageService.getAuthData();
@@ -721,13 +725,7 @@ export default function MonitorScreen() {
           );
 
           console.log("💓 Avvio streaming PPI...");
-          try {
-            await polarSdk.startPpiStreaming(deviceId);
-            console.log("✅ PPI streaming avviato con successo!");
-          } catch (error: any) {
-            console.log("⚠️ PPI non disponibile:", error.message);
-            console.log("🔄 Usando modalità fallback: HRV calcolato da HR");
-          }
+          await startPpiStreamingWithFallback(deviceId, polarSdk);
 
           // Avvia invio periodico dei dati biometrici
           startBiometricSending();
@@ -871,13 +869,7 @@ export default function MonitorScreen() {
               );
 
               console.log("💓 Avvio streaming PPI...");
-              try {
-                await polarSdk.startPpiStreaming(deviceId);
-                console.log("✅ PPI streaming avviato con successo!");
-              } catch (error: any) {
-                console.log("⚠️ PPI non disponibile:", error.message);
-                console.log("🔄 Usando modalità fallback: HRV calcolato da HR");
-              }
+              await startPpiStreamingWithFallback(deviceId, polarSdk);
 
               // Avvia invio periodico dei dati biometrici
               startBiometricSending();
