@@ -13,13 +13,13 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
- * Gestisce First Time Use (FTU) per Polar 360 secondo Polar BLE SDK.
- * Idempotente: se FTU è già fatto, completa senza riscrivere la config.
+ * Gestisce First Time Use (FTU) per Polar 360 / Loop Gen 2 secondo Polar BLE SDK.
  *
- * Dopo doFirstTimeUse il Polar 360 deve riavviarsi per uscire dall'animazione
- * "Waiting for First time use" e abilitare le misure: emettiamo doRestart e
- * segnaliamo [performed]=true così il JS non avvia lo streaming sulla connessione
- * che sta per chiudersi.
+ * Building block pubblici (riutilizzabili):
+ * - [waitForFtuFeatures], [isFtuDone], [performFirstTimeUse], [restartDevice]
+ *
+ * Facade: [ensureFirstTimeUse] orchestra i pezzi. Dopo doFirstTimeUse il device
+ * deve riavviarsi: emettiamo doRestart e restituiamo performed=true.
  */
 class PolarFtuManager(private val api: PolarBleApi) {
 
@@ -76,11 +76,8 @@ class PolarFtuManager(private val api: PolarBleApi) {
             }
     }
 
-    /**
-     * Attende le feature necessarie, verifica FTU e lo esegue se mancante.
-     * @return Single true se FTU è stato appena eseguito (e restart richiesto).
-     */
-    fun ensureFirstTimeUse(deviceId: String): Single<Boolean> {
+    /** Attende FILE_TRANSFER + DEVICE_TIME_SETUP (prerequisiti FTU). */
+    fun waitForFtuFeatures(deviceId: String): Completable {
         return waitForFeature(deviceId, PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_FILE_TRANSFER)
             .andThen(
                 waitForFeature(
@@ -88,6 +85,34 @@ class PolarFtuManager(private val api: PolarBleApi) {
                     PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_DEVICE_TIME_SETUP
                 )
             )
+    }
+
+    fun isFtuDone(deviceId: String): Single<Boolean> {
+        return waitForFeature(deviceId, PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_FILE_TRANSFER)
+            .andThen(api.isFtuDone(deviceId))
+    }
+
+    /** Scrive la config FTU sul device (senza restart). */
+    fun performFirstTimeUse(
+        deviceId: String,
+        config: PolarFirstTimeUseConfig = defaultFtuConfig()
+    ): Completable {
+        return api.doFirstTimeUse(deviceId, config)
+    }
+
+    /**
+     * Riavvia il device dopo FTU. Errori ignorati se già disconnesso.
+     */
+    fun restartDevice(deviceId: String): Completable {
+        return api.doRestart(deviceId).onErrorComplete()
+    }
+
+    /**
+     * Orchestratore: attende feature, esegue FTU+restart se mancante.
+     * @return true se FTU è stato appena eseguito (device in restart).
+     */
+    fun ensureFirstTimeUse(deviceId: String): Single<Boolean> {
+        return waitForFtuFeatures(deviceId)
             .andThen(
                 Single.defer {
                     api.isFtuDone(deviceId)
@@ -95,25 +120,13 @@ class PolarFtuManager(private val api: PolarBleApi) {
                             if (done) {
                                 Single.just(false)
                             } else {
-                                api.doFirstTimeUse(deviceId, defaultFtuConfig())
-                                    .andThen(
-                                        Completable.defer {
-                                            api.doRestart(deviceId)
-                                                // Restart può fallire se il device si è già
-                                                // disconnesso da solo dopo FTU: non bloccare.
-                                                .onErrorComplete()
-                                        }
-                                    )
+                                performFirstTimeUse(deviceId)
+                                    .andThen(restartDevice(deviceId))
                                     .andThen(Single.just(true))
                             }
                         }
                 }
             )
-    }
-
-    fun isFtuDone(deviceId: String): Single<Boolean> {
-        return waitForFeature(deviceId, PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_FILE_TRANSFER)
-            .andThen(api.isFtuDone(deviceId))
     }
 
     private fun waitForFeature(

@@ -170,4 +170,50 @@ class PolarFtuManagerTest {
             "deviceTime must be yyyy-MM-dd'T'HH:mm:ss'Z', got: ${config.deviceTime}"
         }
     }
+
+    @Test
+    fun `waitForFtuFeatures completes when both features ready`() {
+        val deviceId = "E462542B"
+        whenever(
+            mockApi.isFeatureReady(
+                deviceId,
+                PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_FILE_TRANSFER
+            )
+        ).thenReturn(true)
+        whenever(
+            mockApi.isFeatureReady(
+                deviceId,
+                PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_DEVICE_TIME_SETUP
+            )
+        ).thenReturn(true)
+
+        ftuManager.waitForFtuFeatures(deviceId).test()
+            .assertComplete()
+            .assertNoErrors()
+    }
+
+    @Test
+    fun `performFirstTimeUse calls doFirstTimeUse`() {
+        val deviceId = "E462542B"
+        whenever(mockApi.doFirstTimeUse(eq(deviceId), any())).thenReturn(Completable.complete())
+
+        ftuManager.performFirstTimeUse(deviceId).test()
+            .assertComplete()
+            .assertNoErrors()
+
+        verify(mockApi).doFirstTimeUse(eq(deviceId), any<PolarFirstTimeUseConfig>())
+    }
+
+    @Test
+    fun `restartDevice calls doRestart and swallows errors`() {
+        val deviceId = "E462542B"
+        whenever(mockApi.doRestart(deviceId))
+            .thenReturn(Completable.error(RuntimeException("already gone")))
+
+        ftuManager.restartDevice(deviceId).test()
+            .assertComplete()
+            .assertNoErrors()
+
+        verify(mockApi).doRestart(deviceId)
+    }
 }

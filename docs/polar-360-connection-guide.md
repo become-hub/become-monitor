@@ -66,6 +66,7 @@ Una volta completata l'associazione, sull'app Augmented Monitor apparirà un pop
 - Dopo la connessione iniziale, l'app Augmented Monitor riconoscerà automaticamente il dispositivo alle connessioni successive.
 - Il First Time Use sul Polar viene eseguito solo se non è già stato completato (`isFtuDone`).
 - Dopo un FTU appena eseguito il Polar **si riavvia**; i LED smettono l'animazione "Waiting for First time use" solo dopo quel riavvio. L'app riparte con scan/riconnessione automatica e poi lo streaming.
+- FTU (`waitForFtuFeatures` / `performFirstTimeUse` / `restartDevice`), reconnect e PPI sono **building block condivisi** (Polar 360 e Loop Gen 2), orchestrati da `ensureFirstTimeUse` + riconnessione.
 
 ## 4. Stato della connessione
 
