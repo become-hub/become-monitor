@@ -27,6 +27,12 @@ import {
   isSupportedPolarDevice,
   resolvePolarProduct,
 } from "@/services/polar-products";
+import { resolveRrInterval } from "@/services/rr-interval";
+import {
+  flushSessionTrack,
+  startSessionOfflineRecording,
+} from "@/services/session-track-flush";
+import { sessionTrackBuffer } from "@/services/session-track-buffer";
 import { StorageService, StoredAuthData } from "@/services/storage-service";
 import { useScanStore } from "@/stores/scan-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -116,12 +122,18 @@ export default function MonitorScreen() {
   const [hrv, setHrv] = useState(0);
   const [lfPower, setLfPower] = useState(0);
   const [hfPower, setHfPower] = useState(0);
+  const [rrMs, setRrMs] = useState(0);
+  const [rrSource, setRrSource] = useState<"ppi" | "hr_derived" | null>(null);
+  const [isFlushingTrack, setIsFlushingTrack] = useState(false);
+  const [offlineRecordingStarted, setOfflineRecordingStarted] = useState(false);
   const heartRateRef = useRef(0);
   const hrvRef = useRef(0);
   const lfPowerRef = useRef(0);
   const hfPowerRef = useRef(0);
   const connectedDeviceNameRef = useRef("");
   const connectedDeviceIdRef = useRef<string | null>(null);
+  const flushInFlightRef = useRef(false);
+  const rrSourceRef = useRef<"ppi" | "hr_derived" | null>(null);
 
   useEffect(() => {
     heartRateRef.current = heartRate;
@@ -141,6 +153,9 @@ export default function MonitorScreen() {
   useEffect(() => {
     connectedDeviceIdRef.current = connectedDeviceId;
   }, [connectedDeviceId]);
+  useEffect(() => {
+    rrSourceRef.current = rrSource;
+  }, [rrSource]);
 
   // Stato per la notifica di autenticazione
   const [notification, setNotification] = useState<{
@@ -203,6 +218,11 @@ export default function MonitorScreen() {
       "Monitor: 🔵 AblyService inizializzato:",
       !!ablyService.current
     );
+
+    ablyService.current.setEndSessionHandler((payload) => {
+      console.log("Monitor: 📥 Ably endSession", payload);
+      handleFlushTrack(payload?.sessionId ?? null);
+    });
 
     // Controlla stato Bluetooth iniziale e prova a riconnettersi
     const initializeBluetooth = async () => {
@@ -411,6 +431,12 @@ export default function MonitorScreen() {
       // Se non ci sono dati PPI, calcola RR approssimato da BPM come fallback
       if (data.hr > 0) {
         const approximateRR = Math.round(60000 / data.hr);
+        const resolved = resolveRrInterval({ hrBpm: data.hr });
+        if (resolved && rrSourceRef.current !== "ppi") {
+          setRrMs(resolved.rrMs);
+          setRrSource(resolved.rrSource);
+          sessionTrackBuffer.pushHr(data.hr);
+        }
 
         ppiWindow.current.push(approximateRR);
         if (ppiWindow.current.length > WINDOW_SIZE) {
@@ -794,6 +820,7 @@ export default function MonitorScreen() {
           startBiometricSending();
           streamReadyDeviceRef.current = deviceId;
           await ensureMonitorForegroundService();
+          await beginOfflineTrack(deviceId);
 
           return;
         } else {
@@ -913,6 +940,7 @@ export default function MonitorScreen() {
               startBiometricSending();
               streamReadyDeviceRef.current = deviceId;
               await ensureMonitorForegroundService();
+              await beginOfflineTrack(deviceId);
             } else {
               console.log("⏳ POLLING - authenticated: false");
             }
@@ -941,6 +969,22 @@ export default function MonitorScreen() {
         console.log(`Monitor: ⚠️ Filtrato PPI fuori range: ${ppiMs}ms`);
         return;
       }
+
+      const resolved = resolveRrInterval({
+        ppiMs,
+        hrBpm: sample.hr > 0 ? sample.hr : heartRateRef.current,
+      });
+      if (resolved) {
+        setRrMs(resolved.rrMs);
+        setRrSource(resolved.rrSource);
+        rrSourceRef.current = resolved.rrSource;
+      }
+      sessionTrackBuffer.pushPpi({
+        ppiMs,
+        hr: sample.hr > 0 ? sample.hr : undefined,
+        errorEstimate: sample.errorEstimate,
+        blockerBit: sample.blocker,
+      });
 
       // Aggiungi alla finestra
       ppiWindow.current.push(ppiMs);
@@ -1016,6 +1060,63 @@ export default function MonitorScreen() {
         }
       }
     });
+  };
+
+  const beginOfflineTrack = async (deviceId: string) => {
+    const result = await startSessionOfflineRecording(deviceId);
+    setOfflineRecordingStarted(result.started);
+    if (result.started) {
+      setNotification({
+        type: "success",
+        message: "Offline PPI recording avviato sul Polar",
+      });
+    } else {
+      setNotification({
+        type: "success",
+        message: "Offline recording non disponibile — buffer live attivo",
+      });
+    }
+    setTimeout(() => setNotification(null), 5000);
+  };
+
+  const handleFlushTrack = async (sessionId?: string | null) => {
+    const deviceId = connectedDeviceIdRef.current;
+    if (!deviceId) {
+      Alert.alert("Flush track", "Nessun dispositivo connesso.");
+      return;
+    }
+    if (flushInFlightRef.current) {
+      return;
+    }
+    flushInFlightRef.current = true;
+    setIsFlushingTrack(true);
+    try {
+      const userState = useUserStore.getState();
+      const result = await flushSessionTrack({
+        deviceId,
+        deviceCode: userState.deviceCode || undefined,
+        userId: userState.userId || undefined,
+        authToken: userState.authToken || undefined,
+        sessionId: sessionId ?? null,
+      });
+      setOfflineRecordingStarted(false);
+      setNotification({
+        type: "success",
+        message: result.dryRun
+          ? `Track flushed (dry-run) · ${result.sampleCount} sample · ${result.source}`
+          : `Track uploaded · ${result.sampleCount} sample · ${result.source}`,
+      });
+      setTimeout(() => setNotification(null), 8000);
+    } catch (error: any) {
+      console.error("Monitor: flush track failed", error);
+      Alert.alert(
+        "Flush track fallito",
+        error?.message || "Errore sconosciuto"
+      );
+    } finally {
+      flushInFlightRef.current = false;
+      setIsFlushingTrack(false);
+    }
   };
 
   const disconnectDevice = async () => {
@@ -1180,6 +1281,11 @@ export default function MonitorScreen() {
     setHrv(0);
     setLfPower(0);
     setHfPower(0);
+    setRrMs(0);
+    setRrSource(null);
+    rrSourceRef.current = null;
+    setOfflineRecordingStarted(false);
+    sessionTrackBuffer.clear();
 
     // Reset finestra PPI
     ppiWindow.current = [];
@@ -1299,6 +1405,16 @@ export default function MonitorScreen() {
             <ThemedText style={styles.statusLabel}>App ID:</ThemedText>
             <ThemedText style={styles.statusValue}>{appId || "N/A"}</ThemedText>
           </View>
+          <View style={styles.statusRow}>
+            <ThemedText style={styles.statusLabel}>Offline track:</ThemedText>
+            <ThemedText style={styles.statusValue}>
+              {offlineRecordingStarted
+                ? "🟢 Polar PPI"
+                : connectedDeviceId
+                ? "🟠 Buffer live"
+                : "🔴 Off"}
+            </ThemedText>
+          </View>
           {!authToken && connectedDeviceId && authCode && (
             <View style={styles.authCodeContainer}>
               <ThemedText style={styles.authCodeLabel}>
@@ -1350,6 +1466,25 @@ export default function MonitorScreen() {
                   ? "ms"
                   : connectedDeviceId && ppiWindow.current.length > 0
                   ? `${ppiWindow.current.length}/${WINDOW_SIZE}`
+                  : "ms"}
+              </ThemedText>
+            </View>
+
+            <View
+              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
+            >
+              <View style={styles.metricIconContainer}>
+                <Activity size={24} color={Colors[theme].tint} />
+              </View>
+              <ThemedText style={styles.metricLabel}>RR</ThemedText>
+              <ThemedText style={styles.metricValue}>
+                {connectedDeviceId && rrMs > 0 ? rrMs : "—"}
+              </ThemedText>
+              <ThemedText style={styles.metricUnit}>
+                {rrSource === "ppi"
+                  ? "ms · PPI"
+                  : rrSource === "hr_derived"
+                  ? "ms · HR"
                   : "ms"}
               </ThemedText>
             </View>
@@ -1484,6 +1619,23 @@ export default function MonitorScreen() {
                 <ThemedText style={styles.buttonText}>
                   Disconnetti {connectedDeviceName}
                 </ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.button,
+                  styles.flushButton,
+                  { backgroundColor: Colors[theme].tint },
+                ]}
+                onPress={() => handleFlushTrack(null)}
+                disabled={isFlushingTrack}
+              >
+                {isFlushingTrack ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <ThemedText style={styles.buttonText}>
+                    Simula endSession / Flush track
+                  </ThemedText>
+                )}
               </TouchableOpacity>
             </View>
           )}
@@ -1742,6 +1894,10 @@ const styles = StyleSheet.create({
   },
   connectedButtons: {
     width: "100%",
+    gap: 10,
+  },
+  flushButton: {
+    marginTop: 0,
   },
   clearButton: {
     backgroundColor: "#FF9800",

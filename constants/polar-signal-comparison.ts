@@ -61,6 +61,14 @@ export const POLAR_SIGNAL_ROWS: PolarSignalRow[] = [
     usedInApp: 'yes',
   },
   {
+    id: 'rr',
+    metricKey: 'docs.signalRr',
+    polar360: 'Da PPI o 60000/HR',
+    polarLoop: 'Da PPI o 60000/HR',
+    scientificNoteKey: 'docs.signalNoteRr',
+    usedInApp: 'derived',
+  },
+  {
     id: 'hrv_rmssd',
     metricKey: 'docs.signalHrvRmssd',
     polar360: 'Derivata da PPI/HR',
@@ -121,7 +129,7 @@ export const POLAR_SIGNAL_THEMES: PolarSignalTheme[] = [
     id: 'cardiacIntervals',
     titleKey: 'docs.signalThemeCardiac',
     descriptionKey: 'docs.signalThemeCardiacDesc',
-    rowIds: ['hr', 'ppi', 'hrv_rmssd', 'lf_hf'],
+    rowIds: ['hr', 'ppi', 'rr', 'hrv_rmssd', 'lf_hf'],
   },
   {
     id: 'rawSignals',
@@ -133,7 +141,7 @@ export const POLAR_SIGNAL_THEMES: PolarSignalTheme[] = [
     id: 'appUsage',
     titleKey: 'docs.signalThemeAppUsage',
     descriptionKey: 'docs.signalThemeAppUsageDesc',
-    rowIds: ['hr', 'ppi', 'hrv_rmssd', 'lf_hf', 'raw_ppg', 'acc', 'skin_temp'],
+    rowIds: ['hr', 'ppi', 'rr', 'hrv_rmssd', 'lf_hf', 'raw_ppg', 'acc', 'skin_temp'],
   },
 ];
 

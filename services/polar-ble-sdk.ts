@@ -32,6 +32,21 @@ export interface PolarPpiData {
     samples: PolarPpiSample[];
 }
 
+export interface PolarOfflinePpiSample {
+    ppiMs: number;
+    hr: number;
+    errorEstimate: number;
+    blockerBit: boolean;
+    t?: string;
+}
+
+export interface PolarOfflinePpiTrack {
+    path: string;
+    size: number;
+    startedAt?: string | null;
+    samples: PolarOfflinePpiSample[];
+}
+
 export interface BluetoothState {
     powered: boolean;
 }
@@ -146,6 +161,24 @@ class PolarBleSdk {
      */
     async stopPpiStreaming(): Promise<void> {
         return PolarBleModule.stopPpiStreaming();
+    }
+
+    async startPpiOfflineRecording(deviceId: string): Promise<void> {
+        return PolarBleModule.startPpiOfflineRecording(deviceId);
+    }
+
+    async stopPpiOfflineRecording(deviceId: string): Promise<void> {
+        return PolarBleModule.stopPpiOfflineRecording(deviceId);
+    }
+
+    async fetchLatestPpiOfflineRecord(
+        deviceId: string
+    ): Promise<PolarOfflinePpiTrack> {
+        return PolarBleModule.fetchLatestPpiOfflineRecord(deviceId);
+    }
+
+    async removePpiOfflineRecord(deviceId: string, path: string): Promise<void> {
+        return PolarBleModule.removePpiOfflineRecord(deviceId, path);
     }
 
     /**

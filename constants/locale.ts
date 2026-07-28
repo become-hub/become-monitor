@@ -112,6 +112,7 @@ export interface LocaleStrings {
         signalEcg: string;
         signalHr: string;
         signalPpi: string;
+        signalRr: string;
         signalHrvRmssd: string;
         signalLfHf: string;
         signalRawPpg: string;
@@ -122,6 +123,7 @@ export interface LocaleStrings {
         signalNoteEcg: string;
         signalNoteHr: string;
         signalNotePpi: string;
+        signalNoteRr: string;
         signalNoteHrv: string;
         signalNoteLfHf: string;
         signalNoteRawPpg: string;
@@ -228,7 +230,7 @@ export const translations: Record<Language, LocaleStrings> = {
             appOverview: 'Panoramica App',
             appOverviewDescription: 'Augmented Monitor è un\'app professionale per il monitoraggio della variabilità della frequenza cardiaca (HRV) progettata per atleti, professionisti della salute ed entusiasti del benessere.',
             deviceConnection: 'Connessione Dispositivo',
-            deviceConnectionDescription: 'Collega un Polar 360 o Polar Loop Gen 2 via Bluetooth per iniziare il monitoraggio in tempo reale (HR/HRV). Scegli il dispositivo dall\'elenco dopo la scansione.',
+            deviceConnectionDescription: 'Collega un Polar 360 o Polar Loop Gen 2 via Bluetooth per iniziare il monitoraggio in tempo reale (HR/HRV/RR). Scegli il dispositivo dall\'elenco dopo la scansione. A fine sessione Ably endSession può flushare il tracciato PPI grezzo.',
             polar360SetupGuide: 'Guida Setup Polar',
             keyFeatures: 'Caratteristiche Principali',
             heartRateMonitoring: 'Monitoraggio Frequenza Cardiaca',
@@ -269,6 +271,7 @@ export const translations: Record<Language, LocaleStrings> = {
             signalEcg: 'ECG',
             signalHr: 'HR (BPM)',
             signalPpi: 'PPI / PP interval',
+            signalRr: 'RR (ms)',
             signalHrvRmssd: 'HRV (RMSSD)',
             signalLfHf: 'LF / HF power',
             signalRawPpg: 'PPG grezzo',
@@ -278,7 +281,8 @@ export const translations: Record<Language, LocaleStrings> = {
             signalNoteSensing: 'PPG ottico a LED verde — non è ECG a contatto toracico.',
             signalNoteEcg: 'ECG tipico di fascia petto (es. H10); non supportato su questi wristband né in app.',
             signalNoteHr: 'Battiti/minuto stimati da PPG (online streaming).',
-            signalNotePpi: 'Intervallo pulse-to-pulse (ms) da PPG; base per HRV time-domain.',
+            signalNotePpi: 'Intervallo pulse-to-pulse (ms) da PPG; base per HRV time-domain e tracciato offline.',
+            signalNoteRr: 'Intervallo RR: da PPI se disponibile, altrimenti RR(ms)=60000/HR(bpm).',
             signalNoteHrv: 'Calcolo app (RMSSD) su finestra RR/PPI — non metrica nativa device.',
             signalNoteLfHf: 'Stima spettrale in-app su finestra di intervalli RR.',
             signalNoteRawPpg: 'Segnale AFE grezzo (es. ~22 Hz, 24 bit); richiede resampling. Non streammato in UI.',
@@ -381,7 +385,7 @@ export const translations: Record<Language, LocaleStrings> = {
             appOverview: 'App Overview',
             appOverviewDescription: 'Augmented Monitor is a professional heart rate variability (HRV) monitoring app designed for athletes, health professionals, and wellness enthusiasts.',
             deviceConnection: 'Device Connection',
-            deviceConnectionDescription: 'Connect a Polar 360 or Polar Loop Gen 2 via Bluetooth to start real-time monitoring (HR/HRV). Select the device from the list after scanning.',
+            deviceConnectionDescription: 'Connect a Polar 360 or Polar Loop Gen 2 via Bluetooth to start real-time monitoring (HR/HRV/RR). Select the device from the list after scanning. At session end, Ably endSession can flush the raw PPI track.',
             polar360SetupGuide: 'Polar Setup Guide',
             keyFeatures: 'Key Features',
             heartRateMonitoring: 'Heart Rate Monitoring',
@@ -422,6 +426,7 @@ export const translations: Record<Language, LocaleStrings> = {
             signalEcg: 'ECG',
             signalHr: 'HR (BPM)',
             signalPpi: 'PPI / PP interval',
+            signalRr: 'RR (ms)',
             signalHrvRmssd: 'HRV (RMSSD)',
             signalLfHf: 'LF / HF power',
             signalRawPpg: 'Raw PPG',
@@ -431,7 +436,8 @@ export const translations: Record<Language, LocaleStrings> = {
             signalNoteSensing: 'Green-LED optical PPG — not chest-contact ECG.',
             signalNoteEcg: 'ECG is typical of chest straps (e.g. H10); not supported on these wristbands or in-app.',
             signalNoteHr: 'Beats per minute estimated from PPG (online streaming).',
-            signalNotePpi: 'Pulse-to-pulse interval (ms) from PPG; basis for time-domain HRV.',
+            signalNotePpi: 'Pulse-to-pulse interval (ms) from PPG; basis for time-domain HRV and offline track.',
+            signalNoteRr: 'RR interval: from PPI when available, otherwise RR(ms)=60000/HR(bpm).',
             signalNoteHrv: 'App calculation (RMSSD) on an RR/PPI window — not a native device metric.',
             signalNoteLfHf: 'In-app spectral estimate on an RR-interval window.',
             signalNoteRawPpg: 'Raw AFE signal (e.g. ~22 Hz, 24-bit); needs resampling. Not streamed in UI.',

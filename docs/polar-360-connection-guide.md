@@ -43,7 +43,47 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Augm
    - completa il pairing BLE
    - esegue il **First Time Use** (configurazione dispositivo via SDK) e, se necessario, **riavvia** il Polar
    - alla riconnessione **dello stesso** `deviceId` avvia lo streaming HR / PPI verso Become
+   - avvia **offline recording PPI** sul Polar (tracciato grezzo in memoria device); se fallisce, accumula un buffer live in-app
+   - calcola il tracciato **RR** (da PPI se disponibile, altrimenti `RR(ms) = 60000 / HR(bpm)`)
    - avvia un **servizio in primo piano** con notifica persistente (dispositivo collegato + HR, HRV, LF, HF), così lo streaming continua anche a schermo bloccato
+
+### Live vs flush a fine sessione (spike)
+
+- **Live**: HR / PPI / RR / HRV restano in streaming verso Ably (`heartRate`) per la visibilità in Hub.
+- **Tracciato intero**: a fine sessione Hub pubblica su `private:{userId}` l’evento Ably **`endSession`** (payload opzionale `{ "sessionId": "..." }`). L’app:
+  1. ferma l’offline recording PPI
+  2. scarica il record dal Polar (o usa il buffer live)
+  3. costruisce un payload grezzo `ppiTrack` (sample con `ppiMs`, `hr`, `rrMs`, `rrSource`)
+  4. fa **POST** a `EXPO_PUBLIC_TRACK_UPLOAD_URL` con `Authorization: Bearer {authToken}`
+  5. rimuove il record offline dal device dopo upload ok
+- Se `EXPO_PUBLIC_TRACK_UPLOAD_URL` è vuoto, lo spike fa **dry-run** (solo log).
+- In Monitor è disponibile il bottone **“Simula endSession / Flush track”** per test senza Hub.
+
+Esempio payload POST:
+
+```json
+{
+  "type": "ppiTrack",
+  "deviceId": "...",
+  "deviceCode": "...",
+  "userId": 0,
+  "sessionId": null,
+  "startedAt": "ISO",
+  "endedAt": "ISO",
+  "source": "polar_offline_ppi",
+  "samples": [
+    {
+      "t": "ISO",
+      "ppiMs": 812,
+      "hr": 74,
+      "errorEstimate": 0,
+      "blockerBit": false,
+      "rrMs": 812,
+      "rrSource": "ppi"
+    }
+  ]
+}
+```
 
 ### Se il dispositivo non viene trovato
 
@@ -99,8 +139,9 @@ Fonte: profilo Polar BLE SDK condiviso da 360 e Loop Gen 2. Tabella allineata al
 | Principio di sensing | PPG ottico (LED verde) | PPG ottico (stesso profilo SDK) | Non è ECG a contatto toracico | Sì (via HR/PPI) |
 | ECG | No | No | ECG tipico di fascia petto (es. H10), non di questi wristband | — |
 | HR (BPM) | Sì (online) | Sì | Battiti/minuto da PPG | Sì |
-| PPI / PP interval | Sì (da PPG) | Sì | Intervallo pulse-to-pulse (ms); base per HRV time-domain | Sì → RMSSD |
+| PPI / PP interval | Sì (da PPG) | Sì | Intervallo pulse-to-pulse (ms); base per HRV time-domain | Sì → RMSSD + tracciato offline/buffer |
 | HRV (RMSSD) | Derivata da PPI/HR | Derivata da PPI/HR | Calcolo app, non metrica nativa device | Sì |
+| RR (ms) | Da PPI oppure `60000/HR` | Idem | Intervallo stimato; `rrSource: ppi \| hr_derived` | Sì (live + flush) |
 | LF / HF power | Derivata da finestra RR | Derivata da finestra RR | Stima spettrale in-app su RR | Sì |
 | PPG grezzo | Sì (SDK; es. ~22 Hz, 24 bit) | Stesso profilo SDK | Segnale grezzo AFE; richiede resampling | No (non streammato in UI) |
 | Accelerometro | Sì (es. ~50 Hz, ±8 g) | Sì | Movimento / activity | No in UI corrente |
