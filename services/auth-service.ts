@@ -3,7 +3,7 @@
  * Gestisce il flusso di autenticazione del dispositivo
  */
 
-import { getApiBaseUrl } from '@/constants/constants';
+import { getApiBaseUrl } from '@/services/api-config';
 import { StorageService, StoredAuthData } from './storage-service';
 
 export interface DeviceStartResponse {

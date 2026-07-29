@@ -5,6 +5,8 @@ metadata:
   origin: ECC
 ---
 
+> **become-monitor:** Do **not** apply ECC Gradle `domain`/`data`/`presentation` modules, Hilt/Koin, or KMP here. This Expo app uses TS `features/` + thin Android BLE packages. See [docs/architecture-scope.md](../../../docs/architecture-scope.md).
+
 # Android Clean Architecture
 
 Clean Architecture patterns for Android and KMP projects. Covers module boundaries, dependency inversion, UseCase/Repository patterns, and data layer design with Room, SQLDelight, and Ktor.
