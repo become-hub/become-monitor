@@ -5,12 +5,12 @@
 import {
   PolarOfflinePpiTrack,
   polarSdk,
-} from "./polar-ble-sdk";
+} from "@/features/devices/polar/polar-ble-sdk";
 import { sessionTrackBuffer } from "./session-track-buffer";
 import {
+  TrackUploadPayload,
   mapBufferSamplesToTrack,
   mapOfflineSamplesToTrack,
-  TrackUploadPayload,
   uploadSessionTrack,
 } from "./track-upload-service";
 

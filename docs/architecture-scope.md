@@ -12,7 +12,7 @@ This app is **Expo Router + React Native**, with **Android-only** native modules
 | Shared I/O | `services/` | Auth, Ably, storage, HRV, upload, Sentry |
 | Native BLE | `android/.../polar/`, `muse/`, `bluetooth/` | Thin RN modules + managers |
 
-Canonical imports may use `@/services/polar-*` / `@/services/muse-*` — those files **re-export** from `features/devices/*` so existing call sites stay stable.
+Import Polar/Muse from `@/features/devices/polar/*` and `@/features/devices/muse/*` (no `services/` re-export shims).
 
 ## What the `android-clean-architecture` skill must NOT drive here
 

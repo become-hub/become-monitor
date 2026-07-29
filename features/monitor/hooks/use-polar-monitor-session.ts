@@ -4,7 +4,7 @@
  * Pass the session object; do not call useMonitorSession here.
  */
 
-import type { PolarProduct } from "@/services/polar-products";
+import type { PolarProduct } from "@/features/devices/polar/polar-products";
 import type { RrSource } from "@/services/rr-interval";
 
 export type PolarMonitorMetrics = {

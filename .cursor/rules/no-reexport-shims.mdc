@@ -1,0 +1,30 @@
+---
+description: Prohibit thin re-export shim files; import from the real module path
+alwaysApply: true
+---
+
+# No re-export shim files
+
+Do **not** create one-line (or thin) files whose only job is `export * from "..."` / re-export to preserve old import paths.
+
+## Why
+
+They hide where code lives, duplicate the public API surface, and rot after moves (e.g. former `services/polar-*.ts` → `features/devices/polar/`).
+
+## Rules
+
+1. After moving a module, **update all call sites** to the new path (`@/features/...`, etc.).
+2. **Delete** the old file; do not leave a shim at the old path.
+3. Prefer one canonical path per module. Barrel `index.ts` is OK only when it re-exports a **folder’s real siblings**, not as a compatibility alias for a deleted path.
+4. Temporary shims need an explicit user request **and** a short-lived TODO/ticket to remove them.
+
+```ts
+// ❌ BAD — shim after move
+// services/muse-ble-sdk.ts
+export * from "@/features/devices/muse/muse-ble-sdk";
+
+// ✅ GOOD — import the real module
+import { museSdk } from "@/features/devices/muse/muse-ble-sdk";
+```
+
+When refactoring layouts (`services/` ↔ `features/`), grep for old imports, fix them, move tests next to the source, update docs/skills that cite the old path.

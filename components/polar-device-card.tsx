@@ -8,7 +8,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import {
   PolarProduct,
   PolarProductImageKey,
-} from "@/services/polar-products";
+} from "@/features/devices/polar/polar-products";
 
 const PRODUCT_IMAGES: Record<PolarProductImageKey, number> = {
   polar360: require("@/assets/images/polar360.webp"),

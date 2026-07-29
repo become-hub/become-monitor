@@ -4,7 +4,7 @@
  * Pass the session object; do not call useMonitorSession here.
  */
 
-import type { MuseProduct } from "@/services/muse-products";
+import type { MuseProduct } from "@/features/devices/muse/muse-products";
 
 export type MuseMonitorMetrics = {
   eegTp9: number;

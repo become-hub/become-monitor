@@ -4,7 +4,7 @@ import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLocale } from "@/hooks/use-locale";
-import { polarSdk } from "@/services/polar-ble-sdk";
+import { polarSdk } from "@/features/devices/polar/polar-ble-sdk";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
   Bluetooth,

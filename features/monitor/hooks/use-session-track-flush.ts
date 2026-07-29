@@ -4,8 +4,8 @@
  */
 
 import { Alert } from "react-native";
-import type { PolarProduct } from "@/services/polar-products";
-import { resolvePolarProduct } from "@/services/polar-products";
+import type { PolarProduct } from "@/features/devices/polar/polar-products";
+import { resolvePolarProduct } from "@/features/devices/polar/polar-products";
 import {
   flushSessionTrack,
   startSessionOfflineRecording,

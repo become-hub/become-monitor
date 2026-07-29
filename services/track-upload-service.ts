@@ -2,7 +2,7 @@
  * Upload session PPI/RR track to configurable service (spike).
  */
 
-import { PolarOfflinePpiSample } from "./polar-ble-sdk";
+import { PolarOfflinePpiSample } from "@/features/devices/polar/polar-ble-sdk";
 import { resolveRrInterval } from "./rr-interval";
 import { TrackSample } from "./session-track-buffer";
 

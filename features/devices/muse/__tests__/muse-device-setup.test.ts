@@ -1,7 +1,7 @@
 import { startMuseStreamingForProduct } from "../muse-device-setup";
 import { MUSE_PRODUCTS } from "../muse-products";
 
-jest.mock("../sentry", () => ({
+jest.mock("@/services/sentry", () => ({
   captureException: jest.fn(),
   logToSentry: jest.fn(),
 }));
@@ -30,7 +30,7 @@ describe("muse-device-setup", () => {
   });
 
   it("non fallisce se PPG manca e logga su Sentry", async () => {
-    const { logToSentry } = require("../sentry");
+    const { logToSentry } = require("@/services/sentry");
     const sdk = {
       startEegStreaming: jest.fn().mockResolvedValue(undefined),
       startPpgStreaming: jest.fn().mockRejectedValue(new Error("no ppg")),
