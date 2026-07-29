@@ -22,6 +22,8 @@ Polar **360** and **Loop Gen 2** behavior must stay identical unless explicitly 
 
 **Rule:** branch on `product.id` / `capabilities`; additive native events and SDK overloads only. No unified manager refactors that change 360/Loop defaults.
 
+**Muse is not Polar:** do not put Muse into this stack. Use [muse-device-integration](../muse-device-integration/SKILL.md) for Muse BLE GATT.
+
 ## Checklist — new Polar product
 
 1. **Catalog** — `services/polar-products.ts`

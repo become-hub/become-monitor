@@ -144,21 +144,22 @@ Durante lo streaming, la barra delle notifiche mostra il nome del Polar collegat
 
 ## Confronto segnali / capacità (scientifico)
 
-Fonte: profilo Polar BLE SDK condiviso da 360 e Loop Gen 2. Tabella allineata all’accordion in-app (tab Documentazione).
+Fonte: profilo Polar BLE SDK (360 / Loop / H10) + protocollo Muse BLE GATT (Muse 2). Tabella allineata all’accordion in-app (tab Documentazione). Per i passi Muse vedi [muse-2-connection-guide.md](./muse-2-connection-guide.md).
 
-| Segnale / metrica | Polar 360 | Polar Loop Gen 2 | Polar H10 | Note scientifiche | Usato oggi in Augmented Monitor |
-| --- | --- | --- | --- | --- | --- |
-| Principio di sensing | PPG ottico (LED verde) | PPG ottico (stesso profilo SDK) | ECG a contatto (fascia toracica) | 360/Loop non sono ECG; H10 misura elettrica cardiaca | Sì |
-| ECG | No | No | Sì (streaming SDK) | Segnale grezzo in microvolt (uV) | Sì (solo H10) |
-| HR (BPM) | Sì (online) | Sì | Sì | Battiti/minuto da PPG (360/Loop) o ECG (H10) | Sì |
-| PPI / PP interval | Sì (da PPG) | Sì | No | Intervallo pulse-to-pulse (ms), base HRV time-domain | Sì (360/Loop) |
-| RR (ms) | Da PPI o `60000/HR` fallback | Idem | Nativo da `rrsMs` | `rrSource`: `ppi`, `ecg_rr`, `hr_derived` | Sì (live + flush) |
-| HRV (RMSSD) | Derivata da RR/PPI | Derivata da RR/PPI | Derivata da RR ECG | Calcolo app, non metrica nativa device | Sì |
-| LF / HF power | Derivata da finestra RR | Derivata da finestra RR | Derivata da finestra RR | Stima spettrale in-app su RR | Sì |
-| PPG grezzo | Sì (SDK, es. ~22 Hz, 24 bit) | Stesso profilo SDK | No | Segnale AFE; richiede resampling | No in UI corrente |
-| Accelerometro | Sì (es. ~50 Hz, +-8 g) | Sì | No | Movimento/activity | No in UI corrente |
-| Temperatura cute | Sì (1-4 Hz) | Sì | No | Skin temperature | Sì (360/Loop) |
-| FTU obbligatorio | Sì | Sì | No | FTU richiesto solo per famiglia 360/Loop | Sì (dove previsto) |
+| Segnale / metrica | Polar 360 | Polar Loop Gen 2 | Polar H10 | Muse 2 | Note scientifiche | Usato oggi in Augmented Monitor |
+| --- | --- | --- | --- | --- | --- | --- |
+| Principio di sensing | PPG ottico (LED verde) | PPG ottico (stesso profilo SDK) | ECG a contatto (fascia toracica) | EEG dry electrodes (4ch) + PPG fronte | Modalità diverse: Polar cardiaco vs Muse EEG | Sì |
+| ECG | No | No | Sì (streaming SDK) | No (EEG, non ECG) | H10: µV; Muse misura EEG | Sì (solo H10) |
+| EEG (4 canali) | No | No | No | Sì TP9/AF7/AF8/TP10 (~256 Hz) | GATT diretto (community protocol) | Sì (Muse) |
+| HR (BPM) | Sì (online) | Sì | Sì | Sì (da PPG) | PPG (360/Loop/Muse) o ECG (H10) | Sì |
+| PPI / PP interval | Sì (da PPG) | Sì | No | No | Base HRV time-domain su 360/Loop | Sì (360/Loop) |
+| RR (ms) | Da PPI o `60000/HR` fallback | Idem | Nativo da `rrsMs` | No (HR da PPG) | `rrSource`: `ppi`, `ecg_rr`, `hr_derived` | Sì (Polar) |
+| HRV (RMSSD) | Derivata da RR/PPI | Derivata da RR/PPI | Derivata da RR ECG | No in UI Muse | Calcolo app Polar | Sì (Polar) |
+| LF / HF / bande | LF/HF da finestra RR | LF/HF da finestra RR | LF/HF da finestra RR | Bande EEG relative δ…γ | Polar spettrale RR; Muse bande EEG | Sì |
+| PPG grezzo | Sì (SDK) | Stesso profilo SDK | No | Sì (3 stream; HR in UI) | Muse ambient/IR/red | Sì (HR Muse; Polar offline/live) |
+| Accelerometro | Sì | Sì | Sì (SDK; non in UI) | Sì (protocollo; non in UI MVP) | Fuori scope UI | No |
+| Temperatura cute | Sì (1-4 Hz) | Sì | No | No | Skin temperature | Sì (360/Loop) |
+| FTU obbligatorio | Sì | Sì | No | No | Solo famiglia 360/Loop | Sì (dove previsto) |
 
 ## Disconnessione del dispositivo
 
