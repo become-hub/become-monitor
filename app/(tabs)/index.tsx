@@ -1,4 +1,5 @@
 import { AppFooter } from "@/components/app-footer";
+import { MuseDeviceCard } from "@/components/muse-device-card";
 import { PolarDeviceCard } from "@/components/polar-device-card";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
@@ -10,6 +11,7 @@ import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLocale } from "@/hooks/use-locale";
+import { MUSE_PRODUCT_LIST } from "@/services/muse-products";
 import { POLAR_PRODUCT_LIST } from "@/services/polar-products";
 
 export default function HomeScreen() {
@@ -41,8 +43,8 @@ export default function HomeScreen() {
           </ThemedText>
           <ThemedText style={styles.deviceDescription}>
             {language === "en"
-              ? "Connect a Polar device to start monitoring performance in Become Hub apps"
-              : "Connetti un dispositivo Polar per iniziare a monitorare le tue prestazioni nelle app Become Hub"}
+              ? "Connect a Polar or Muse device to start monitoring in Become Hub apps"
+              : "Connetti un dispositivo Polar o Muse per iniziare a monitorare nelle app Become Hub"}
           </ThemedText>
         </ThemedView>
 
@@ -58,6 +60,24 @@ export default function HomeScreen() {
 
           {POLAR_PRODUCT_LIST.map((product) => (
             <PolarDeviceCard
+              key={product.id}
+              product={product}
+              description={
+                language === "en"
+                  ? product.shortDescriptionEn
+                  : product.shortDescriptionIt
+              }
+              ctaLabel={
+                language === "en"
+                  ? `Connect ${product.displayName}`
+                  : `Connetti ${product.displayName}`
+              }
+              onPress={handleStartPress}
+            />
+          ))}
+
+          {MUSE_PRODUCT_LIST.map((product) => (
+            <MuseDeviceCard
               key={product.id}
               product={product}
               description={

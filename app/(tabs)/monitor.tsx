@@ -30,6 +30,20 @@ import {
   PolarProduct,
   resolvePolarProduct,
 } from "@/services/polar-products";
+import {
+  MuseBandPowers,
+  MuseDeviceInfo,
+  MuseEegSample,
+  museSdk,
+} from "@/services/muse-ble-sdk";
+import { startMuseStreamingForProduct } from "@/services/muse-device-setup";
+import {
+  getMuseProductBadge,
+  isSupportedMuseDevice,
+  MuseProduct,
+  resolveMuseProduct,
+} from "@/services/muse-products";
+import { captureException, logToSentry } from "@/services/sentry";
 import { resolveRrInterval, type RrSource } from "@/services/rr-interval";
 import {
   flushSessionTrack,
@@ -132,6 +146,26 @@ export default function MonitorScreen() {
   const [rrSource, setRrSource] = useState<RrSource | null>(null);
   const [ecgMicroVolts, setEcgMicroVolts] = useState(0);
   const [skinTemperatureC, setSkinTemperatureC] = useState(0);
+  const [connectedFamily, setConnectedFamily] = useState<"polar" | "muse" | null>(
+    null
+  );
+  const [eegTp9, setEegTp9] = useState(0);
+  const [eegAf7, setEegAf7] = useState(0);
+  const [eegAf8, setEegAf8] = useState(0);
+  const [eegTp10, setEegTp10] = useState(0);
+  const [bandDelta, setBandDelta] = useState(0);
+  const [bandTheta, setBandTheta] = useState(0);
+  const [bandAlpha, setBandAlpha] = useState(0);
+  const [bandBeta, setBandBeta] = useState(0);
+  const [bandGamma, setBandGamma] = useState(0);
+  const [museHr, setMuseHr] = useState(0);
+  const [museBattery, setMuseBattery] = useState(0);
+  const bandAlphaRef = useRef(0);
+  const bandThetaRef = useRef(0);
+  const bandBetaRef = useRef(0);
+  const bandDeltaRef = useRef(0);
+  const bandGammaRef = useRef(0);
+  const connectedFamilyRef = useRef<"polar" | "muse" | null>(null);
   const [isFlushingTrack, setIsFlushingTrack] = useState(false);
   const [offlineRecordingStarted, setOfflineRecordingStarted] = useState(false);
   const heartRateRef = useRef(0);
@@ -147,10 +181,39 @@ export default function MonitorScreen() {
   const connectedProduct: PolarProduct | null = resolvePolarProduct(
     connectedDeviceName
   );
+  const connectedMuseProduct: MuseProduct | null = resolveMuseProduct(
+    connectedDeviceName
+  );
   const isH10Connected = connectedProduct?.id === "polar_h10";
-  const isSkinTemperatureSupported = connectedProduct?.capabilities.skinTemperature === true;
-  const showRawEcgCards = connectedProduct?.capabilities.rawEcg === true;
+  const isMuseConnected =
+    connectedFamily === "muse" || connectedMuseProduct != null;
+  const isSkinTemperatureSupported =
+    !isMuseConnected &&
+    connectedProduct?.capabilities.skinTemperature === true;
+  const showRawEcgCards =
+    !isMuseConnected && connectedProduct?.capabilities.rawEcg === true;
+  const titleDisplayName = isMuseConnected
+    ? connectedMuseProduct?.displayName || "Muse 2"
+    : connectedProduct?.displayName || "Polar Monitor";
 
+  useEffect(() => {
+    bandAlphaRef.current = bandAlpha;
+  }, [bandAlpha]);
+  useEffect(() => {
+    bandThetaRef.current = bandTheta;
+  }, [bandTheta]);
+  useEffect(() => {
+    bandBetaRef.current = bandBeta;
+  }, [bandBeta]);
+  useEffect(() => {
+    bandDeltaRef.current = bandDelta;
+  }, [bandDelta]);
+  useEffect(() => {
+    bandGammaRef.current = bandGamma;
+  }, [bandGamma]);
+  useEffect(() => {
+    connectedFamilyRef.current = connectedFamily;
+  }, [connectedFamily]);
   useEffect(() => {
     heartRateRef.current = heartRate;
   }, [heartRate]);
@@ -331,6 +394,7 @@ export default function MonitorScreen() {
       upsertDiscoveredDevice({
         deviceId: device.deviceId,
         name: device.name,
+        family: "polar",
         productId: product.id,
         displayName: product.displayName,
       });
@@ -342,6 +406,7 @@ export default function MonitorScreen() {
         );
         pendingPostFtuReconnectRef.current = null;
         polarSdk.stopScan();
+        museSdk.stopScan().catch(() => {});
         setScanningState(false);
         polarSdk.connectToDevice(device.deviceId);
       }
@@ -355,6 +420,7 @@ export default function MonitorScreen() {
         setConnectedDeviceId(device.deviceId);
         setConnectedDeviceIdInStore(device.deviceId);
         setConnectedDeviceName(device.name);
+        setConnectedFamily("polar");
         setFoundDeviceName("");
         clearDiscoveredDevices();
 
@@ -372,7 +438,7 @@ export default function MonitorScreen() {
           return;
         }
 
-        launchAuthAndStream(device.deviceId, device.name);
+        launchAuthAndStream(device.deviceId, device.name, "polar");
       }
     );
 
@@ -640,12 +706,127 @@ export default function MonitorScreen() {
       console.log("Monitor: ⚠️ ECG Stream Error:", error.error);
     });
 
+    // —— Muse listeners (parallel stack; does not alter Polar callbacks) ——
+    try {
+      museSdk.addEventListener("onMuseDeviceFound", (device: MuseDeviceInfo) => {
+        if (!isSupportedMuseDevice(device.name)) {
+          return;
+        }
+        const product = resolveMuseProduct(device.name);
+        if (!product) {
+          return;
+        }
+        console.log(`Monitor: 📡 Muse trovato: ${device.name} (${device.deviceId})`);
+        setDeviceFound(true);
+        setFoundDeviceName(device.name);
+        upsertDiscoveredDevice({
+          deviceId: device.deviceId,
+          name: device.name,
+          family: "muse",
+          productId: product.id,
+          displayName: product.displayName,
+        });
+      });
+
+      museSdk.addEventListener("onMuseDeviceConnected", (device: MuseDeviceInfo) => {
+        console.log(`Monitor: ✅ Muse connesso a ${device.name}`);
+        setIsConnectingSelected(false);
+        setConnectedDeviceId(device.deviceId);
+        setConnectedDeviceIdInStore(device.deviceId);
+        setConnectedDeviceName(device.name);
+        setConnectedFamily("muse");
+        setFoundDeviceName("");
+        clearDiscoveredDevices();
+        StorageService.setLastDeviceId(device.deviceId);
+        StorageService.updateDeviceName(device.name, device.deviceId);
+        StorageService.updateDeviceId(device.deviceId);
+        if (
+          streamReadyDeviceRef.current === device.deviceId ||
+          authSessionDeviceRef.current === device.deviceId ||
+          authStreamInFlightRef.current
+        ) {
+          return;
+        }
+        launchAuthAndStream(device.deviceId, device.name, "muse");
+      });
+
+      museSdk.addEventListener(
+        "onMuseDeviceDisconnected",
+        (_device: MuseDeviceInfo) => {
+          console.log("Monitor: ⚠️ Muse disconnesso");
+          setNotification({
+            type: "error",
+            message: "Dispositivo disconnesso",
+          });
+          setTimeout(() => setNotification(null), 5000);
+          setConnectedDeviceId(null);
+          setConnectedDeviceIdInStore(null);
+          setConnectedDeviceName("");
+          setConnectedFamily(null);
+          setFoundDeviceName("");
+          setIsConnectingSelected(false);
+          authStreamInFlightRef.current = false;
+          streamReadyDeviceRef.current = null;
+          authSessionDeviceRef.current = null;
+          if (pollInterval.current) {
+            clearInterval(pollInterval.current);
+            pollInterval.current = null;
+          }
+          stopBiometricSending();
+          polarSdk.stopMonitorForegroundService().catch(() => {});
+          ablyService.current?.close();
+          resetDeviceState();
+        }
+      );
+
+      museSdk.addEventListener("onMuseEegSample", (data: MuseEegSample) => {
+        setEegTp9(data.tp9);
+        setEegAf7(data.af7);
+        setEegAf8(data.af8);
+        setEegTp10(data.tp10);
+      });
+
+      museSdk.addEventListener("onMuseBandPowers", (data: MuseBandPowers) => {
+        setBandDelta(data.delta);
+        setBandTheta(data.theta);
+        setBandAlpha(data.alpha);
+        setBandBeta(data.beta);
+        setBandGamma(data.gamma);
+      });
+
+      museSdk.addEventListener("onMuseHeartRate", (data) => {
+        setMuseHr(data.hr);
+        setHeartRate(data.hr);
+      });
+
+      museSdk.addEventListener("onMuseTelemetry", (data) => {
+        setMuseBattery(data.batteryPercent);
+      });
+
+      museSdk.addEventListener("onMuseStreamError", (error) => {
+        console.log("Monitor: ⚠️ Muse stream error:", error.error);
+        logToSentry("Muse stream error", "error", {
+          deviceFamily: "muse",
+          error: error.error ?? "unknown",
+        });
+      });
+    } catch (e) {
+      console.warn("Monitor: MuseBleModule non disponibile", e);
+      captureException(e, {
+        deviceFamily: "muse",
+        phase: "muse_module_init",
+      });
+    }
+
     return () => {
       polarSdk.stopScan();
+      museSdk.stopScan().catch(() => {});
       if (connectedDeviceId) {
         polarSdk.disconnectFromDevice(connectedDeviceId);
+        museSdk.disconnectFromDevice(connectedDeviceId).catch(() => {});
       }
       polarSdk.removeAllListeners();
+      museSdk.removeAllListeners();
       if (pollInterval.current) {
         clearInterval(pollInterval.current);
       }
@@ -791,16 +972,22 @@ export default function MonitorScreen() {
     setScanStartTime(Date.now());
 
     setScanningState(true);
-    console.log("Monitor: 🔍 Avvio scansione Polar...");
+    console.log("Monitor: 🔍 Avvio scansione Polar + Muse...");
 
     try {
-      await polarSdk.startScan();
+      await Promise.all([
+        polarSdk.startScan(),
+        museSdk.startScan().catch((e) => {
+          console.warn("Monitor: Muse scan non disponibile", e);
+        }),
+      ]);
 
       // Timeout scansione completa
       setTimeout(async () => {
         const currentState = useScanStore.getState();
         if (currentState.isScanning) {
           await polarSdk.stopScan();
+          await museSdk.stopScan().catch(() => {});
           setScanningState(false);
           console.log("Monitor: ⏱️ Timeout scansione completo");
 
@@ -816,7 +1003,7 @@ export default function MonitorScreen() {
 
             Alert.alert(
               "Difficoltà di connessione",
-              "Nessun Polar 360 o Loop trovato. Prova a spegnere e riaccendere il Bluetooth, poi ripeti la ricerca.",
+              "Nessun Polar o Muse trovato. Prova a spegnere e riaccendere il Bluetooth, poi ripeti la ricerca.",
               [
                 {
                   text: "Chiudi",
@@ -838,17 +1025,24 @@ export default function MonitorScreen() {
     }
   };
 
-  const selectAndConnect = async (deviceId: string) => {
+  const selectAndConnect = async (deviceId: string, family?: "polar" | "muse") => {
     if (pairingBlockedRef.current || isConnectingSelected) {
       return;
     }
-    console.log(`Monitor: 👆 Selezione device ${deviceId}`);
+    const discovered = discoveredDevices.find((d) => d.deviceId === deviceId);
+    const resolvedFamily = family || discovered?.family || "polar";
+    console.log(`Monitor: 👆 Selezione device ${deviceId} (${resolvedFamily})`);
     setIsConnectingSelected(true);
     try {
       await polarSdk.stopScan();
+      await museSdk.stopScan().catch(() => {});
       setScanningState(false);
       await StorageService.setLastDeviceId(deviceId);
-      await polarSdk.connectToDevice(deviceId);
+      if (resolvedFamily === "muse") {
+        await museSdk.connectToDevice(deviceId);
+      } else {
+        await polarSdk.connectToDevice(deviceId);
+      }
     } catch (error: any) {
       setIsConnectingSelected(false);
       console.error("Monitor: Errore connessione selezionata:", error);
@@ -859,7 +1053,11 @@ export default function MonitorScreen() {
     }
   };
 
-  const launchAuthAndStream = async (deviceId: string, deviceName?: string) => {
+  const launchAuthAndStream = async (
+    deviceId: string,
+    deviceName?: string,
+    family: "polar" | "muse" = "polar"
+  ) => {
     if (
       pairingBlockedRef.current ||
       authStreamInFlightRef.current ||
@@ -871,40 +1069,60 @@ export default function MonitorScreen() {
     authStreamInFlightRef.current = true;
     authSessionDeviceRef.current = deviceId;
     try {
-      // FTU prima di auth/streaming: se appena eseguito, il Polar riavvia e
-      // riprenderemo auth+PPI alla prossima onDeviceConnected.
-      console.log("🩺 Verifica First Time Use...");
-      const product = resolvePolarProduct(
-        deviceName ?? connectedDeviceNameRef.current
-      );
-      const requireFtu = product?.capabilities.ftuRequired !== false;
-      const polarReady = await ensurePolarReady(deviceId, polarSdk, {
-        requireFtu,
-      });
-      if (polarReady.status === "deferred") {
-        console.log("✅ First Time Use ok (restart pending)");
-        pendingPostFtuReconnectRef.current = deviceId;
-        authSessionDeviceRef.current = null;
-        setNotification({
-          type: "success",
-          message:
-            "Polar configurato — riavvio in corso. Ricollega se non riparte da solo.",
+      const name = deviceName ?? connectedDeviceNameRef.current;
+      const museProduct = resolveMuseProduct(name);
+      const polarProduct = resolvePolarProduct(name);
+      const isMuse = family === "muse" || museProduct != null;
+
+      if (!isMuse) {
+        // FTU prima di auth/streaming: se appena eseguito, il Polar riavvia e
+        // riprenderemo auth+PPI alla prossima onDeviceConnected.
+        console.log("🩺 Verifica First Time Use...");
+        const requireFtu = polarProduct?.capabilities.ftuRequired !== false;
+        const polarReady = await ensurePolarReady(deviceId, polarSdk, {
+          requireFtu,
         });
-        setTimeout(() => setNotification(null), 8000);
-        return;
+        if (polarReady.status === "deferred") {
+          console.log("✅ First Time Use ok (restart pending)");
+          pendingPostFtuReconnectRef.current = deviceId;
+          authSessionDeviceRef.current = null;
+          setNotification({
+            type: "success",
+            message:
+              "Polar configurato — riavvio in corso. Ricollega se non riparte da solo.",
+          });
+          setTimeout(() => setNotification(null), 8000);
+          return;
+        }
+        if (polarReady.status === "failed") {
+          console.error("Monitor: ❌ FTU fallito:", polarReady.error);
+          authSessionDeviceRef.current = null;
+          setNotification({
+            type: "error",
+            message:
+              "Configura Polar 360 fallita — reset di fabbrica se già abbinato altrove",
+          });
+          setTimeout(() => setNotification(null), 8000);
+          return;
+        }
+        console.log("✅ First Time Use ok");
+      } else {
+        console.log("🧠 Muse: skip FTU");
       }
-      if (polarReady.status === "failed") {
-        console.error("Monitor: ❌ FTU fallito:", polarReady.error);
-        authSessionDeviceRef.current = null;
-        setNotification({
-          type: "error",
-          message:
-            "Configura Polar 360 fallita — reset di fabbrica se già abbinato altrove",
-        });
-        setTimeout(() => setNotification(null), 8000);
-        return;
-      }
-      console.log("✅ First Time Use ok");
+
+      const startDeviceStreaming = async () => {
+        if (isMuse && museProduct) {
+          await startMuseStreamingForProduct(museProduct, museSdk);
+        } else if (isMuse && !museProduct) {
+          console.warn("Monitor: Muse product non risolto per", name);
+          logToSentry("Muse product unresolved", "warn", {
+            deviceFamily: "muse",
+            deviceName: name ?? "",
+          });
+        } else if (polarProduct) {
+          await startPolarStreamingForProduct(polarProduct, deviceId, polarSdk);
+        }
+      };
 
       // Step 1: Controlla se abbiamo dati di autenticazione salvati per questo device
       const storedAuthData = await StorageService.getAuthDataForDevice(deviceId);
@@ -943,16 +1161,16 @@ export default function MonitorScreen() {
             storedAuthData.deviceCode
           );
 
-          console.log("💓 Avvio streaming Polar...");
-          if (product) {
-            await startPolarStreamingForProduct(product, deviceId, polarSdk);
-          }
+          console.log("💓 Avvio streaming device...");
+          await startDeviceStreaming();
 
           // Avvia invio periodico dei dati biometrici
           startBiometricSending();
           streamReadyDeviceRef.current = deviceId;
           await ensureMonitorForegroundService();
-          await beginOfflineTrack(deviceId, product);
+          if (!isMuse) {
+            await beginOfflineTrack(deviceId, polarProduct);
+          }
 
           return;
         } else {
@@ -1066,15 +1284,15 @@ export default function MonitorScreen() {
                 pollResponse.deviceCode
               );
 
-              console.log("💓 Avvio streaming Polar...");
-              if (product) {
-                await startPolarStreamingForProduct(product, deviceId, polarSdk);
-              }
+              console.log("💓 Avvio streaming device...");
+              await startDeviceStreaming();
 
               startBiometricSending();
               streamReadyDeviceRef.current = deviceId;
               await ensureMonitorForegroundService();
-              await beginOfflineTrack(deviceId, product);
+              if (!isMuse) {
+                await beginOfflineTrack(deviceId, polarProduct);
+              }
             } else {
               console.log("⏳ POLLING - authenticated: false");
             }
@@ -1286,10 +1504,16 @@ export default function MonitorScreen() {
             style: "destructive",
             onPress: async () => {
               try {
-                await polarSdk.disconnectFromDevice(connectedDeviceId);
+                if (connectedFamily === "muse") {
+                  await museSdk.stopStreaming().catch(() => {});
+                  await museSdk.disconnectFromDevice(connectedDeviceId);
+                } else {
+                  await polarSdk.disconnectFromDevice(connectedDeviceId);
+                }
                 setConnectedDeviceId(null);
                 setConnectedDeviceIdInStore(null);
                 setConnectedDeviceName("");
+                setConnectedFamily(null);
                 setFoundDeviceName("");
                 setDeviceMenuOpen(false);
                 if (pollInterval.current) {
@@ -1441,17 +1665,30 @@ export default function MonitorScreen() {
       ) {
         console.log("✅ BIOMETRIC SENDING - Invio dati ad Ably");
         const timestamp = new Date().toISOString();
+        const isMuse = connectedFamilyRef.current === "muse";
         ablyService.current.sendMessage(
           userStateBiometric.userId,
           "heartRate",
-          {
-            deviceId: connectedDeviceIdRef.current,
-            hr,
-            hrv: currentHrv > 0 ? currentHrv : null,
-            lfPower: lf > 0 ? lf : null,
-            hfPower: hf > 0 ? hf : null,
-            date: timestamp,
-          },
+          isMuse
+            ? {
+                deviceId: connectedDeviceIdRef.current,
+                deviceFamily: "muse",
+                hr,
+                alpha: bandAlphaRef.current || null,
+                theta: bandThetaRef.current || null,
+                beta: bandBetaRef.current || null,
+                delta: bandDeltaRef.current || null,
+                gamma: bandGammaRef.current || null,
+                date: timestamp,
+              }
+            : {
+                deviceId: connectedDeviceIdRef.current,
+                hr,
+                hrv: currentHrv > 0 ? currentHrv : null,
+                lfPower: lf > 0 ? lf : null,
+                hfPower: hf > 0 ? hf : null,
+                date: timestamp,
+              },
           userStateBiometric.deviceCode
         );
       } else {
@@ -1509,6 +1746,18 @@ export default function MonitorScreen() {
     setRrSource(null);
     setEcgMicroVolts(0);
     setSkinTemperatureC(0);
+    setConnectedFamily(null);
+    setEegTp9(0);
+    setEegAf7(0);
+    setEegAf8(0);
+    setEegTp10(0);
+    setBandDelta(0);
+    setBandTheta(0);
+    setBandAlpha(0);
+    setBandBeta(0);
+    setBandGamma(0);
+    setMuseHr(0);
+    setMuseBattery(0);
     rrSourceRef.current = null;
     setOfflineRecordingStarted(false);
     sessionTrackBuffer.clear();
@@ -1551,6 +1800,11 @@ export default function MonitorScreen() {
   };
 
   const getDisconnectButtonLabel = () => {
+    if (isMuseConnected) {
+      const model = connectedMuseProduct?.displayName || "Muse 2";
+      const id = (connectedDeviceId || "").slice(0, 12);
+      return id ? `Disconnetti ${model} (${id})` : `Disconnetti ${model}`;
+    }
     const model = connectedProduct?.displayName || "Device";
     const bleSuffix =
       connectedDeviceName
@@ -1601,7 +1855,7 @@ export default function MonitorScreen() {
         <ThemedView style={styles.header}>
           <View style={styles.titleRow}>
             <ThemedText type="title" style={styles.title}>
-              {connectedProduct?.displayName || "Polar Monitor"}
+              {connectedDeviceId ? titleDisplayName : "Polar Monitor"}
             </ThemedText>
             {connectedDeviceId ? (
               <View style={styles.deviceMenuWrap}>
@@ -1639,11 +1893,13 @@ export default function MonitorScreen() {
             ) : null}
           </View>
           <ThemedText style={styles.subtitle}>
-            {connectedDeviceName
-              ? isH10Connected
+            {connectedDeviceId
+              ? isMuseConnected
+                ? "Monitoraggio Muse 2 (EEG, bande, HR PPG)"
+                : isH10Connected
                 ? "Monitoraggio H10 (HR, RR ECG, ECG, HRV, LF/HF)"
                 : "Monitoraggio cardiaco avanzato con HRV"
-              : "Connetti un dispositivo Polar per iniziare"}
+              : "Connetti un dispositivo Polar o Muse per iniziare"}
           </ThemedText>
         </ThemedView>
 
@@ -1708,14 +1964,21 @@ export default function MonitorScreen() {
         {/* Metriche cardiache */}
         <ThemedView style={styles.metricsSection}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            {isH10Connected
+            {isMuseConnected
+              ? "Metriche Muse 2"
+              : isH10Connected
               ? "Metriche H10 disponibili"
               : "Metriche Cardiache"}
           </ThemedText>
 
-          {connectedDeviceId && heartRate === 0 && (
+          {connectedDeviceId && heartRate === 0 && !isMuseConnected && (
             <ThemedText style={styles.waitingText}>
               ⏳ In attesa di dati dal dispositivo...
+            </ThemedText>
+          )}
+          {isMuseConnected && connectedDeviceId && eegAf7 === 0 && (
+            <ThemedText style={styles.waitingText}>
+              ⏳ In attesa di EEG dal Muse…
             </ThemedText>
           )}
           {isH10Connected && (
@@ -1725,6 +1988,146 @@ export default function MonitorScreen() {
             </ThemedText>
           )}
 
+          {isMuseConnected ? (
+            <View style={styles.metricsGrid}>
+              <View style={styles.metricsRow}>
+                <View
+                  style={[
+                    styles.metricCard,
+                    { borderColor: Colors[theme].border },
+                  ]}
+                >
+                  <ThemedText style={styles.metricLabel}>TP9</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {eegTp9 !== 0 ? eegTp9.toFixed(1) : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>µV</ThemedText>
+                </View>
+                <View
+                  style={[
+                    styles.metricCard,
+                    { borderColor: Colors[theme].border },
+                  ]}
+                >
+                  <ThemedText style={styles.metricLabel}>AF7</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {eegAf7 !== 0 ? eegAf7.toFixed(1) : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>µV</ThemedText>
+                </View>
+              </View>
+              <View style={styles.metricsRow}>
+                <View
+                  style={[
+                    styles.metricCard,
+                    { borderColor: Colors[theme].border },
+                  ]}
+                >
+                  <ThemedText style={styles.metricLabel}>AF8</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {eegAf8 !== 0 ? eegAf8.toFixed(1) : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>µV</ThemedText>
+                </View>
+                <View
+                  style={[
+                    styles.metricCard,
+                    { borderColor: Colors[theme].border },
+                  ]}
+                >
+                  <ThemedText style={styles.metricLabel}>TP10</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {eegTp10 !== 0 ? eegTp10.toFixed(1) : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>µV</ThemedText>
+                </View>
+              </View>
+              <View style={styles.metricsRow}>
+                <View
+                  style={[
+                    styles.metricCard,
+                    { borderColor: Colors[theme].border },
+                  ]}
+                >
+                  <ThemedText style={styles.metricLabel}>Alpha</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {bandAlpha > 0 ? (bandAlpha * 100).toFixed(0) : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>%</ThemedText>
+                </View>
+                <View
+                  style={[
+                    styles.metricCard,
+                    { borderColor: Colors[theme].border },
+                  ]}
+                >
+                  <ThemedText style={styles.metricLabel}>Theta</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {bandTheta > 0 ? (bandTheta * 100).toFixed(0) : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>%</ThemedText>
+                </View>
+              </View>
+              <View style={styles.metricsRow}>
+                <View
+                  style={[
+                    styles.metricCard,
+                    { borderColor: Colors[theme].border },
+                  ]}
+                >
+                  <ThemedText style={styles.metricLabel}>Beta</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {bandBeta > 0 ? (bandBeta * 100).toFixed(0) : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>%</ThemedText>
+                </View>
+                <View
+                  style={[
+                    styles.metricCard,
+                    { borderColor: Colors[theme].border },
+                  ]}
+                >
+                  <ThemedText style={styles.metricLabel}>Delta / Gamma</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {bandDelta > 0 || bandGamma > 0
+                      ? `${(bandDelta * 100).toFixed(0)}/${(bandGamma * 100).toFixed(0)}`
+                      : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>%</ThemedText>
+                </View>
+              </View>
+              <View style={styles.metricsRow}>
+                <View
+                  style={[
+                    styles.metricCard,
+                    styles.metricCardHighlight,
+                    { borderColor: Colors[theme].tint },
+                  ]}
+                >
+                  <View style={styles.metricIconContainer}>
+                    <Heart size={24} color={Colors[theme].tint} />
+                  </View>
+                  <ThemedText style={styles.metricLabel}>HR (PPG)</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {museHr > 0 ? museHr : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>BPM</ThemedText>
+                </View>
+                <View
+                  style={[
+                    styles.metricCard,
+                    { borderColor: Colors[theme].border },
+                  ]}
+                >
+                  <ThemedText style={styles.metricLabel}>Batteria</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {museBattery > 0 ? museBattery.toFixed(0) : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>%</ThemedText>
+                </View>
+              </View>
+            </View>
+          ) : (
           <View style={styles.metricsGrid}>
             <View style={styles.metricsRow}>
               <View
@@ -1907,6 +2310,7 @@ export default function MonitorScreen() {
               </View>
             )}
           </View>
+          )}
         </ThemedView>
 
         {/* Controlli */}
@@ -1936,7 +2340,7 @@ export default function MonitorScreen() {
                   <View style={styles.buttonContent}>
                     <Search size={20} color="#fff" />
                     <ThemedText style={styles.buttonText}>
-                      Cerca Dispositivo Polar
+                      Cerca Dispositivo Polar / Muse
                     </ThemedText>
                   </View>
                 )}
@@ -1962,7 +2366,9 @@ export default function MonitorScreen() {
                         styles.discoveredItem,
                         { borderColor: Colors[theme].border },
                       ]}
-                      onPress={() => selectAndConnect(device.deviceId)}
+                      onPress={() =>
+                        selectAndConnect(device.deviceId, device.family)
+                      }
                       disabled={isConnectingSelected}
                     >
                       <View style={styles.discoveredItemText}>

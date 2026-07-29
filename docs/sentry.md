@@ -18,8 +18,12 @@ import { logToSentry, captureException } from "@/services/sentry";
 
 logToSentry("Polar connected", "info", { deviceId: "…" });
 captureException(err, { phase: "ftu" });
+
+// Muse (stesso pattern — non blocca lo streaming)
+logToSentry("Muse stream error", "error", { deviceFamily: "muse", error: "…" });
+captureException(err, { deviceFamily: "muse", phase: "muse_start_eeg" });
 ```
 
-Both helpers swallow SDK failures so logging never changes control flow.
+Both helpers swallow SDK failures so logging never changes control flow. Muse BLE/setup paths use them the same way: report then continue (or rethrow only where callers already handle the rejection).
 
 Without `EXPO_PUBLIC_SENTRY_DSN`, init is a no-op.

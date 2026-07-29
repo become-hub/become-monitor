@@ -131,6 +131,24 @@ export default function DocsScreen() {
                 <ExternalLink size={16} />
               </View>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.linkButton,
+                { borderColor: Colors[theme].tint, marginTop: 12 },
+              ]}
+              onPress={() =>
+                openLink(
+                  "https://github.com/become-hub/become-monitor/blob/main/docs/muse-2-connection-guide.md"
+                )
+              }
+            >
+              <View style={styles.linkContent}>
+                <ThemedText style={styles.linkText}>
+                  {strings.docs.muse2ConnectionGuide}
+                </ThemedText>
+                <ExternalLink size={16} />
+              </View>
+            </TouchableOpacity>
           </ThemedView>
         </ThemedView>
 
@@ -183,6 +201,9 @@ export default function DocsScreen() {
                         {strings.docs.signalPolarH10}
                       </ThemedText>
                       <ThemedText style={[styles.tableCell, styles.tableHeader]}>
+                        {strings.docs.signalMuse2}
+                      </ThemedText>
+                      <ThemedText style={[styles.tableCell, styles.tableHeader]}>
                         {strings.docs.signalUsedInApp}
                       </ThemedText>
                     </View>
@@ -200,6 +221,9 @@ export default function DocsScreen() {
                           </ThemedText>
                           <ThemedText style={styles.tableCell}>
                             {row.polarH10}
+                          </ThemedText>
+                          <ThemedText style={styles.tableCell}>
+                            {row.muse2}
                           </ThemedText>
                           <ThemedText style={styles.tableCell}>
                             {usedLabel(strings.docs, row.usedInApp)}
@@ -319,6 +343,36 @@ export default function DocsScreen() {
               <View style={styles.linkContent}>
                 <ThemedText style={styles.linkText}>
                   {strings.docs.viewPolar360Guide}
+                </ThemedText>
+                <ExternalLink size={16} />
+              </View>
+            </TouchableOpacity>
+          </ThemedView>
+
+          <ThemedView style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Bluetooth size={20} color={Colors[theme].tint} />
+              <ThemedText style={styles.cardTitle}>
+                {strings.docs.muse2ConnectionGuide}
+              </ThemedText>
+            </View>
+            <ThemedText style={styles.cardText}>
+              {strings.docs.muse2GuideDescription}
+            </ThemedText>
+            <TouchableOpacity
+              style={[
+                styles.linkButton,
+                { borderColor: Colors[theme].tint, marginTop: 12 },
+              ]}
+              onPress={() =>
+                openLink(
+                  "https://github.com/become-hub/become-monitor/blob/main/docs/muse-2-connection-guide.md"
+                )
+              }
+            >
+              <View style={styles.linkContent}>
+                <ThemedText style={styles.linkText}>
+                  {strings.docs.viewMuse2Guide}
                 </ThemedText>
                 <ExternalLink size={16} />
               </View>
