@@ -14,22 +14,22 @@ export interface PolarDeviceInfo {
 }
 
 export interface PolarHrData {
-    deviceId: string;
-    hr: number;
-    contactDetected: boolean;
-    contactSupported: boolean;
-    /** Native RR intervals (ms) from ECG — H10 via startHrStreaming. */
-    rrsMs?: number[];
+  deviceId: string;
+  hr: number;
+  contactDetected: boolean;
+  contactSupported: boolean;
+  /** Native RR intervals (ms) from ECG — H10 via startHrStreaming. */
+  rrsMs?: number[];
 }
 
 export interface PolarEcgData {
-    deviceId: string;
-    /** Last sample voltage in µV. */
-    voltageUv: number;
-    avgVoltageUv: number;
-    timestamp: number;
-    sampleCount: number;
-    voltagesUv?: number[];
+  deviceId: string;
+  /** Last sample voltage in µV. */
+  voltageUv: number;
+  avgVoltageUv: number;
+  timestamp: number;
+  sampleCount: number;
+  voltagesUv?: number[];
 }
 
 export interface PolarPpiSample {

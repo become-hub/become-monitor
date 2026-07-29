@@ -1,14 +1,15 @@
-import { create } from 'zustand';
+import { create } from "zustand";
 
-import type { MuseProductId } from '@/services/muse-products';
-import type { PolarProductId } from '@/services/polar-products';
+import type { MuseProductId } from "@/services/muse-products";
+import type { PolarProductId } from "@/services/polar-products";
 
-export type DiscoveredDeviceFamily = 'polar' | 'muse';
+export type DiscoveredDeviceFamily = "polar" | "muse";
 
 export interface DiscoveredDevice {
   deviceId: string;
   name: string;
   family: DiscoveredDeviceFamily;
+  /** Polar catalog id or Muse catalog id (e.g. polar_h10, muse_2). */
   productId: PolarProductId | MuseProductId;
   displayName: string;
 }

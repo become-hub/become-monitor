@@ -51,7 +51,10 @@ import {
 } from "@/services/session-track-flush";
 import { sessionTrackBuffer } from "@/services/session-track-buffer";
 import { StorageService, StoredAuthData } from "@/services/storage-service";
-import { useScanStore } from "@/stores/scan-store";
+import {
+  useScanStore,
+  type DiscoveredDevice,
+} from "@/stores/scan-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUserStore } from "@/stores/user-store";
 import {
@@ -391,13 +394,14 @@ export default function MonitorScreen() {
 
       setDeviceFound(true);
       setFoundDeviceName(device.name);
-      upsertDiscoveredDevice({
+      const discovered: DiscoveredDevice = {
         deviceId: device.deviceId,
         name: device.name,
         family: "polar",
         productId: product.id,
         displayName: product.displayName,
-      });
+      };
+      upsertDiscoveredDevice(discovered);
 
       // Solo dopo FTU+restart: riconnetti automaticamente allo stesso deviceId
       if (pendingPostFtuReconnectRef.current === device.deviceId) {
@@ -719,13 +723,14 @@ export default function MonitorScreen() {
         console.log(`Monitor: 📡 Muse trovato: ${device.name} (${device.deviceId})`);
         setDeviceFound(true);
         setFoundDeviceName(device.name);
-        upsertDiscoveredDevice({
+        const discovered: DiscoveredDevice = {
           deviceId: device.deviceId,
           name: device.name,
           family: "muse",
           productId: product.id,
           displayName: product.displayName,
-        });
+        };
+        upsertDiscoveredDevice(discovered);
       });
 
       museSdk.addEventListener("onMuseDeviceConnected", (device: MuseDeviceInfo) => {
@@ -2403,7 +2408,10 @@ export default function MonitorScreen() {
                 <ThemedView style={styles.successMessage}>
                   <ThemedText style={styles.successText}>
                     ✅ Trovato device {foundDeviceName} (
-                    {getPolarProductBadge(foundDeviceName)})
+                    {isSupportedMuseDevice(foundDeviceName)
+                      ? getMuseProductBadge(foundDeviceName)
+                      : getPolarProductBadge(foundDeviceName)}
+                    )
                   </ThemedText>
                 </ThemedView>
               )}
