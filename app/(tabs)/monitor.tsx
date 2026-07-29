@@ -22,6 +22,17 @@ import {
   ensurePolarReady,
   startPpiStreamingWithFallback,
 } from "@/services/polar-device-setup";
+import {
+  getPolarProductBadge,
+  isSupportedPolarDevice,
+  resolvePolarProduct,
+} from "@/services/polar-products";
+import { resolveRrInterval } from "@/services/rr-interval";
+import {
+  flushSessionTrack,
+  startSessionOfflineRecording,
+} from "@/services/session-track-flush";
+import { sessionTrackBuffer } from "@/services/session-track-buffer";
 import { StorageService, StoredAuthData } from "@/services/storage-service";
 import { useScanStore } from "@/stores/scan-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -64,6 +75,9 @@ export default function MonitorScreen() {
     setDeviceFound,
     setScanStartTime,
     setConnectedDeviceId: setConnectedDeviceIdInStore,
+    discoveredDevices,
+    upsertDiscoveredDevice,
+    clearDiscoveredDevices,
     resetScanState,
   } = useScanStore();
 
@@ -92,6 +106,7 @@ export default function MonitorScreen() {
   );
   const [connectedDeviceName, setConnectedDeviceName] = useState<string>("");
   const [foundDeviceName, setFoundDeviceName] = useState<string>("");
+  const [isConnectingSelected, setIsConnectingSelected] = useState(false);
 
   // Auth & Ably
   const authService = useRef(new AuthService());
@@ -107,12 +122,18 @@ export default function MonitorScreen() {
   const [hrv, setHrv] = useState(0);
   const [lfPower, setLfPower] = useState(0);
   const [hfPower, setHfPower] = useState(0);
+  const [rrMs, setRrMs] = useState(0);
+  const [rrSource, setRrSource] = useState<"ppi" | "hr_derived" | null>(null);
+  const [isFlushingTrack, setIsFlushingTrack] = useState(false);
+  const [offlineRecordingStarted, setOfflineRecordingStarted] = useState(false);
   const heartRateRef = useRef(0);
   const hrvRef = useRef(0);
   const lfPowerRef = useRef(0);
   const hfPowerRef = useRef(0);
   const connectedDeviceNameRef = useRef("");
   const connectedDeviceIdRef = useRef<string | null>(null);
+  const flushInFlightRef = useRef(false);
+  const rrSourceRef = useRef<"ppi" | "hr_derived" | null>(null);
 
   useEffect(() => {
     heartRateRef.current = heartRate;
@@ -132,6 +153,9 @@ export default function MonitorScreen() {
   useEffect(() => {
     connectedDeviceIdRef.current = connectedDeviceId;
   }, [connectedDeviceId]);
+  useEffect(() => {
+    rrSourceRef.current = rrSource;
+  }, [rrSource]);
 
   // Stato per la notifica di autenticazione
   const [notification, setNotification] = useState<{
@@ -195,6 +219,11 @@ export default function MonitorScreen() {
       !!ablyService.current
     );
 
+    ablyService.current.setEndSessionHandler((payload) => {
+      console.log("Monitor: 📥 Ably endSession", payload);
+      handleFlushTrack(payload?.sessionId ?? null);
+    });
+
     // Controlla stato Bluetooth iniziale e prova a riconnettersi
     const initializeBluetooth = async () => {
       const powered = await polarSdk.checkBluetoothState();
@@ -204,8 +233,10 @@ export default function MonitorScreen() {
       setBluetoothPowered(powered);
 
       if (powered) {
-        // Controlla se abbiamo dati di autenticazione salvati
-        const storedAuthData = await StorageService.getAuthData();
+        const lastDeviceId = await StorageService.getLastDeviceId();
+        const storedAuthData = lastDeviceId
+          ? await StorageService.getAuthDataForDevice(lastDeviceId)
+          : await StorageService.getAuthData();
         if (
           storedAuthData &&
           storedAuthData.deviceId &&
@@ -216,7 +247,6 @@ export default function MonitorScreen() {
               storedAuthData.deviceName || storedAuthData.deviceId
             }`
           );
-          // Prova a riconnettersi al dispositivo salvato usando l'ID
           try {
             await polarSdk.connectToDevice(storedAuthData.deviceId);
           } catch {
@@ -241,7 +271,10 @@ export default function MonitorScreen() {
       // prova a riconnettersi al dispositivo salvato
       if (state.powered && !connectedDeviceId) {
         const tryReconnect = async () => {
-          const storedAuthData = await StorageService.getAuthData();
+          const lastDeviceId = await StorageService.getLastDeviceId();
+          const storedAuthData = lastDeviceId
+            ? await StorageService.getAuthDataForDevice(lastDeviceId)
+            : await StorageService.getAuthData();
           if (storedAuthData && storedAuthData.deviceId) {
             console.log(
               `Monitor: 🔄 Bluetooth riacceso, tentativo riconnessione a ${
@@ -264,28 +297,50 @@ export default function MonitorScreen() {
     polarSdk.addEventListener("onDeviceFound", (device: PolarDeviceInfo) => {
       console.log(`Monitor: 📡 Trovato: ${device.name} (${device.deviceId})`);
 
-      // Marca che abbiamo trovato un dispositivo durante la scansione
+      if (!isSupportedPolarDevice(device.name)) {
+        console.log(`Monitor: ⏭️ Ignorato (non supportato): ${device.name}`);
+        return;
+      }
+
+      const product = resolvePolarProduct(device.name);
+      if (!product) {
+        return;
+      }
+
       setDeviceFound(true);
       setFoundDeviceName(device.name);
+      upsertDiscoveredDevice({
+        deviceId: device.deviceId,
+        name: device.name,
+        productId: product.id,
+        displayName: product.displayName,
+      });
 
-      // Connetti automaticamente al primo Polar trovato
-      polarSdk.stopScan();
-      setScanningState(false);
-
-      polarSdk.connectToDevice(device.deviceId);
+      // Solo dopo FTU+restart: riconnetti automaticamente allo stesso deviceId
+      if (pendingPostFtuReconnectRef.current === device.deviceId) {
+        console.log(
+          `Monitor: 🔁 Post-FTU reconnect automatico a ${device.deviceId}`
+        );
+        pendingPostFtuReconnectRef.current = null;
+        polarSdk.stopScan();
+        setScanningState(false);
+        polarSdk.connectToDevice(device.deviceId);
+      }
     });
 
     polarSdk.addEventListener(
       "onDeviceConnected",
       (device: PolarDeviceInfo) => {
         console.log(`Monitor: ✅ Connesso a ${device.name}!`);
+        setIsConnectingSelected(false);
         setConnectedDeviceId(device.deviceId);
         setConnectedDeviceIdInStore(device.deviceId);
         setConnectedDeviceName(device.name);
         setFoundDeviceName("");
+        clearDiscoveredDevices();
 
-        // Aggiorna il nome e l'ID del dispositivo nei dati salvati se esistono
-        StorageService.updateDeviceName(device.name);
+        StorageService.setLastDeviceId(device.deviceId);
+        StorageService.updateDeviceName(device.name, device.deviceId);
         StorageService.updateDeviceId(device.deviceId);
 
         // Skip auth/stream restart if already ready or in progress for this device
@@ -298,7 +353,6 @@ export default function MonitorScreen() {
           return;
         }
 
-        // Avvia autenticazione e streaming
         launchAuthAndStream(device.deviceId);
       }
     );
@@ -316,7 +370,7 @@ export default function MonitorScreen() {
             type: "success",
             message: "Polar riavviato dopo configurazione — riconnessione…",
           });
-          // Bond already exists: scan+auto-connect when the Polar advertises again.
+          // Bond already exists: scan and auto-reconnect same deviceId when it advertises.
           polarSdk.startScan().catch(() => {});
           setScanningState(true);
         } else {
@@ -324,6 +378,7 @@ export default function MonitorScreen() {
             type: "error",
             message: `Dispositivo disconnesso`,
           });
+          pendingPostFtuReconnectRef.current = null;
         }
 
         // Auto-close dopo 5 secondi
@@ -335,10 +390,11 @@ export default function MonitorScreen() {
         setConnectedDeviceIdInStore(null);
         setConnectedDeviceName("");
         setFoundDeviceName("");
+        setIsConnectingSelected(false);
         authStreamInFlightRef.current = false;
         streamReadyDeviceRef.current = null;
         authSessionDeviceRef.current = null;
-        pendingPostFtuReconnectRef.current = null;
+        // Keep pendingPostFtuReconnectRef across expected FTU restart disconnect
         if (pollInterval.current) {
           clearInterval(pollInterval.current);
           pollInterval.current = null;
@@ -349,6 +405,10 @@ export default function MonitorScreen() {
 
         // Reset stato del dispositivo
         resetDeviceState();
+        if (expectedFtuRestart) {
+          // resetScanState clears isScanning; keep scanning for post-FTU reconnect
+          setScanningState(true);
+        }
       }
     );
 
@@ -360,7 +420,7 @@ export default function MonitorScreen() {
       authSessionDeviceRef.current = null;
       Alert.alert(
         "Pairing Bluetooth fallito",
-        "Il Polar rifiuta l'abbinamento (chiavi BLE non valide).\n\n1) Impostazioni → Bluetooth → dimentica «Polar 360»\n2) Factory reset del Polar 360 (in carica, reset nascosto)\n3) Riapri Augmented Monitor e accetta il popup di pairing"
+        "Il Polar rifiuta l'abbinamento (chiavi BLE non valide).\n\n1) Impostazioni → Bluetooth → dimentica il Polar (360 o Loop)\n2) Factory reset del Polar (in carica, reset nascosto)\n3) Riapri Augmented Monitor e accetta il popup di pairing"
       );
     });
 
@@ -371,6 +431,12 @@ export default function MonitorScreen() {
       // Se non ci sono dati PPI, calcola RR approssimato da BPM come fallback
       if (data.hr > 0) {
         const approximateRR = Math.round(60000 / data.hr);
+        const resolved = resolveRrInterval({ hrBpm: data.hr });
+        if (resolved && rrSourceRef.current !== "ppi") {
+          setRrMs(resolved.rrMs);
+          setRrSource(resolved.rrSource);
+          sessionTrackBuffer.pushHr(data.hr);
+        }
 
         ppiWindow.current.push(approximateRR);
         if (ppiWindow.current.length > WINDOW_SIZE) {
@@ -597,6 +663,7 @@ export default function MonitorScreen() {
     // Reset flag e timestamp di scansione
     setDeviceFound(false);
     setFoundDeviceName("");
+    clearDiscoveredDevices();
     setScanStartTime(Date.now());
 
     setScanningState(true);
@@ -613,9 +680,10 @@ export default function MonitorScreen() {
           setScanningState(false);
           console.log("Monitor: ⏱️ Timeout scansione completo");
 
-          // Mostra l'alert solo se non è stato trovato un dispositivo E non c'è già un dispositivo connesso
+          // Alert solo se nessun device supportato trovato e nessuno connesso
           if (
             !currentState.deviceFoundDuringScan &&
+            currentState.discoveredDevices.length === 0 &&
             !currentState.connectedDeviceId
           ) {
             console.log(
@@ -624,7 +692,7 @@ export default function MonitorScreen() {
 
             Alert.alert(
               "Difficoltà di connessione",
-              "Sembra che sia difficile connettersi con il tuo Polar360. Prova a spegnere e riaccendere il bluetooth per resettare la connessione manualmente.",
+              "Nessun Polar 360 o Loop trovato. Prova a spegnere e riaccendere il Bluetooth, poi ripeti la ricerca.",
               [
                 {
                   text: "Chiudi",
@@ -642,6 +710,27 @@ export default function MonitorScreen() {
       Alert.alert(
         "Errore",
         `Impossibile avviare la scansione: ${error.message}`
+      );
+    }
+  };
+
+  const selectAndConnect = async (deviceId: string) => {
+    if (pairingBlockedRef.current || isConnectingSelected) {
+      return;
+    }
+    console.log(`Monitor: 👆 Selezione device ${deviceId}`);
+    setIsConnectingSelected(true);
+    try {
+      await polarSdk.stopScan();
+      setScanningState(false);
+      await StorageService.setLastDeviceId(deviceId);
+      await polarSdk.connectToDevice(deviceId);
+    } catch (error: any) {
+      setIsConnectingSelected(false);
+      console.error("Monitor: Errore connessione selezionata:", error);
+      Alert.alert(
+        "Errore",
+        `Impossibile connettersi: ${error?.message || "sconosciuto"}`
       );
     }
   };
@@ -687,8 +776,8 @@ export default function MonitorScreen() {
       }
       console.log("✅ First Time Use ok");
 
-      // Step 1: Controlla se abbiamo dati di autenticazione salvati
-      const storedAuthData = await StorageService.getAuthData();
+      // Step 1: Controlla se abbiamo dati di autenticazione salvati per questo device
+      const storedAuthData = await StorageService.getAuthDataForDevice(deviceId);
 
       if (storedAuthData && storedAuthData.deviceToken) {
         console.log("Monitor: 🔍 Token salvato trovato, validazione...");
@@ -731,17 +820,18 @@ export default function MonitorScreen() {
           startBiometricSending();
           streamReadyDeviceRef.current = deviceId;
           await ensureMonitorForegroundService();
+          await beginOfflineTrack(deviceId);
 
           return;
         } else {
-          // Token non valido, cancella i dati salvati
+          // Token non valido, cancella i dati salvati per questo device
           console.log("Monitor: ❌ Token non valido, cancello dati salvati");
-          await authService.current.clearAuthData();
+          await authService.current.clearAuthData(deviceId);
         }
       }
 
-      // Step 2: Nuovo flusso di autenticazione
-      const authFlow = await authService.current.startAuthFlow();
+      // Step 2: Nuovo flusso di autenticazione (scoped al device)
+      const authFlow = await authService.current.startAuthFlow(deviceId);
 
       if (!authFlow.needsAuth && authFlow.storedData) {
         // Questa parte ora non dovrebbe essere raggiunta dato che abbiamo già gestito il caso sopra
@@ -757,17 +847,12 @@ export default function MonitorScreen() {
           "Monitor: 🎫 Device token da salvare:",
           authResponse.deviceToken
         );
-        console.log(
-          "Monitor: 🎫 Device token type:",
-          typeof authResponse.deviceToken
-        );
-        console.log(
-          "Monitor: 🎫 Device token length:",
-          authResponse.deviceToken?.length
-        );
 
-        // Salva il device token per il polling
-        await StorageService.saveDeviceToken(authResponse.deviceToken);
+        // Salva il device token per il polling (per questo device)
+        await StorageService.saveDeviceTokenForDevice(
+          deviceId,
+          authResponse.deviceToken
+        );
         console.log("Monitor: 🎫 Device token salvato nel storage");
       }
 
@@ -781,17 +866,9 @@ export default function MonitorScreen() {
         if (pollHandlingAuth || streamReadyDeviceRef.current === deviceId) {
           return;
         }
-        const currentDeviceToken = await StorageService.getDeviceToken();
+        const currentDeviceToken =
+          await StorageService.getDeviceTokenForDevice(deviceId);
         console.log("🔄 POLLING ATTIVO - deviceToken:", currentDeviceToken);
-        console.log(
-          "🔄 POLLING ATTIVO - deviceToken type:",
-          typeof currentDeviceToken
-        );
-
-        console.log(
-          "🔄 POLLING ATTIVO - deviceToken length:",
-          currentDeviceToken?.length
-        );
 
         if (currentDeviceToken) {
           console.log("🔄 POLLING ATTIVO - Chiamando pollDeviceAuth...");
@@ -799,20 +876,11 @@ export default function MonitorScreen() {
             currentDeviceToken
           );
           console.log("📥 POLL RESPONSE RAW:", pollResponse);
-          console.log("📥 POLL RESPONSE TYPE:", typeof pollResponse);
 
           if (pollResponse) {
             console.log(
               "Monitor: 📥 Poll response:",
               JSON.stringify(pollResponse)
-            );
-            console.log(
-              "Monitor: 📥 Poll response.authenticated:",
-              pollResponse.authenticated
-            );
-            console.log(
-              "Monitor: 📥 Poll response.authenticated type:",
-              typeof pollResponse.authenticated
             );
 
             if (pollResponse.authenticated) {
@@ -833,21 +901,20 @@ export default function MonitorScreen() {
               );
               console.log("🔥 AUTENTICAZIONE COMPLETATA - Avvio setup...");
 
-              // Recupera il deviceToken per salvarlo insieme agli altri dati
-              const currentDeviceToken = await StorageService.getDeviceToken();
+              const currentDeviceToken =
+                await StorageService.getDeviceTokenForDevice(deviceId);
 
               const authData: StoredAuthData = {
                 authToken: pollResponse.session,
                 userId: parseInt(pollResponse.userId),
                 deviceCode: pollResponse.deviceCode,
-                deviceToken: currentDeviceToken || "", // Token per validazione futura
-                expiresAt: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 ore
-                deviceName: connectedDeviceName,
-                deviceId: connectedDeviceId || undefined,
+                deviceToken: currentDeviceToken || "",
+                expiresAt: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+                deviceName: connectedDeviceNameRef.current,
+                deviceId,
                 appId: pollResponse.appId,
               };
 
-              // Salva i dati di autenticazione
               await authService.current.saveAuthData(authData);
 
               setAuthToken(pollResponse.session);
@@ -860,7 +927,6 @@ export default function MonitorScreen() {
                 setAppId(pollResponse.appId);
               }
 
-              // Connetti ad Ably
               console.log("🔵 Connessione Ably...");
               ablyService.current?.connectWithToken(
                 pollResponse.session,
@@ -871,10 +937,10 @@ export default function MonitorScreen() {
               console.log("💓 Avvio streaming PPI...");
               await startPpiStreamingWithFallback(deviceId, polarSdk);
 
-              // Avvia invio periodico dei dati biometrici
               startBiometricSending();
               streamReadyDeviceRef.current = deviceId;
               await ensureMonitorForegroundService();
+              await beginOfflineTrack(deviceId);
             } else {
               console.log("⏳ POLLING - authenticated: false");
             }
@@ -903,6 +969,22 @@ export default function MonitorScreen() {
         console.log(`Monitor: ⚠️ Filtrato PPI fuori range: ${ppiMs}ms`);
         return;
       }
+
+      const resolved = resolveRrInterval({
+        ppiMs,
+        hrBpm: sample.hr > 0 ? sample.hr : heartRateRef.current,
+      });
+      if (resolved) {
+        setRrMs(resolved.rrMs);
+        setRrSource(resolved.rrSource);
+        rrSourceRef.current = resolved.rrSource;
+      }
+      sessionTrackBuffer.pushPpi({
+        ppiMs,
+        hr: sample.hr > 0 ? sample.hr : undefined,
+        errorEstimate: sample.errorEstimate,
+        blockerBit: sample.blocker,
+      });
 
       // Aggiungi alla finestra
       ppiWindow.current.push(ppiMs);
@@ -980,6 +1062,63 @@ export default function MonitorScreen() {
     });
   };
 
+  const beginOfflineTrack = async (deviceId: string) => {
+    const result = await startSessionOfflineRecording(deviceId);
+    setOfflineRecordingStarted(result.started);
+    if (result.started) {
+      setNotification({
+        type: "success",
+        message: "Offline PPI recording avviato sul Polar",
+      });
+    } else {
+      setNotification({
+        type: "success",
+        message: "Offline recording non disponibile — buffer live attivo",
+      });
+    }
+    setTimeout(() => setNotification(null), 5000);
+  };
+
+  const handleFlushTrack = async (sessionId?: string | null) => {
+    const deviceId = connectedDeviceIdRef.current;
+    if (!deviceId) {
+      Alert.alert("Flush track", "Nessun dispositivo connesso.");
+      return;
+    }
+    if (flushInFlightRef.current) {
+      return;
+    }
+    flushInFlightRef.current = true;
+    setIsFlushingTrack(true);
+    try {
+      const userState = useUserStore.getState();
+      const result = await flushSessionTrack({
+        deviceId,
+        deviceCode: userState.deviceCode || undefined,
+        userId: userState.userId || undefined,
+        authToken: userState.authToken || undefined,
+        sessionId: sessionId ?? null,
+      });
+      setOfflineRecordingStarted(false);
+      setNotification({
+        type: "success",
+        message: result.dryRun
+          ? `Track flushed (dry-run) · ${result.sampleCount} sample · ${result.source}`
+          : `Track uploaded · ${result.sampleCount} sample · ${result.source}`,
+      });
+      setTimeout(() => setNotification(null), 8000);
+    } catch (error: any) {
+      console.error("Monitor: flush track failed", error);
+      Alert.alert(
+        "Flush track fallito",
+        error?.message || "Errore sconosciuto"
+      );
+    } finally {
+      flushInFlightRef.current = false;
+      setIsFlushingTrack(false);
+    }
+  };
+
   const disconnectDevice = async () => {
     if (connectedDeviceId) {
       Alert.alert(
@@ -1023,7 +1162,11 @@ export default function MonitorScreen() {
 
   const clearStoredAuth = async () => {
     try {
-      await authService.current.clearAuthData();
+      if (connectedDeviceId) {
+        await authService.current.clearAuthData(connectedDeviceId);
+      } else {
+        await authService.current.clearAuthData();
+      }
       setAuthToken("");
       setUserId(0);
       setDeviceCode("");
@@ -1138,6 +1281,11 @@ export default function MonitorScreen() {
     setHrv(0);
     setLfPower(0);
     setHfPower(0);
+    setRrMs(0);
+    setRrSource(null);
+    rrSourceRef.current = null;
+    setOfflineRecordingStarted(false);
+    sessionTrackBuffer.clear();
 
     // Reset finestra PPI
     ppiWindow.current = [];
@@ -1257,6 +1405,16 @@ export default function MonitorScreen() {
             <ThemedText style={styles.statusLabel}>App ID:</ThemedText>
             <ThemedText style={styles.statusValue}>{appId || "N/A"}</ThemedText>
           </View>
+          <View style={styles.statusRow}>
+            <ThemedText style={styles.statusLabel}>Offline track:</ThemedText>
+            <ThemedText style={styles.statusValue}>
+              {offlineRecordingStarted
+                ? "🟢 Polar PPI"
+                : connectedDeviceId
+                ? "🟠 Buffer live"
+                : "🔴 Off"}
+            </ThemedText>
+          </View>
           {!authToken && connectedDeviceId && authCode && (
             <View style={styles.authCodeContainer}>
               <ThemedText style={styles.authCodeLabel}>
@@ -1280,62 +1438,103 @@ export default function MonitorScreen() {
           )}
 
           <View style={styles.metricsGrid}>
-            <View
-              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
-            >
-              <View style={styles.metricIconContainer}>
-                <Heart size={24} color={Colors[theme].tint} />
+            <View style={styles.metricsRow}>
+              <View
+                style={[
+                  styles.metricCard,
+                  styles.metricCardFull,
+                  { borderColor: Colors[theme].border },
+                ]}
+              >
+                <View style={styles.metricIconContainer}>
+                  <Heart size={24} color={Colors[theme].tint} />
+                </View>
+                <ThemedText style={styles.metricLabel}>Heart Rate</ThemedText>
+                <ThemedText style={styles.metricValue}>
+                  {connectedDeviceId && heartRate > 0 ? heartRate : "—"}
+                </ThemedText>
+                <ThemedText style={styles.metricUnit}>BPM</ThemedText>
               </View>
-              <ThemedText style={styles.metricLabel}>Heart Rate</ThemedText>
-              <ThemedText style={styles.metricValue}>
-                {connectedDeviceId && heartRate > 0 ? heartRate : "—"}
-              </ThemedText>
-              <ThemedText style={styles.metricUnit}>BPM</ThemedText>
             </View>
 
-            <View
-              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
-            >
-              <View style={styles.metricIconContainer}>
-                <Activity size={24} color={Colors[theme].tint} />
+            <View style={styles.metricsRow}>
+              <View
+                style={[
+                  styles.metricCard,
+                  { borderColor: Colors[theme].border },
+                ]}
+              >
+                <View style={styles.metricIconContainer}>
+                  <Activity size={24} color={Colors[theme].tint} />
+                </View>
+                <ThemedText style={styles.metricLabel}>HRV (RMSSD)</ThemedText>
+                <ThemedText style={styles.metricValue}>
+                  {connectedDeviceId && hrv > 0 ? hrv : "—"}
+                </ThemedText>
+                <ThemedText style={styles.metricUnit}>
+                  {connectedDeviceId && hrv > 0
+                    ? "ms"
+                    : connectedDeviceId && ppiWindow.current.length > 0
+                    ? `${ppiWindow.current.length}/${WINDOW_SIZE}`
+                    : "ms"}
+                </ThemedText>
               </View>
-              <ThemedText style={styles.metricLabel}>HRV (RMSSD)</ThemedText>
-              <ThemedText style={styles.metricValue}>
-                {connectedDeviceId && hrv > 0 ? hrv : "—"}
-              </ThemedText>
-              <ThemedText style={styles.metricUnit}>
-                {connectedDeviceId && hrv > 0
-                  ? "ms"
-                  : connectedDeviceId && ppiWindow.current.length > 0
-                  ? `${ppiWindow.current.length}/${WINDOW_SIZE}`
-                  : "ms"}
-              </ThemedText>
+
+              <View
+                style={[
+                  styles.metricCard,
+                  { borderColor: Colors[theme].border },
+                ]}
+              >
+                <View style={styles.metricIconContainer}>
+                  <Activity size={24} color={Colors[theme].tint} />
+                </View>
+                <ThemedText style={styles.metricLabel}>RR</ThemedText>
+                <ThemedText style={styles.metricValue}>
+                  {connectedDeviceId && rrMs > 0 ? rrMs : "—"}
+                </ThemedText>
+                <ThemedText style={styles.metricUnit}>
+                  {rrSource === "ppi"
+                    ? "ms · PPI"
+                    : rrSource === "hr_derived"
+                    ? "ms · HR"
+                    : "ms"}
+                </ThemedText>
+              </View>
             </View>
 
-            <View
-              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
-            >
-              <View style={styles.metricIconContainer}>
-                <Zap size={24} color={Colors[theme].tint} />
+            <View style={styles.metricsRow}>
+              <View
+                style={[
+                  styles.metricCard,
+                  { borderColor: Colors[theme].border },
+                ]}
+              >
+                <View style={styles.metricIconContainer}>
+                  <Zap size={24} color={Colors[theme].tint} />
+                </View>
+                <ThemedText style={styles.metricLabel}>HF Power</ThemedText>
+                <ThemedText style={styles.metricValue}>
+                  {connectedDeviceId && hfPower > 0 ? hfPower : "—"}
+                </ThemedText>
+                <ThemedText style={styles.metricUnit}>ms²</ThemedText>
               </View>
-              <ThemedText style={styles.metricLabel}>LF Power</ThemedText>
-              <ThemedText style={styles.metricValue}>
-                {connectedDeviceId && lfPower > 0 ? lfPower : "—"}
-              </ThemedText>
-              <ThemedText style={styles.metricUnit}>ms²</ThemedText>
-            </View>
 
-            <View
-              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
-            >
-              <View style={styles.metricIconContainer}>
-                <Zap size={24} color={Colors[theme].tint} />
+              <View
+                style={[
+                  styles.metricCard,
+                  { borderColor: Colors[theme].border },
+                ]}
+              >
+                <View style={styles.metricIconContainer}>
+                  <Zap size={24} color={Colors[theme].tint} />
+                </View>
+                <ThemedText style={styles.metricLabel}>LF Power</ThemedText>
+                <ThemedText style={styles.metricValue}>
+                  {connectedDeviceId && lfPower > 0 ? lfPower : "—"}
+                </ThemedText>
+                <ThemedText style={styles.metricUnit}>ms²</ThemedText>
               </View>
-              <ThemedText style={styles.metricLabel}>HF Power</ThemedText>
-              <ThemedText style={styles.metricValue}>
-                {connectedDeviceId && hfPower > 0 ? hfPower : "—"}
-              </ThemedText>
-              <ThemedText style={styles.metricUnit}>ms²</ThemedText>
             </View>
           </View>
         </ThemedView>
@@ -1344,41 +1543,93 @@ export default function MonitorScreen() {
         <ThemedView style={styles.controlsSection}>
           {!connectedDeviceId ? (
             <>
-              {foundDeviceName ? (
-                <ThemedView style={styles.successMessage}>
-                  <ThemedText style={styles.successText}>
-                    ✅ Trovato device {foundDeviceName}
+              <TouchableOpacity
+                style={[
+                  styles.button,
+                  styles.scanButton,
+                  { backgroundColor: Colors[theme].tint },
+                ]}
+                onPress={startScan}
+                disabled={isScanning || isConnectingSelected || !bluetoothPowered}
+              >
+                {isScanning ? (
+                  <>
+                    <ActivityIndicator
+                      color="#fff"
+                      style={{ marginRight: 10 }}
+                    />
+                    <ThemedText style={styles.buttonText}>
+                      Scansione in corso...
+                    </ThemedText>
+                  </>
+                ) : (
+                  <View style={styles.buttonContent}>
+                    <Search size={20} color="#fff" />
+                    <ThemedText style={styles.buttonText}>
+                      Cerca Dispositivo Polar
+                    </ThemedText>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {(discoveredDevices.length > 0 || isConnectingSelected) && (
+                <ThemedView style={styles.discoveredList}>
+                  <ThemedText style={styles.discoveredTitle}>
+                    Seleziona un dispositivo
                   </ThemedText>
-                </ThemedView>
-              ) : (
-                <TouchableOpacity
-                  style={[
-                    styles.button,
-                    styles.scanButton,
-                    { backgroundColor: Colors[theme].tint },
-                  ]}
-                  onPress={startScan}
-                  disabled={isScanning || !bluetoothPowered}
-                >
-                  {isScanning ? (
-                    <>
-                      <ActivityIndicator
-                        color="#fff"
-                        style={{ marginRight: 10 }}
-                      />
-                      <ThemedText style={styles.buttonText}>
-                        Scansione in corso...
-                      </ThemedText>
-                    </>
-                  ) : (
-                    <View style={styles.buttonContent}>
-                      <Search size={20} color="#fff" />
-                      <ThemedText style={styles.buttonText}>
-                        Cerca Dispositivo Polar
+                  {isConnectingSelected && (
+                    <View style={styles.connectingRow}>
+                      <ActivityIndicator color={Colors[theme].tint} />
+                      <ThemedText style={styles.connectingText}>
+                        Connessione in corso…
                       </ThemedText>
                     </View>
                   )}
-                </TouchableOpacity>
+                  {discoveredDevices.map((device) => (
+                    <TouchableOpacity
+                      key={device.deviceId}
+                      style={[
+                        styles.discoveredItem,
+                        { borderColor: Colors[theme].border },
+                      ]}
+                      onPress={() => selectAndConnect(device.deviceId)}
+                      disabled={isConnectingSelected}
+                    >
+                      <View style={styles.discoveredItemText}>
+                        <ThemedText style={styles.discoveredName}>
+                          {device.name}
+                        </ThemedText>
+                        <View
+                          style={[
+                            styles.productBadge,
+                            { backgroundColor: Colors[theme].tint },
+                          ]}
+                        >
+                          <ThemedText style={styles.productBadgeText}>
+                            {device.displayName}
+                          </ThemedText>
+                        </View>
+                      </View>
+                      <ThemedText
+                        style={[
+                          styles.connectHint,
+                          { color: Colors[theme].tint },
+                        ]}
+                      >
+                        Connetti
+                      </ThemedText>
+                    </TouchableOpacity>
+                  ))}
+                </ThemedView>
+              )}
+
+              {foundDeviceName && discoveredDevices.length === 0 && (
+                <ThemedView style={styles.successMessage}>
+                  <ThemedText style={styles.successText}>
+                    ✅ Trovato device {foundDeviceName} (
+                    {getPolarProductBadge(foundDeviceName)})
+                  </ThemedText>
+                </ThemedView>
               )}
             </>
           ) : (
@@ -1391,6 +1642,25 @@ export default function MonitorScreen() {
                   Disconnetti {connectedDeviceName}
                 </ThemedText>
               </TouchableOpacity>
+              {debugMode && (
+                <TouchableOpacity
+                  style={[
+                    styles.button,
+                    styles.flushButton,
+                    { backgroundColor: Colors[theme].tint },
+                  ]}
+                  onPress={() => handleFlushTrack(null)}
+                  disabled={isFlushingTrack}
+                >
+                  {isFlushingTrack ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <ThemedText style={styles.buttonText}>
+                      Simula endSession / Flush track
+                    </ThemedText>
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
           )}
 
@@ -1537,17 +1807,21 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   metricsGrid: {
+    gap: 12,
+  },
+  metricsRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 12,
   },
   metricCard: {
     flex: 1,
-    minWidth: "45%",
     padding: 20,
     borderRadius: 12,
     borderWidth: 1,
     alignItems: "center",
+  },
+  metricCardFull: {
+    flex: 1,
   },
   metricIconContainer: {
     marginBottom: 8,
@@ -1595,8 +1869,63 @@ const styles = StyleSheet.create({
     backgroundColor: "#9C27B0",
     marginTop: 10,
   },
+  discoveredList: {
+    marginTop: 16,
+    gap: 10,
+  },
+  discoveredTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  connectingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 8,
+  },
+  connectingText: {
+    fontSize: 14,
+    opacity: 0.8,
+  },
+  discoveredItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  discoveredItemText: {
+    flex: 1,
+    marginRight: 12,
+    gap: 8,
+  },
+  discoveredName: {
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  productBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  productBadgeText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  connectHint: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
   connectedButtons: {
     width: "100%",
+    gap: 10,
+  },
+  flushButton: {
+    marginTop: 0,
   },
   clearButton: {
     backgroundColor: "#FF9800",

@@ -1,16 +1,26 @@
 import { create } from 'zustand';
 
+export interface DiscoveredPolarDevice {
+    deviceId: string;
+    name: string;
+    productId: 'polar_360' | 'polar_loop';
+    displayName: string;
+}
+
 interface ScanState {
     isScanning: boolean;
     deviceFoundDuringScan: boolean;
     scanStartTime: number | null;
     connectedDeviceId: string | null;
+    discoveredDevices: DiscoveredPolarDevice[];
 
     // Actions
     setScanning: (value: boolean) => void;
     setDeviceFound: (value: boolean) => void;
     setScanStartTime: (time: number | null) => void;
     setConnectedDeviceId: (deviceId: string | null) => void;
+    upsertDiscoveredDevice: (device: DiscoveredPolarDevice) => void;
+    clearDiscoveredDevices: () => void;
     resetScanState: () => void;
 }
 
@@ -19,17 +29,36 @@ export const useScanStore = create<ScanState>((set) => ({
     deviceFoundDuringScan: false,
     scanStartTime: null,
     connectedDeviceId: null,
+    discoveredDevices: [],
 
     setScanning: (value) => set({ isScanning: value }),
     setDeviceFound: (value) => set({ deviceFoundDuringScan: value }),
     setScanStartTime: (time) => set({ scanStartTime: time }),
     setConnectedDeviceId: (deviceId) => set({ connectedDeviceId: deviceId }),
+    upsertDiscoveredDevice: (device) =>
+        set((state) => {
+            const exists = state.discoveredDevices.some(
+                (d) => d.deviceId === device.deviceId
+            );
+            if (exists) {
+                return {
+                    discoveredDevices: state.discoveredDevices.map((d) =>
+                        d.deviceId === device.deviceId ? device : d
+                    ),
+                };
+            }
+            return {
+                discoveredDevices: [...state.discoveredDevices, device],
+            };
+        }),
+    clearDiscoveredDevices: () => set({ discoveredDevices: [] }),
 
-    resetScanState: () => set({
-        isScanning: false,
-        deviceFoundDuringScan: false,
-        scanStartTime: null,
-        connectedDeviceId: null,
-    }),
+    resetScanState: () =>
+        set({
+            isScanning: false,
+            deviceFoundDuringScan: false,
+            scanStartTime: null,
+            connectedDeviceId: null,
+            discoveredDevices: [],
+        }),
 }));
-

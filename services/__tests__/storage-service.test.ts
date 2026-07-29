@@ -1,12 +1,11 @@
 /**
  * Test per Storage Service
- * Verifica la gestione dello storage dei token di autenticazione
+ * Verifica la gestione dello storage dei token di autenticazione (anche multi-device)
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StorageService, StoredAuthData } from '../storage-service';
 
-// Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () => ({
     getItem: jest.fn(),
     setItem: jest.fn(),
@@ -16,208 +15,211 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 describe('StorageService', () => {
     const mockAsyncStorage = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
 
+    const futureAuth = (overrides: Partial<StoredAuthData> = {}): StoredAuthData => ({
+        authToken: 'test-token',
+        userId: 123,
+        deviceCode: 'device-abc',
+        deviceToken: 'device-token-xyz',
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        deviceName: 'Polar 360',
+        deviceId: 'polar-device-123',
+        ...overrides,
+    });
+
     beforeEach(() => {
         jest.clearAllMocks();
+        mockAsyncStorage.getItem.mockResolvedValue(null);
+        mockAsyncStorage.setItem.mockResolvedValue(undefined);
+        mockAsyncStorage.removeItem.mockResolvedValue(undefined);
     });
 
-    describe('saveAuthData', () => {
-        it('salva correttamente i dati di autenticazione', async () => {
-            const authData: StoredAuthData = {
-                authToken: 'test-token',
-                userId: 123,
-                deviceCode: 'device-abc',
-                deviceToken: 'device-token-xyz',
-                expiresAt: Date.now() / 1000 + 3600, // 1 ora nel futuro
-                deviceName: 'Polar H10',
-                deviceId: 'polar-device-123'
-            };
+    describe('saveAuthDataForDevice / getAuthDataForDevice', () => {
+        it('salva e recupera sessione per deviceId', async () => {
+            const authData = futureAuth();
+            const sessionsStore: Record<string, string> = {};
 
-            mockAsyncStorage.setItem.mockResolvedValueOnce(undefined);
+            mockAsyncStorage.getItem.mockImplementation(async (key) => {
+                if (key === 'auth_sessions') {
+                    return sessionsStore.auth_sessions ?? null;
+                }
+                if (key === 'device_tokens') {
+                    return sessionsStore.device_tokens ?? null;
+                }
+                if (key === 'last_device_id') {
+                    return sessionsStore.last_device_id ?? null;
+                }
+                return null;
+            });
+            mockAsyncStorage.setItem.mockImplementation(async (key, value) => {
+                sessionsStore[key] = value;
+            });
 
-            await StorageService.saveAuthData(authData);
+            await StorageService.saveAuthDataForDevice('polar-device-123', authData);
+            const result = await StorageService.getAuthDataForDevice('polar-device-123');
 
-            expect(mockAsyncStorage.setItem).toHaveBeenCalledWith(
-                'auth_data',
-                JSON.stringify(authData)
+            expect(result).toEqual({ ...authData, deviceId: 'polar-device-123' });
+            expect(sessionsStore.last_device_id).toBe('polar-device-123');
+        });
+
+        it('isolamento tra due device', async () => {
+            const store: Record<string, string> = {};
+            mockAsyncStorage.getItem.mockImplementation(async (key) => store[key] ?? null);
+            mockAsyncStorage.setItem.mockImplementation(async (key, value) => {
+                store[key] = value;
+            });
+            mockAsyncStorage.removeItem.mockImplementation(async (key) => {
+                delete store[key];
+            });
+
+            await StorageService.saveAuthDataForDevice(
+                'device-a',
+                futureAuth({ deviceId: 'device-a', authToken: 'token-a' })
+            );
+            await StorageService.saveAuthDataForDevice(
+                'device-b',
+                futureAuth({ deviceId: 'device-b', authToken: 'token-b' })
+            );
+
+            expect((await StorageService.getAuthDataForDevice('device-a'))?.authToken).toBe(
+                'token-a'
+            );
+            expect((await StorageService.getAuthDataForDevice('device-b'))?.authToken).toBe(
+                'token-b'
+            );
+
+            await StorageService.clearAuthDataForDevice('device-a');
+            expect(await StorageService.getAuthDataForDevice('device-a')).toBeNull();
+            expect((await StorageService.getAuthDataForDevice('device-b'))?.authToken).toBe(
+                'token-b'
             );
         });
+    });
 
-        it('gestisce errori durante il salvataggio', async () => {
-            const authData: StoredAuthData = {
-                authToken: 'test-token',
-                userId: 123,
-                deviceCode: 'device-abc',
-                deviceToken: 'device-token-xyz',
-                expiresAt: Date.now() / 1000 + 3600,
-                deviceName: 'Polar H10',
-                deviceId: 'polar-device-123'
+    describe('migrazione legacy', () => {
+        it('migra auth_data con deviceId verso auth_sessions', async () => {
+            const legacy = futureAuth();
+            const store: Record<string, string> = {
+                auth_data: JSON.stringify(legacy),
             };
 
-            mockAsyncStorage.setItem.mockRejectedValueOnce(new Error('Storage error'));
+            mockAsyncStorage.getItem.mockImplementation(async (key) => store[key] ?? null);
+            mockAsyncStorage.setItem.mockImplementation(async (key, value) => {
+                store[key] = value;
+            });
+            mockAsyncStorage.removeItem.mockImplementation(async (key) => {
+                delete store[key];
+            });
 
-            // Non dovrebbe lanciare eccezioni
-            await expect(StorageService.saveAuthData(authData)).resolves.toBeUndefined();
+            const result = await StorageService.getAuthDataForDevice('polar-device-123');
+            expect(result?.authToken).toBe('test-token');
+            expect(store.auth_sessions).toBeTruthy();
+            expect(store.auth_data).toBeUndefined();
         });
     });
 
-    describe('getAuthData', () => {
-        it('restituisce i dati salvati se validi', async () => {
-            const authData: StoredAuthData = {
-                authToken: 'test-token',
-                userId: 123,
-                deviceCode: 'device-abc',
-                deviceToken: 'device-token-xyz',
-                expiresAt: Date.now() / 1000 + 3600, // 1 ora nel futuro
-                deviceName: 'Polar H10',
-                deviceId: 'polar-device-123'
-            };
+    describe('saveAuthData / getAuthData (compat)', () => {
+        it('salva tramite deviceId nella mappa sessioni', async () => {
+            const store: Record<string, string> = {};
+            mockAsyncStorage.getItem.mockImplementation(async (key) => store[key] ?? null);
+            mockAsyncStorage.setItem.mockImplementation(async (key, value) => {
+                store[key] = value;
+            });
 
-            mockAsyncStorage.getItem.mockResolvedValueOnce(JSON.stringify(authData));
-
+            const authData = futureAuth();
+            await StorageService.saveAuthData(authData);
             const result = await StorageService.getAuthData();
 
-            expect(result).toEqual(authData);
-            expect(mockAsyncStorage.getItem).toHaveBeenCalledWith('auth_data');
+            expect(result?.deviceId).toBe('polar-device-123');
+            expect(store.auth_sessions).toContain('polar-device-123');
         });
 
-        it('restituisce null se non ci sono dati salvati', async () => {
-            mockAsyncStorage.getItem.mockResolvedValueOnce(null);
-
+        it('restituisce null se non ci sono dati', async () => {
             const result = await StorageService.getAuthData();
-
             expect(result).toBeNull();
         });
 
         it('rimuove i dati se scaduti', async () => {
-            const expiredAuthData: StoredAuthData = {
-                authToken: 'test-token',
-                userId: 123,
-                deviceCode: 'device-abc',
-                deviceToken: 'device-token-xyz',
-                expiresAt: Date.now() / 1000 - 3600, // 1 ora nel passato
-                deviceName: 'Polar H10',
-                deviceId: 'polar-device-123'
+            const expired = futureAuth({
+                expiresAt: Math.floor(Date.now() / 1000) - 3600,
+            });
+            const store: Record<string, string> = {
+                auth_sessions: JSON.stringify({ 'polar-device-123': expired }),
+                last_device_id: 'polar-device-123',
+                device_tokens: JSON.stringify({ 'polar-device-123': 'tok' }),
             };
+            mockAsyncStorage.getItem.mockImplementation(async (key) => store[key] ?? null);
+            mockAsyncStorage.setItem.mockImplementation(async (key, value) => {
+                store[key] = value;
+            });
+            mockAsyncStorage.removeItem.mockImplementation(async (key) => {
+                delete store[key];
+            });
 
-            mockAsyncStorage.getItem.mockResolvedValueOnce(JSON.stringify(expiredAuthData));
-            mockAsyncStorage.removeItem.mockResolvedValueOnce(undefined);
-
-            const result = await StorageService.getAuthData();
-
-            expect(result).toBeNull();
-            expect(mockAsyncStorage.removeItem).toHaveBeenCalledWith('auth_data');
-        });
-
-        it('gestisce errori durante il recupero', async () => {
-            mockAsyncStorage.getItem.mockRejectedValueOnce(new Error('Storage error'));
-
-            const result = await StorageService.getAuthData();
-
+            const result = await StorageService.getAuthDataForDevice('polar-device-123');
             expect(result).toBeNull();
         });
     });
 
     describe('clearAuthData', () => {
-        it('cancella tutti i dati di autenticazione', async () => {
-            mockAsyncStorage.removeItem.mockResolvedValueOnce(undefined);
-            mockAsyncStorage.removeItem.mockResolvedValueOnce(undefined);
-
+        it('cancella tutte le chiavi auth', async () => {
             await StorageService.clearAuthData();
 
             expect(mockAsyncStorage.removeItem).toHaveBeenCalledWith('auth_data');
             expect(mockAsyncStorage.removeItem).toHaveBeenCalledWith('device_token');
+            expect(mockAsyncStorage.removeItem).toHaveBeenCalledWith('auth_sessions');
+            expect(mockAsyncStorage.removeItem).toHaveBeenCalledWith('device_tokens');
+            expect(mockAsyncStorage.removeItem).toHaveBeenCalledWith('last_device_id');
         });
     });
 
-    describe('saveDeviceToken e getDeviceToken', () => {
-        it('salva e recupera il device token', async () => {
-            const token = 'device-token-123';
+    describe('saveDeviceTokenForDevice', () => {
+        it('salva e recupera token per device', async () => {
+            const store: Record<string, string> = {};
+            mockAsyncStorage.getItem.mockImplementation(async (key) => store[key] ?? null);
+            mockAsyncStorage.setItem.mockImplementation(async (key, value) => {
+                store[key] = value;
+            });
 
-            mockAsyncStorage.setItem.mockResolvedValueOnce(undefined);
-            mockAsyncStorage.getItem.mockResolvedValueOnce(token);
-
-            await StorageService.saveDeviceToken(token);
-            const result = await StorageService.getDeviceToken();
-
-            expect(mockAsyncStorage.setItem).toHaveBeenCalledWith('device_token', token);
-            expect(mockAsyncStorage.getItem).toHaveBeenCalledWith('device_token');
-            expect(result).toBe(token);
-        });
-
-        it('restituisce null se il device token non esiste', async () => {
-            mockAsyncStorage.getItem.mockResolvedValueOnce(null);
-
-            const result = await StorageService.getDeviceToken();
-
-            expect(result).toBeNull();
+            await StorageService.saveDeviceTokenForDevice('dev-1', 'tok-1');
+            const result = await StorageService.getDeviceTokenForDevice('dev-1');
+            expect(result).toBe('tok-1');
         });
     });
 
     describe('updateDeviceName', () => {
-        it('aggiorna il nome del dispositivo nei dati esistenti', async () => {
-            const existingData: StoredAuthData = {
-                authToken: 'test-token',
-                userId: 123,
-                deviceCode: 'device-abc',
-                deviceToken: 'device-token-xyz',
-                expiresAt: Date.now() / 1000 + 3600,
-                deviceName: 'Polar H10',
-                deviceId: 'polar-device-123'
-            };
+        it('aggiorna il nome sul device indicato', async () => {
+            const store: Record<string, string> = {};
+            mockAsyncStorage.getItem.mockImplementation(async (key) => store[key] ?? null);
+            mockAsyncStorage.setItem.mockImplementation(async (key, value) => {
+                store[key] = value;
+            });
 
-            const newDeviceName = 'Polar H9';
+            await StorageService.saveAuthDataForDevice('polar-device-123', futureAuth());
+            await StorageService.updateDeviceName('Polar Loop', 'polar-device-123');
 
-            mockAsyncStorage.getItem.mockResolvedValueOnce(JSON.stringify(existingData));
-            mockAsyncStorage.setItem.mockResolvedValueOnce(undefined);
-
-            await StorageService.updateDeviceName(newDeviceName);
-
-            expect(mockAsyncStorage.setItem).toHaveBeenCalledWith(
-                'auth_data',
-                JSON.stringify({ ...existingData, deviceName: newDeviceName })
-            );
-        });
-
-        it('non fa nulla se non ci sono dati salvati', async () => {
-            mockAsyncStorage.getItem.mockResolvedValueOnce(null);
-
-            await StorageService.updateDeviceName('New Device');
-
-            expect(mockAsyncStorage.setItem).not.toHaveBeenCalled();
+            const result = await StorageService.getAuthDataForDevice('polar-device-123');
+            expect(result?.deviceName).toBe('Polar Loop');
         });
     });
 
     describe('updateDeviceId', () => {
-        it('aggiorna l\'ID del dispositivo nei dati esistenti', async () => {
-            const existingData: StoredAuthData = {
-                authToken: 'test-token',
-                userId: 123,
-                deviceCode: 'device-abc',
-                deviceToken: 'device-token-xyz',
-                expiresAt: Date.now() / 1000 + 3600,
-                deviceName: 'Polar H10',
-                deviceId: 'polar-device-123'
+        it('imposta last device e migra legacy senza deviceId', async () => {
+            const legacyNoId = futureAuth({ deviceId: undefined });
+            const store: Record<string, string> = {
+                auth_data: JSON.stringify(legacyNoId),
             };
-
-            const newDeviceId = 'polar-device-456';
-
-            mockAsyncStorage.getItem.mockResolvedValueOnce(JSON.stringify(existingData));
-            mockAsyncStorage.setItem.mockResolvedValueOnce(undefined);
-
-            await StorageService.updateDeviceId(newDeviceId);
-
-            expect(mockAsyncStorage.setItem).toHaveBeenCalledWith(
-                'auth_data',
-                JSON.stringify({ ...existingData, deviceId: newDeviceId })
-            );
-        });
-
-        it('non fa nulla se non ci sono dati salvati', async () => {
-            mockAsyncStorage.getItem.mockResolvedValueOnce(null);
+            mockAsyncStorage.getItem.mockImplementation(async (key) => store[key] ?? null);
+            mockAsyncStorage.setItem.mockImplementation(async (key, value) => {
+                store[key] = value;
+            });
+            mockAsyncStorage.removeItem.mockImplementation(async (key) => {
+                delete store[key];
+            });
 
             await StorageService.updateDeviceId('new-device-id');
-
-            expect(mockAsyncStorage.setItem).not.toHaveBeenCalled();
+            const result = await StorageService.getAuthDataForDevice('new-device-id');
+            expect(result?.deviceId).toBe('new-device-id');
+            expect(store.auth_data).toBeUndefined();
         });
     });
 });

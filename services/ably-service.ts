@@ -11,6 +11,13 @@ export enum ConnectionStatus {
     DISCONNECTED = "DISCONNECTED",
 }
 
+export type EndSessionPayload = {
+    sessionId?: string | null;
+    [key: string]: unknown;
+};
+
+export type EndSessionHandler = (payload: EndSessionPayload) => void;
+
 export class AblyService {
     private ably: Ably.Realtime | null = null;
     private isConnected = false;
@@ -19,6 +26,8 @@ export class AblyService {
     private connectedDeviceCode: string | null = null;
     private ablyTokenEndpoint: string;
     private connectionStatusCallback: (status: ConnectionStatus) => void;
+    private endSessionHandler: EndSessionHandler | null = null;
+    private endSessionSubscribedUserId: number | null = null;
 
     constructor(
         ablyTokenEndpoint: string,
@@ -26,6 +35,13 @@ export class AblyService {
     ) {
         this.ablyTokenEndpoint = ablyTokenEndpoint;
         this.connectionStatusCallback = connectionStatusCallback;
+    }
+
+    setEndSessionHandler(handler: EndSessionHandler | null) {
+        this.endSessionHandler = handler;
+        if (this.isConnected && this.connectedUserId != null) {
+            this.subscribeEndSession(this.connectedUserId);
+        }
     }
 
     connectWithToken(authToken: string, userId: number, deviceCode: string) {
@@ -47,6 +63,7 @@ export class AblyService {
             this.ably = null;
             this.isConnected = false;
             this.presenceEntered = false;
+            this.endSessionSubscribedUserId = null;
             this.connectedUserId = null;
             this.connectedDeviceCode = null;
         }
@@ -84,6 +101,7 @@ export class AblyService {
                     if (this.ably) {
                         const shouldEnter = !this.presenceEntered;
                         this.presenceEntered = true;
+                        this.subscribeEndSession(userId);
                         if (shouldEnter) {
                             const channel = this.ably.channels.get(`private:${userId}`);
                             channel.presence.enter(
@@ -208,7 +226,48 @@ export class AblyService {
         }
     }
 
+    private subscribeEndSession(userId: number) {
+        if (!this.ably || !this.endSessionHandler) {
+            return;
+        }
+        if (this.endSessionSubscribedUserId === userId) {
+            return;
+        }
+
+        const channel = this.ably.channels.get(`private:${userId}`);
+        channel.unsubscribe("endSession");
+        channel.subscribe("endSession", (message) => {
+            console.log("AblyService: 📥 endSession received", message.data);
+            let payload: EndSessionPayload = {};
+            try {
+                if (typeof message.data === "string") {
+                    payload = JSON.parse(message.data);
+                } else if (message.data && typeof message.data === "object") {
+                    payload = message.data as EndSessionPayload;
+                }
+            } catch (error: any) {
+                console.warn(
+                    "AblyService: endSession payload parse failed:",
+                    error?.message
+                );
+            }
+            this.endSessionHandler?.(payload);
+        });
+        this.endSessionSubscribedUserId = userId;
+        console.log(`AblyService: 👂 Subscribed endSession on private:${userId}`);
+    }
+
     close() {
+        if (this.ably && this.endSessionSubscribedUserId != null) {
+            try {
+                this.ably.channels
+                    .get(`private:${this.endSessionSubscribedUserId}`)
+                    .unsubscribe("endSession");
+            } catch {
+                // ignore
+            }
+        }
+        this.endSessionSubscribedUserId = null;
         if (this.ably) {
             this.ably.close();
             console.log("AblyService: 🔒 Connection closed");

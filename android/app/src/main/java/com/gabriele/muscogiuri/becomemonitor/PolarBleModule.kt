@@ -6,6 +6,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.gabriele.muscogiuri.becomemonitor.bluetooth.BluetoothManager
 import com.gabriele.muscogiuri.becomemonitor.polar.PolarDeviceManager
 import com.gabriele.muscogiuri.becomemonitor.polar.PolarFtuManager
+import com.gabriele.muscogiuri.becomemonitor.polar.PolarOfflineRecordingManager
 import com.gabriele.muscogiuri.becomemonitor.polar.PolarStreamManager
 import com.polar.sdk.api.PolarBleApi
 import com.polar.sdk.api.PolarBleApiDefaultImpl
@@ -20,6 +21,7 @@ class PolarBleModule @JvmOverloads constructor(
     deviceManagerOverride: PolarDeviceManager? = null,
     streamManagerOverride: PolarStreamManager? = null,
     ftuManagerOverride: PolarFtuManager? = null,
+    offlineRecordingManagerOverride: PolarOfflineRecordingManager? = null,
     apiOverride: PolarBleApi? = null,
 ) : ReactContextBaseJavaModule(reactContext) {
 
@@ -35,7 +37,8 @@ class PolarBleModule @JvmOverloads constructor(
                 PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_ONLINE_STREAMING,
                 PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_SDK_MODE,
                 PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_DEVICE_TIME_SETUP,
-                PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_FILE_TRANSFER
+                PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_FILE_TRANSFER,
+                PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_OFFLINE_RECORDING
             )
         ).also { polarApi ->
             // Auto-reconnect hammers a broken LE bond (SMP_PAIR_AUTH_FAIL → GATT 22 loop).
@@ -58,6 +61,10 @@ class PolarBleModule @JvmOverloads constructor(
 
     private val ftuManager: PolarFtuManager by lazy {
         ftuManagerOverride ?: PolarFtuManager(api)
+    }
+
+    private val offlineRecordingManager: PolarOfflineRecordingManager by lazy {
+        offlineRecordingManagerOverride ?: PolarOfflineRecordingManager(api)
     }
 
     private val disposables = CompositeDisposable()
@@ -369,6 +376,90 @@ class PolarBleModule @JvmOverloads constructor(
         } catch (e: Exception) {
             promise.reject("STOP_PPI_ERROR", e.message)
         }
+    }
+
+    @ReactMethod
+    fun startPpiOfflineRecording(deviceId: String, promise: Promise) {
+        Log.d(TAG, "startPpiOfflineRecording $deviceId")
+        val disposable = offlineRecordingManager.startPpiOfflineRecording(deviceId)
+            .subscribeOn(Schedulers.io())
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe({
+                promise.resolve(null)
+            }, { error ->
+                promise.reject(
+                    "OFFLINE_REC_START_ERROR",
+                    "${error.javaClass.simpleName}: ${error.message}"
+                )
+            })
+        disposables.add(disposable)
+    }
+
+    @ReactMethod
+    fun stopPpiOfflineRecording(deviceId: String, promise: Promise) {
+        Log.d(TAG, "stopPpiOfflineRecording $deviceId")
+        val disposable = offlineRecordingManager.stopPpiOfflineRecording(deviceId)
+            .subscribeOn(Schedulers.io())
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe({
+                promise.resolve(null)
+            }, { error ->
+                promise.reject(
+                    "OFFLINE_REC_STOP_ERROR",
+                    "${error.javaClass.simpleName}: ${error.message}"
+                )
+            })
+        disposables.add(disposable)
+    }
+
+    @ReactMethod
+    fun fetchLatestPpiOfflineRecord(deviceId: String, promise: Promise) {
+        Log.d(TAG, "fetchLatestPpiOfflineRecord $deviceId")
+        val disposable = offlineRecordingManager.fetchLatestPpiRecord(deviceId)
+            .subscribeOn(Schedulers.io())
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe({ track ->
+                val map = Arguments.createMap().apply {
+                    putString("path", track.path)
+                    putDouble("size", track.size.toDouble())
+                    putString("startedAt", track.startedAt)
+                    val samples = Arguments.createArray()
+                    track.samples.forEach { sample ->
+                        samples.pushMap(Arguments.createMap().apply {
+                            putInt("ppiMs", sample.ppiMs)
+                            putInt("hr", sample.hr)
+                            putInt("errorEstimate", sample.errorEstimate)
+                            putBoolean("blockerBit", sample.blockerBit)
+                            if (sample.t != null) putString("t", sample.t)
+                        })
+                    }
+                    putArray("samples", samples)
+                }
+                promise.resolve(map)
+            }, { error ->
+                promise.reject(
+                    "OFFLINE_REC_FETCH_ERROR",
+                    "${error.javaClass.simpleName}: ${error.message}"
+                )
+            })
+        disposables.add(disposable)
+    }
+
+    @ReactMethod
+    fun removePpiOfflineRecord(deviceId: String, path: String, promise: Promise) {
+        Log.d(TAG, "removePpiOfflineRecord $deviceId $path")
+        val disposable = offlineRecordingManager.removeRecordByPath(deviceId, path)
+            .subscribeOn(Schedulers.io())
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe({
+                promise.resolve(null)
+            }, { error ->
+                promise.reject(
+                    "OFFLINE_REC_REMOVE_ERROR",
+                    "${error.javaClass.simpleName}: ${error.message}"
+                )
+            })
+        disposables.add(disposable)
     }
 
     /**
