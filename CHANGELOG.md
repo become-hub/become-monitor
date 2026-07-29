@@ -4,6 +4,17 @@ Tutte le modifiche rilevanti a Augmented Monitor.
 
 Il formato si ispira a [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [1.1.0] — Feature architecture + CI
+
+### Changed
+- Monitor refactor: logica in `features/monitor` (hook di sessione + componenti UI), route sottile
+- Device Polar/Muse spostati in `features/devices/*` con re-export da `services/`
+- `getApiBaseUrl` spostato in `services/api-config` (niente dipendenza store da `constants/`)
+
+### Added
+- Pipeline GitHub Actions (Jest + coverage su push/PR)
+- Guida `docs/architecture-scope.md` (scope Clean Architecture su Expo, senza moduli Gradle ECC)
+
 ## [1.0.3] — Muse 2
 
 ### Added
