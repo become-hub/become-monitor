@@ -102,6 +102,7 @@ export interface LocaleStrings {
         signalMetric: string;
         signalPolar360: string;
         signalPolarLoop: string;
+        signalPolarH10: string;
         signalNotes: string;
         signalUsedInApp: string;
         signalUsedYes: string;
@@ -116,6 +117,7 @@ export interface LocaleStrings {
         signalHrvRmssd: string;
         signalLfHf: string;
         signalRawPpg: string;
+        signalRawEcg: string;
         signalAcc: string;
         signalSkinTemp: string;
         signalFtu: string;
@@ -127,6 +129,7 @@ export interface LocaleStrings {
         signalNoteHrv: string;
         signalNoteLfHf: string;
         signalNoteRawPpg: string;
+        signalNoteRawEcg: string;
         signalNoteAcc: string;
         signalNoteSkinTemp: string;
         signalNoteFtu: string;
@@ -243,10 +246,10 @@ export const translations: Record<Language, LocaleStrings> = {
             hrvMetrics: 'Metriche HRV',
             hrvMetricsDescription: '• RMSSD (Root Mean Square of Successive Differences)\n• Potenza LF (Low Frequency)\n• Potenza HF (High Frequency)\n• Analisi finestra scorrevole di 30 secondi',
             supportedDevices: 'Dispositivi Supportati',
-            supportedDevicesDescription: '• Polar 360\n• Polar Loop Gen 2\n\nEntrambi usano PPG ottico (non ECG). Fasce petto come H10 non sono integrate in questa app.',
+            supportedDevicesDescription: '• Polar 360\n• Polar Loop Gen 2\n• Polar H10 (ECG, RR nativi)\n\n360 e Loop usano PPG ottico; H10 usa ECG a contatto toracico.',
             deviceGuides: 'Guide Connessione Dispositivi',
             polar360ConnectionGuide: 'Guida Connessione Polar',
-            polar360GuideDescription: 'Guida passo-passo per Polar 360 e Loop Gen 2: scansione, selezione dispositivo, FTU, autenticazione Become e streaming.',
+            polar360GuideDescription: 'Guida passo-passo per Polar 360, Loop Gen 2 e H10: scansione, selezione dispositivo, FTU (360/Loop), autenticazione Become e streaming.',
             viewPolar360Guide: 'Visualizza Guida Polar',
             deviceComparison: 'Confronto dispositivi',
             deviceComparisonIntro: 'Differenze scientifiche tra i Polar integrati (profilo SDK condiviso). Espandi un tema per la tabella.',
@@ -261,6 +264,7 @@ export const translations: Record<Language, LocaleStrings> = {
             signalMetric: 'Segnale / metrica',
             signalPolar360: 'Polar 360',
             signalPolarLoop: 'Polar Loop Gen 2',
+            signalPolarH10: 'Polar H10',
             signalNotes: 'Note scientifiche',
             signalUsedInApp: 'In app',
             signalUsedYes: 'Sì',
@@ -275,20 +279,22 @@ export const translations: Record<Language, LocaleStrings> = {
             signalHrvRmssd: 'HRV (RMSSD)',
             signalLfHf: 'LF / HF power',
             signalRawPpg: 'PPG grezzo',
+            signalRawEcg: 'ECG grezzo (µV)',
             signalAcc: 'Accelerometro',
             signalSkinTemp: 'Temperatura cute',
             signalFtu: 'FTU obbligatorio',
             signalNoteSensing: 'PPG ottico a LED verde — non è ECG a contatto toracico.',
-            signalNoteEcg: 'ECG tipico di fascia petto (es. H10); non supportato su questi wristband né in app.',
-            signalNoteHr: 'Battiti/minuto stimati da PPG (online streaming).',
-            signalNotePpi: 'Intervallo pulse-to-pulse (ms) da PPG; base per HRV time-domain e tracciato offline.',
-            signalNoteRr: 'Intervallo RR: da PPI se disponibile, altrimenti RR(ms)=60000/HR(bpm).',
-            signalNoteHrv: 'Calcolo app (RMSSD) su finestra RR/PPI — non metrica nativa device.',
+            signalNoteEcg: 'ECG a contatto (H10); wristband 360/Loop usano PPG, non ECG.',
+            signalNoteHr: 'Battiti/minuto: da PPG (360/Loop) o HR+RR nativi ECG (H10).',
+            signalNotePpi: 'Intervallo pulse-to-pulse (ms) da PPG; base per HRV e tracciato offline 360/Loop. Assente su H10.',
+            signalNoteRr: 'RR(ms): da PPI (360/Loop), da rrsMs ECG (H10), altrimenti 60000/HR solo se non c\'è grezzo.',
+            signalNoteHrv: 'Calcolo app (RMSSD) su finestra RR — non metrica nativa device.',
             signalNoteLfHf: 'Stima spettrale in-app su finestra di intervalli RR.',
             signalNoteRawPpg: 'Segnale AFE grezzo (es. ~22 Hz, 24 bit); richiede resampling. Non streammato in UI.',
+            signalNoteRawEcg: 'Ultimo campione µV da startEcgStreaming; mostrato in Monitor solo su H10.',
             signalNoteAcc: 'Movimento / activity (~50 Hz, ±8 g tipico). Non usato in UI corrente.',
             signalNoteSkinTemp: 'Skin temperature (1–4 Hz). Non usato in UI corrente.',
-            signalNoteFtu: 'Dati antropometrici via SDK prima delle misure 24/7; poi restart device.',
+            signalNoteFtu: 'Dati antropometrici via SDK (360/Loop) prima delle misure 24/7; H10 non richiede FTU.',
             resources: 'Risorse',
             becomeHubWebsite: 'Sito Web Become Hub',
             becomeSupport: 'Supporto Become',
@@ -398,10 +404,10 @@ export const translations: Record<Language, LocaleStrings> = {
             hrvMetrics: 'HRV Metrics',
             hrvMetricsDescription: '• RMSSD (Root Mean Square of Successive Differences)\n• LF Power (Low Frequency)\n• HF Power (High Frequency)\n• 30-second rolling window analysis',
             supportedDevices: 'Supported Devices',
-            supportedDevicesDescription: '• Polar 360\n• Polar Loop Gen 2\n\nBoth use optical PPG (not ECG). Chest straps such as H10 are not integrated in this app.',
+            supportedDevicesDescription: '• Polar 360\n• Polar Loop Gen 2\n• Polar H10 (ECG, native RR)\n\n360 and Loop use optical PPG; H10 uses chest-contact ECG.',
             deviceGuides: 'Device Connection Guides',
             polar360ConnectionGuide: 'Polar Connection Guide',
-            polar360GuideDescription: 'Step-by-step guide for Polar 360 and Loop Gen 2: scan, device selection, FTU, Become auth, and streaming.',
+            polar360GuideDescription: 'Step-by-step guide for Polar 360, Loop Gen 2, and H10: scan, device selection, FTU (360/Loop), Become auth, and streaming.',
             viewPolar360Guide: 'View Polar Guide',
             deviceComparison: 'Device comparison',
             deviceComparisonIntro: 'Scientific differences between integrated Polar devices (shared SDK profile). Expand a theme for the table.',
@@ -416,6 +422,7 @@ export const translations: Record<Language, LocaleStrings> = {
             signalMetric: 'Signal / metric',
             signalPolar360: 'Polar 360',
             signalPolarLoop: 'Polar Loop Gen 2',
+            signalPolarH10: 'Polar H10',
             signalNotes: 'Scientific notes',
             signalUsedInApp: 'In app',
             signalUsedYes: 'Yes',
@@ -430,20 +437,22 @@ export const translations: Record<Language, LocaleStrings> = {
             signalHrvRmssd: 'HRV (RMSSD)',
             signalLfHf: 'LF / HF power',
             signalRawPpg: 'Raw PPG',
+            signalRawEcg: 'Raw ECG (µV)',
             signalAcc: 'Accelerometer',
             signalSkinTemp: 'Skin temperature',
             signalFtu: 'FTU required',
             signalNoteSensing: 'Green-LED optical PPG — not chest-contact ECG.',
-            signalNoteEcg: 'ECG is typical of chest straps (e.g. H10); not supported on these wristbands or in-app.',
-            signalNoteHr: 'Beats per minute estimated from PPG (online streaming).',
-            signalNotePpi: 'Pulse-to-pulse interval (ms) from PPG; basis for time-domain HRV and offline track.',
-            signalNoteRr: 'RR interval: from PPI when available, otherwise RR(ms)=60000/HR(bpm).',
-            signalNoteHrv: 'App calculation (RMSSD) on an RR/PPI window — not a native device metric.',
+            signalNoteEcg: 'Chest-contact ECG (H10); 360/Loop wristbands use PPG, not ECG.',
+            signalNoteHr: 'Beats per minute from PPG (360/Loop) or native HR+RR from ECG (H10).',
+            signalNotePpi: 'Pulse-to-pulse interval (ms) from PPG; basis for HRV and offline track on 360/Loop. Not on H10.',
+            signalNoteRr: 'RR(ms): from PPI (360/Loop), from native ECG rrsMs (H10), else 60000/HR only when no raw RR.',
+            signalNoteHrv: 'App calculation (RMSSD) on an RR window — not a native device metric.',
             signalNoteLfHf: 'In-app spectral estimate on an RR-interval window.',
             signalNoteRawPpg: 'Raw AFE signal (e.g. ~22 Hz, 24-bit); needs resampling. Not streamed in UI.',
+            signalNoteRawEcg: 'Latest µV sample from startEcgStreaming; shown in Monitor on H10 only.',
             signalNoteAcc: 'Motion / activity (~50 Hz, ±8 g typical). Not used in current UI.',
             signalNoteSkinTemp: 'Skin temperature (1–4 Hz). Not used in current UI.',
-            signalNoteFtu: 'Anthropometric data via SDK before 24/7 measures; then device restart.',
+            signalNoteFtu: 'Anthropometric data via SDK (360/Loop) before 24/7 measures; H10 does not require FTU.',
             resources: 'Resources',
             becomeHubWebsite: 'Become Hub Website',
             becomeSupport: 'Become Support',

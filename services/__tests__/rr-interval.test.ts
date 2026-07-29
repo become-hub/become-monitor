@@ -25,6 +25,20 @@ describe("rr-interval", () => {
     });
   });
 
+  it("preferisce RR ECG rispetto a HR", () => {
+    expect(resolveRrInterval({ ecgRrMs: 805, hrBpm: 75 })).toEqual({
+      rrMs: 805,
+      rrSource: "ecg_rr",
+    });
+  });
+
+  it("preferisce PPI rispetto a RR ECG", () => {
+    expect(resolveRrInterval({ ppiMs: 790, ecgRrMs: 805 })).toEqual({
+      rrMs: 790,
+      rrSource: "ppi",
+    });
+  });
+
   it("deriva da HR se PPI assente", () => {
     expect(resolveRrInterval({ hrBpm: 75 })).toEqual({
       rrMs: 800,

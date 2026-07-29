@@ -84,6 +84,32 @@ export class SessionTrackBuffer {
     this.samples.push(sample);
     return sample;
   }
+
+  pushEcgRr(input: {
+    rrMs: number;
+    hr?: number;
+    t?: string;
+  }): TrackSample | null {
+    const resolved = resolveRrInterval({
+      ecgRrMs: input.rrMs,
+      hrBpm: input.hr,
+    });
+    if (!resolved || resolved.rrSource !== "ecg_rr") {
+      return null;
+    }
+    const stamp = input.t ?? new Date().toISOString();
+    if (!this.startedAt) {
+      this.startedAt = stamp;
+    }
+    const sample: TrackSample = {
+      t: stamp,
+      hr: input.hr,
+      rrMs: resolved.rrMs,
+      rrSource: resolved.rrSource,
+    };
+    this.samples.push(sample);
+    return sample;
+  }
 }
 
 export const sessionTrackBuffer = new SessionTrackBuffer();

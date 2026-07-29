@@ -10,12 +10,13 @@ Dispositivi supportati:
 
 - **Polar 360**
 - **Polar Loop Gen 2**
+- **Polar H10** (fascia petto ECG)
 
-Entrambi condividono lo stesso profilo SDK (PPG ottico, HR, PPI, ACC, skin temp, FTU). **Non** sono dispositivi ECG: l’ECG tipico appartiene a fasce petto (es. Polar H10), non integrate in questa app.
+360 e Loop condividono lo stesso profilo SDK (PPG ottico, HR, PPI, ACC, skin temp, FTU). **H10** usa ECG a contatto: HR + RR nativi (`rrsMs`) ed ECG grezzo (µV) in streaming; **nessun FTU** e **nessun PPI offline**.
 
 ## Requisiti preliminari
 
-- Polar 360 o Loop Gen 2 carico.
+- Polar 360, Loop Gen 2 o H10 carico / con batteria sufficiente.
 - **Smartphone Android 13 o superiore** (API 33+): versioni precedenti non consentono l'installazione dell'app.
 - Bluetooth attivo.
 - App Augmented Monitor installata (versione corrente: **1.0.0**).
@@ -38,26 +39,37 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Augm
 2. Apri l'app Augmented Monitor.
 3. Consenti all'app i permessi Bluetooth e, se richiesto, le **notifiche**.
 4. Vai su **Monitor** e avvia **"Cerca Dispositivo Polar"**.
-5. Quando compaiono i Polar supportati nell’elenco, **seleziona** quello che vuoi usare (360 o Loop). L’app **non** si connette automaticamente al primo trovato.
+5. Quando compaiono i Polar supportati nell’elenco, **seleziona** quello che vuoi usare (360, Loop o H10). L’app **non** si connette automaticamente al primo trovato.
 6. Al primo collegamento l'app:
    - completa il pairing BLE
-   - esegue il **First Time Use** (configurazione dispositivo via SDK) e, se necessario, **riavvia** il Polar
-   - alla riconnessione **dello stesso** `deviceId` avvia lo streaming HR / PPI verso Become
-   - avvia **offline recording PPI** sul Polar (tracciato grezzo in memoria device); se fallisce, accumula un buffer live in-app
-   - calcola il tracciato **RR** (da PPI se disponibile, altrimenti `RR(ms) = 60000 / HR(bpm)`)
+   - **360 / Loop:** esegue il **First Time Use** (configurazione dispositivo via SDK) e, se necessario, **riavvia** il Polar
+   - **H10:** salta FTU; avvia subito HR (con RR nativi) ed ECG grezzo
+   - alla riconnessione **dello stesso** `deviceId` avvia lo streaming verso Become
+   - **360 / Loop:** avvia **offline recording PPI** sul Polar (tracciato grezzo in memoria device); se fallisce, accumula un buffer live in-app
+   - **H10:** solo buffer live in-app (`rrSource: ecg_rr`); niente offline PPI
+   - calcola il tracciato **RR** (da PPI su 360/Loop, da `rrsMs` su H10, altrimenti `60000/HR` solo se non c’è grezzo)
    - avvia un **servizio in primo piano** con notifica persistente (dispositivo collegato + HR, HRV, LF, HF), così lo streaming continua anche a schermo bloccato
 
 ### Live vs flush a fine sessione (spike)
 
-- **Live**: HR / PPI / RR / HRV restano in streaming verso Ably (`heartRate`) per la visibilità in Hub.
+- **Live**: HR / PPI o RR ECG / HRV restano in streaming verso Ably (`heartRate`) per la visibilità in Hub.
 - **Tracciato intero**: a fine sessione Hub pubblica su `private:{userId}` l’evento Ably **`endSession`** (payload opzionale `{ "sessionId": "..." }`). L’app:
-  1. ferma l’offline recording PPI
-  2. scarica il record dal Polar (o usa il buffer live)
-  3. costruisce un payload grezzo `ppiTrack` (sample con `ppiMs`, `hr`, `rrMs`, `rrSource`)
+  1. **360 / Loop:** ferma l’offline recording PPI, scarica il record dal Polar (o usa il buffer live)
+  2. **H10:** usa solo il buffer live (RR `ecg_rr`)
+  3. costruisce un payload grezzo `ppiTrack` (sample con `ppiMs`/`hr`, `rrMs`, `rrSource`)
   4. fa **POST** a `EXPO_PUBLIC_TRACK_UPLOAD_URL` con `Authorization: Bearer {authToken}`
-  5. rimuove il record offline dal device dopo upload ok
+  5. **360 / Loop:** rimuove il record offline dal device dopo upload ok
 - Se `EXPO_PUBLIC_TRACK_UPLOAD_URL` è vuoto, lo spike fa **dry-run** (solo log).
-- In Monitor è disponibile il bottone **“Simula endSession / Flush track”** per test senza Hub.
+- In Monitor, con **debug mode** attivo, è disponibile il bottone **“Simula endSession / Flush track”** per test senza Hub.
+
+### Monitor — card grezze H10
+
+Con H10 connesso, oltre a HR e metriche derivate (RMSSD, LF/HF), l’app mostra in evidenza:
+
+- **RR (ECG)** — ultimo intervallo da `rrsMs` nativo (`ecg_rr`)
+- **ECG** — ultimo campione in µV dallo streaming SDK
+
+Su H10 **non** viene mostrato RR derivato da `60000/HR` quando è disponibile RR grezzo.
 
 Esempio payload POST:
 
@@ -134,19 +146,19 @@ Durante lo streaming, la barra delle notifiche mostra il nome del Polar collegat
 
 Fonte: profilo Polar BLE SDK condiviso da 360 e Loop Gen 2. Tabella allineata all’accordion in-app (tab Documentazione).
 
-| Segnale / metrica | Polar 360 | Polar Loop Gen 2 | Note scientifiche | Usato oggi in Augmented Monitor |
-|---|---|---|---|---|
-| Principio di sensing | PPG ottico (LED verde) | PPG ottico (stesso profilo SDK) | Non è ECG a contatto toracico | Sì (via HR/PPI) |
-| ECG | No | No | ECG tipico di fascia petto (es. H10), non di questi wristband | — |
-| HR (BPM) | Sì (online) | Sì | Battiti/minuto da PPG | Sì |
-| PPI / PP interval | Sì (da PPG) | Sì | Intervallo pulse-to-pulse (ms); base per HRV time-domain | Sì → RMSSD + tracciato offline/buffer |
-| HRV (RMSSD) | Derivata da PPI/HR | Derivata da PPI/HR | Calcolo app, non metrica nativa device | Sì |
-| RR (ms) | Da PPI oppure `60000/HR` | Idem | Intervallo stimato; `rrSource: ppi \| hr_derived` | Sì (live + flush) |
-| LF / HF power | Derivata da finestra RR | Derivata da finestra RR | Stima spettrale in-app su RR | Sì |
-| PPG grezzo | Sì (SDK; es. ~22 Hz, 24 bit) | Stesso profilo SDK | Segnale grezzo AFE; richiede resampling | No (non streammato in UI) |
-| Accelerometro | Sì (es. ~50 Hz, ±8 g) | Sì | Movimento / activity | No in UI corrente |
-| Temperatura cute | Sì (1–4 Hz) | Sì | Skin temperature | No in UI corrente |
-| FTU obbligatorio | Sì | Sì | Dati antropometrici prima delle misure 24/7 | Sì |
+| Segnale / metrica | Polar 360 | Polar Loop Gen 2 | Polar H10 | Note scientifiche | Usato oggi in Augmented Monitor |
+| --- | --- | --- | --- | --- | --- |
+| Principio di sensing | PPG ottico (LED verde) | PPG ottico (stesso profilo SDK) | ECG a contatto (fascia toracica) | 360/Loop non sono ECG; H10 misura elettrica cardiaca | Sì |
+| ECG | No | No | Sì (streaming SDK) | Segnale grezzo in microvolt (uV) | Sì (solo H10) |
+| HR (BPM) | Sì (online) | Sì | Sì | Battiti/minuto da PPG (360/Loop) o ECG (H10) | Sì |
+| PPI / PP interval | Sì (da PPG) | Sì | No | Intervallo pulse-to-pulse (ms), base HRV time-domain | Sì (360/Loop) |
+| RR (ms) | Da PPI o `60000/HR` fallback | Idem | Nativo da `rrsMs` | `rrSource`: `ppi`, `ecg_rr`, `hr_derived` | Sì (live + flush) |
+| HRV (RMSSD) | Derivata da RR/PPI | Derivata da RR/PPI | Derivata da RR ECG | Calcolo app, non metrica nativa device | Sì |
+| LF / HF power | Derivata da finestra RR | Derivata da finestra RR | Derivata da finestra RR | Stima spettrale in-app su RR | Sì |
+| PPG grezzo | Sì (SDK, es. ~22 Hz, 24 bit) | Stesso profilo SDK | No | Segnale AFE; richiede resampling | No in UI corrente |
+| Accelerometro | Sì (es. ~50 Hz, +-8 g) | Sì | No | Movimento/activity | No in UI corrente |
+| Temperatura cute | Sì (1-4 Hz) | Sì | No | Skin temperature | Sì (360/Loop) |
+| FTU obbligatorio | Sì | Sì | No | FTU richiesto solo per famiglia 360/Loop | Sì (dove previsto) |
 
 ## Disconnessione del dispositivo
 

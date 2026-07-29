@@ -23,8 +23,12 @@ describe('polar-products', () => {
       expect(resolvePolarProduct('polar loop xyz')?.id).toBe('polar_loop');
     });
 
-    it('ignora H10 e dispositivi non supportati', () => {
-      expect(resolvePolarProduct('Polar H10')).toBeNull();
+    it('riconosce Polar H10', () => {
+      expect(resolvePolarProduct('Polar H10')?.id).toBe('polar_h10');
+      expect(resolvePolarProduct('POLAR H10 ABC')?.id).toBe('polar_h10');
+    });
+
+    it('ignora dispositivi non supportati', () => {
       expect(resolvePolarProduct('Polar H9')).toBeNull();
       expect(resolvePolarProduct('Polar Sense')).toBeNull();
       expect(resolvePolarProduct('Unknown Device')).toBeNull();
@@ -35,26 +39,28 @@ describe('polar-products', () => {
   });
 
   describe('isSupportedPolarDevice', () => {
-    it('true solo per 360 e Loop', () => {
+    it('true per 360, Loop e H10', () => {
       expect(isSupportedPolarDevice('Polar 360')).toBe(true);
       expect(isSupportedPolarDevice('Polar Loop')).toBe(true);
-      expect(isSupportedPolarDevice('Polar H10')).toBe(false);
+      expect(isSupportedPolarDevice('Polar H10')).toBe(true);
     });
   });
 
   describe('getPolarProductBadge', () => {
     it('restituisce display name o fallback', () => {
       expect(getPolarProductBadge('Polar 360 ABC')).toBe('Polar 360');
-      expect(getPolarProductBadge('Polar Loop')).toBe('Polar Loop');
+      expect(getPolarProductBadge('Polar Loop')).toBe('Polar Loop Gen 2');
+      expect(getPolarProductBadge('Polar H10')).toBe('Polar H10');
       expect(getPolarProductBadge('Something')).toBe('Polar');
     });
   });
 
   describe('POLAR_PRODUCT_LIST', () => {
-    it('espone 360 e Loop in ordine', () => {
+    it('espone 360, Loop e H10 in ordine', () => {
       expect(POLAR_PRODUCT_LIST.map((p) => p.id)).toEqual([
         'polar_360',
         'polar_loop',
+        'polar_h10',
       ]);
     });
   });

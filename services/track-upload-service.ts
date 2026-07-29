@@ -15,7 +15,7 @@ export interface TrackUploadSample {
   errorEstimate?: number;
   blockerBit?: boolean | number;
   rrMs: number;
-  rrSource: "ppi" | "hr_derived";
+  rrSource: "ppi" | "hr_derived" | "ecg_rr";
 }
 
 export interface TrackUploadPayload {

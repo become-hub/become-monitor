@@ -14,20 +14,23 @@ import { AuthService } from "@/services/auth-service";
 import { calculateRMSSD, computeLfHf } from "@/services/hrv-calculator";
 import {
   PolarDeviceInfo,
+  PolarEcgData,
   PolarHrData,
   PolarPpiData,
+  PolarSkinTemperatureData,
   polarSdk,
 } from "@/services/polar-ble-sdk";
 import {
   ensurePolarReady,
-  startPpiStreamingWithFallback,
+  startPolarStreamingForProduct,
 } from "@/services/polar-device-setup";
 import {
   getPolarProductBadge,
   isSupportedPolarDevice,
+  PolarProduct,
   resolvePolarProduct,
 } from "@/services/polar-products";
-import { resolveRrInterval } from "@/services/rr-interval";
+import { resolveRrInterval, type RrSource } from "@/services/rr-interval";
 import {
   flushSessionTrack,
   startSessionOfflineRecording,
@@ -41,7 +44,9 @@ import {
   Activity,
   CheckCircle,
   Heart,
+  MoreVertical,
   Search,
+  Thermometer,
   Trash2,
   Unplug,
   XCircle,
@@ -107,6 +112,7 @@ export default function MonitorScreen() {
   const [connectedDeviceName, setConnectedDeviceName] = useState<string>("");
   const [foundDeviceName, setFoundDeviceName] = useState<string>("");
   const [isConnectingSelected, setIsConnectingSelected] = useState(false);
+  const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
 
   // Auth & Ably
   const authService = useRef(new AuthService());
@@ -123,17 +129,27 @@ export default function MonitorScreen() {
   const [lfPower, setLfPower] = useState(0);
   const [hfPower, setHfPower] = useState(0);
   const [rrMs, setRrMs] = useState(0);
-  const [rrSource, setRrSource] = useState<"ppi" | "hr_derived" | null>(null);
+  const [rrSource, setRrSource] = useState<RrSource | null>(null);
+  const [ecgMicroVolts, setEcgMicroVolts] = useState(0);
+  const [skinTemperatureC, setSkinTemperatureC] = useState(0);
   const [isFlushingTrack, setIsFlushingTrack] = useState(false);
   const [offlineRecordingStarted, setOfflineRecordingStarted] = useState(false);
   const heartRateRef = useRef(0);
   const hrvRef = useRef(0);
   const lfPowerRef = useRef(0);
   const hfPowerRef = useRef(0);
+  const skinTemperatureCRef = useRef(0);
   const connectedDeviceNameRef = useRef("");
   const connectedDeviceIdRef = useRef<string | null>(null);
   const flushInFlightRef = useRef(false);
-  const rrSourceRef = useRef<"ppi" | "hr_derived" | null>(null);
+  const rrSourceRef = useRef<RrSource | null>(null);
+
+  const connectedProduct: PolarProduct | null = resolvePolarProduct(
+    connectedDeviceName
+  );
+  const isH10Connected = connectedProduct?.id === "polar_h10";
+  const isSkinTemperatureSupported = connectedProduct?.capabilities.skinTemperature === true;
+  const showRawEcgCards = connectedProduct?.capabilities.rawEcg === true;
 
   useEffect(() => {
     heartRateRef.current = heartRate;
@@ -147,6 +163,9 @@ export default function MonitorScreen() {
   useEffect(() => {
     hfPowerRef.current = hfPower;
   }, [hfPower]);
+  useEffect(() => {
+    skinTemperatureCRef.current = skinTemperatureC;
+  }, [skinTemperatureC]);
   useEffect(() => {
     connectedDeviceNameRef.current = connectedDeviceName;
   }, [connectedDeviceName]);
@@ -353,7 +372,7 @@ export default function MonitorScreen() {
           return;
         }
 
-        launchAuthAndStream(device.deviceId);
+        launchAuthAndStream(device.deviceId, device.name);
       }
     );
 
@@ -391,6 +410,7 @@ export default function MonitorScreen() {
         setConnectedDeviceName("");
         setFoundDeviceName("");
         setIsConnectingSelected(false);
+        setDeviceMenuOpen(false);
         authStreamInFlightRef.current = false;
         streamReadyDeviceRef.current = null;
         authSessionDeviceRef.current = null;
@@ -428,11 +448,94 @@ export default function MonitorScreen() {
       console.log(`Monitor: 💓 HR=${data.hr} BPM`);
       setHeartRate(data.hr);
 
-      // Se non ci sono dati PPI, calcola RR approssimato da BPM come fallback
+      const product = resolvePolarProduct(connectedDeviceNameRef.current);
+      const nativeRrs = data.rrsMs?.filter(
+        (rr) => Number.isFinite(rr) && rr >= 300 && rr <= 2000
+      );
+
+      if (
+        nativeRrs &&
+        nativeRrs.length > 0 &&
+        product?.capabilities.rawEcg
+      ) {
+        nativeRrs.forEach((rr) => {
+          const resolved = resolveRrInterval({
+            ecgRrMs: rr,
+            hrBpm: data.hr,
+          });
+          if (resolved) {
+            setRrMs(resolved.rrMs);
+            setRrSource(resolved.rrSource);
+            rrSourceRef.current = resolved.rrSource;
+          }
+          sessionTrackBuffer.pushEcgRr({ rrMs: rr, hr: data.hr });
+          ppiWindow.current.push(rr);
+          if (ppiWindow.current.length > WINDOW_SIZE) {
+            ppiWindow.current.shift();
+          }
+        });
+
+        let hrvValue = null;
+        let lfPowerValue = null;
+        let hfPowerValue = null;
+
+        if (ppiWindow.current.length === WINDOW_SIZE) {
+          const rmssd = calculateRMSSD(ppiWindow.current);
+          const roundedRmsdd = Math.round(rmssd);
+          setHrv(roundedRmsdd);
+          hrvValue = roundedRmsdd;
+
+          const { lf, hf } = computeLfHf(ppiWindow.current);
+          const roundedLf = Math.round(lf);
+          const roundedHf = Math.round(hf);
+          setLfPower(roundedLf);
+          setHfPower(roundedHf);
+          lfPowerValue = roundedLf;
+          hfPowerValue = roundedHf;
+
+          console.log(
+            `Monitor: 📊 HRV (RR ECG)=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`
+          );
+        }
+
+        const userStateHr = useUserStore.getState();
+        if (
+          userStateHr.authToken &&
+          ablyService.current &&
+          userStateHr.userId &&
+          userStateHr.deviceCode
+        ) {
+          const timestamp = new Date().toISOString();
+          ablyService.current.sendMessage(
+            userStateHr.userId,
+            "heartRate",
+            {
+              deviceId: connectedDeviceId,
+              heartRate: data.hr,
+              hrv: hrvValue,
+              lfPower: lfPowerValue,
+              hfPower: hfPowerValue,
+              date: timestamp,
+            },
+            userStateHr.deviceCode
+          );
+        }
+        return;
+      }
+
+      // Se non ci sono dati PPI/RR grezzi, calcola RR approssimato da BPM come fallback
       if (data.hr > 0) {
+        if (
+          product?.capabilities.rawEcg ||
+          rrSourceRef.current === "ppi" ||
+          rrSourceRef.current === "ecg_rr"
+        ) {
+          return;
+        }
+
         const approximateRR = Math.round(60000 / data.hr);
         const resolved = resolveRrInterval({ hrBpm: data.hr });
-        if (resolved && rrSourceRef.current !== "ppi") {
+        if (resolved) {
           setRrMs(resolved.rrMs);
           setRrSource(resolved.rrSource);
           sessionTrackBuffer.pushHr(data.hr);
@@ -514,6 +617,27 @@ export default function MonitorScreen() {
     polarSdk.addEventListener("onPpiStreamError", (error: any) => {
       console.log("Monitor: ⚠️ PPI Stream Error:", error.error);
       console.log("Monitor: 🔄 Modalità fallback attiva (HRV da HR)");
+    });
+
+    polarSdk.addEventListener("onEcgDataReceived", (data: PolarEcgData) => {
+      console.log(
+        `Monitor: 📈 ECG ${data.voltageUv} µV (${data.sampleCount} samples)`
+      );
+      setEcgMicroVolts(data.voltageUv);
+    });
+
+    polarSdk.addEventListener(
+      "onSkinTemperatureReceived",
+      (data: PolarSkinTemperatureData) => {
+        console.log(
+          `Monitor: 🌡️ Skin temperature=${data.temperatureC.toFixed(1)} °C`
+        );
+        setSkinTemperatureC(data.temperatureC);
+      }
+    );
+
+    polarSdk.addEventListener("onEcgStreamError", (error: any) => {
+      console.log("Monitor: ⚠️ ECG Stream Error:", error.error);
     });
 
     return () => {
@@ -735,7 +859,7 @@ export default function MonitorScreen() {
     }
   };
 
-  const launchAuthAndStream = async (deviceId: string) => {
+  const launchAuthAndStream = async (deviceId: string, deviceName?: string) => {
     if (
       pairingBlockedRef.current ||
       authStreamInFlightRef.current ||
@@ -750,7 +874,13 @@ export default function MonitorScreen() {
       // FTU prima di auth/streaming: se appena eseguito, il Polar riavvia e
       // riprenderemo auth+PPI alla prossima onDeviceConnected.
       console.log("🩺 Verifica First Time Use...");
-      const polarReady = await ensurePolarReady(deviceId, polarSdk);
+      const product = resolvePolarProduct(
+        deviceName ?? connectedDeviceNameRef.current
+      );
+      const requireFtu = product?.capabilities.ftuRequired !== false;
+      const polarReady = await ensurePolarReady(deviceId, polarSdk, {
+        requireFtu,
+      });
       if (polarReady.status === "deferred") {
         console.log("✅ First Time Use ok (restart pending)");
         pendingPostFtuReconnectRef.current = deviceId;
@@ -813,14 +943,16 @@ export default function MonitorScreen() {
             storedAuthData.deviceCode
           );
 
-          console.log("💓 Avvio streaming PPI...");
-          await startPpiStreamingWithFallback(deviceId, polarSdk);
+          console.log("💓 Avvio streaming Polar...");
+          if (product) {
+            await startPolarStreamingForProduct(product, deviceId, polarSdk);
+          }
 
           // Avvia invio periodico dei dati biometrici
           startBiometricSending();
           streamReadyDeviceRef.current = deviceId;
           await ensureMonitorForegroundService();
-          await beginOfflineTrack(deviceId);
+          await beginOfflineTrack(deviceId, product);
 
           return;
         } else {
@@ -934,13 +1066,15 @@ export default function MonitorScreen() {
                 pollResponse.deviceCode
               );
 
-              console.log("💓 Avvio streaming PPI...");
-              await startPpiStreamingWithFallback(deviceId, polarSdk);
+              console.log("💓 Avvio streaming Polar...");
+              if (product) {
+                await startPolarStreamingForProduct(product, deviceId, polarSdk);
+              }
 
               startBiometricSending();
               streamReadyDeviceRef.current = deviceId;
               await ensureMonitorForegroundService();
-              await beginOfflineTrack(deviceId);
+              await beginOfflineTrack(deviceId, product);
             } else {
               console.log("⏳ POLLING - authenticated: false");
             }
@@ -1062,7 +1196,23 @@ export default function MonitorScreen() {
     });
   };
 
-  const beginOfflineTrack = async (deviceId: string) => {
+  const beginOfflineTrack = async (
+    deviceId: string,
+    product?: PolarProduct | null
+  ) => {
+    const resolvedProduct =
+      product ?? resolvePolarProduct(connectedDeviceNameRef.current);
+    if (resolvedProduct && !resolvedProduct.capabilities.ppi) {
+      sessionTrackBuffer.clear();
+      setOfflineRecordingStarted(false);
+      setNotification({
+        type: "success",
+        message: "Buffer live attivo (RR ECG)",
+      });
+      setTimeout(() => setNotification(null), 5000);
+      return;
+    }
+
     const result = await startSessionOfflineRecording(deviceId);
     setOfflineRecordingStarted(result.started);
     if (result.started) {
@@ -1092,12 +1242,14 @@ export default function MonitorScreen() {
     setIsFlushingTrack(true);
     try {
       const userState = useUserStore.getState();
+      const product = resolvePolarProduct(connectedDeviceNameRef.current);
       const result = await flushSessionTrack({
         deviceId,
         deviceCode: userState.deviceCode || undefined,
         userId: userState.userId || undefined,
         authToken: userState.authToken || undefined,
         sessionId: sessionId ?? null,
+        skipOfflinePpi: product?.capabilities.ppi === false,
       });
       setOfflineRecordingStarted(false);
       setNotification({
@@ -1139,6 +1291,7 @@ export default function MonitorScreen() {
                 setConnectedDeviceIdInStore(null);
                 setConnectedDeviceName("");
                 setFoundDeviceName("");
+                setDeviceMenuOpen(false);
                 if (pollInterval.current) {
                   clearInterval(pollInterval.current);
                 }
@@ -1179,6 +1332,77 @@ export default function MonitorScreen() {
     } catch (error: any) {
       console.error("Monitor: Errore cancellazione dati:", error.message);
     }
+  };
+
+  /** Cancella il token auth solo per il dispositivo connesso e lo disconnette. */
+  const resetAuthSessionForDevice = () => {
+    if (!connectedDeviceId) {
+      return;
+    }
+    const deviceId = connectedDeviceId;
+    const deviceLabel =
+      connectedProduct?.displayName || connectedDeviceName || deviceId;
+    setDeviceMenuOpen(false);
+    Alert.alert(
+      "Reset auth token",
+      `Cancellare il token di autenticazione solo per ${deviceLabel} e disconnettere il dispositivo?`,
+      [
+        { text: "Annulla", style: "cancel" },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await authService.current.clearAuthData(deviceId);
+              setAuthToken("");
+              setUserId(0);
+              setDeviceCode("");
+              setAuthCode("");
+              console.log(
+                `Monitor: 🗑️ Auth token resettato per device ${deviceId}`
+              );
+
+              try {
+                await polarSdk.disconnectFromDevice(deviceId);
+              } catch (disconnectError: any) {
+                console.error(
+                  "Monitor: Errore disconnessione dopo reset auth:",
+                  disconnectError?.message
+                );
+              }
+
+              setConnectedDeviceId(null);
+              setConnectedDeviceIdInStore(null);
+              setConnectedDeviceName("");
+              setFoundDeviceName("");
+              setDeviceMenuOpen(false);
+              if (pollInterval.current) {
+                clearInterval(pollInterval.current);
+                pollInterval.current = null;
+              }
+              stopBiometricSending();
+              polarSdk.stopMonitorForegroundService().catch(() => {});
+              ablyService.current?.close();
+              resetDeviceState();
+
+              Alert.alert(
+                "Reset completato",
+                `Token cancellato per ${deviceLabel}. Dispositivo disconnesso.`
+              );
+            } catch (error: any) {
+              console.error(
+                "Monitor: Errore reset auth token:",
+                error?.message
+              );
+              Alert.alert(
+                "Errore",
+                error?.message || "Impossibile resettare il token"
+              );
+            }
+          },
+        },
+      ]
+    );
   };
 
   const startBiometricSending = () => {
@@ -1283,6 +1507,8 @@ export default function MonitorScreen() {
     setHfPower(0);
     setRrMs(0);
     setRrSource(null);
+    setEcgMicroVolts(0);
+    setSkinTemperatureC(0);
     rrSourceRef.current = null;
     setOfflineRecordingStarted(false);
     sessionTrackBuffer.clear();
@@ -1324,6 +1550,20 @@ export default function MonitorScreen() {
     }
   };
 
+  const getDisconnectButtonLabel = () => {
+    const model = connectedProduct?.displayName || "Device";
+    const bleSuffix =
+      connectedDeviceName
+        ?.replace(/polar/gi, "")
+        .replace(/loop/gi, "")
+        .replace(/gen\s*2/gi, "")
+        .replace(/360/gi, "")
+        .replace(/h10/gi, "")
+        .trim() || "";
+    const id = (bleSuffix || connectedDeviceId || "").slice(0, 12);
+    return id ? `Disconnetti ${model} (${id})` : `Disconnetti ${model}`;
+  };
+
   return (
     <ThemedView style={styles.container}>
       {/* Notifica di autenticazione */}
@@ -1359,12 +1599,50 @@ export default function MonitorScreen() {
       <ScrollView style={styles.scrollView}>
         {/* Header */}
         <ThemedView style={styles.header}>
-          <ThemedText type="title" style={styles.title}>
-            {connectedDeviceName || "Polar Monitor"}
-          </ThemedText>
+          <View style={styles.titleRow}>
+            <ThemedText type="title" style={styles.title}>
+              {connectedProduct?.displayName || "Polar Monitor"}
+            </ThemedText>
+            {connectedDeviceId ? (
+              <View style={styles.deviceMenuWrap}>
+                <TouchableOpacity
+                  onPress={() => setDeviceMenuOpen((open) => !open)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Menu dispositivo"
+                  hitSlop={8}
+                  style={styles.deviceMenuButton}
+                >
+                  <MoreVertical size={22} color={Colors[theme].tint} />
+                </TouchableOpacity>
+                {deviceMenuOpen && (
+                  <View
+                    style={[
+                      styles.deviceMenuDropdown,
+                      {
+                        backgroundColor: Colors[theme].background,
+                        borderColor: Colors[theme].border,
+                      },
+                    ]}
+                  >
+                    <TouchableOpacity
+                      style={styles.deviceMenuItem}
+                      onPress={resetAuthSessionForDevice}
+                    >
+                      <Trash2 size={16} color="#EF4444" />
+                      <ThemedText style={styles.deviceMenuItemTextDanger}>
+                        Reset auth token
+                      </ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            ) : null}
+          </View>
           <ThemedText style={styles.subtitle}>
             {connectedDeviceName
-              ? "Monitoraggio cardiaco avanzato con HRV"
+              ? isH10Connected
+                ? "Monitoraggio H10 (HR, RR ECG, ECG, HRV, LF/HF)"
+                : "Monitoraggio cardiaco avanzato con HRV"
               : "Connetti un dispositivo Polar per iniziare"}
           </ThemedText>
         </ThemedView>
@@ -1411,7 +1689,9 @@ export default function MonitorScreen() {
               {offlineRecordingStarted
                 ? "🟢 Polar PPI"
                 : connectedDeviceId
-                ? "🟠 Buffer live"
+                ? showRawEcgCards
+                  ? "🟠 Buffer live (ECG RR)"
+                  : "🟠 Buffer live"
                 : "🔴 Off"}
             </ThemedText>
           </View>
@@ -1428,12 +1708,20 @@ export default function MonitorScreen() {
         {/* Metriche cardiache */}
         <ThemedView style={styles.metricsSection}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            Metriche Cardiache
+            {isH10Connected
+              ? "Metriche H10 disponibili"
+              : "Metriche Cardiache"}
           </ThemedText>
 
           {connectedDeviceId && heartRate === 0 && (
             <ThemedText style={styles.waitingText}>
               ⏳ In attesa di dati dal dispositivo...
+            </ThemedText>
+          )}
+          {isH10Connected && (
+            <ThemedText style={styles.waitingText}>
+              H10 espone HR, RR ECG, ECG (uV), HRV (RMSSD) e LF/HF; non espone
+              temperatura corporea/cutanea.
             </ThemedText>
           )}
 
@@ -1457,10 +1745,53 @@ export default function MonitorScreen() {
               </View>
             </View>
 
+            {showRawEcgCards && (
+              <View style={styles.metricsRow}>
+                <View
+                  style={[
+                    styles.metricCard,
+                    styles.metricCardHighlight,
+                    { borderColor: Colors[theme].tint },
+                  ]}
+                >
+                  <View style={styles.metricIconContainer}>
+                    <Activity size={24} color={Colors[theme].tint} />
+                  </View>
+                  <ThemedText style={styles.metricLabel}>RR (ECG)</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {connectedDeviceId && rrMs > 0 && rrSource === "ecg_rr"
+                      ? rrMs
+                      : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>ms · ecg_rr</ThemedText>
+                </View>
+
+                <View
+                  style={[
+                    styles.metricCard,
+                    styles.metricCardHighlight,
+                    { borderColor: Colors[theme].tint },
+                  ]}
+                >
+                  <View style={styles.metricIconContainer}>
+                    <Zap size={24} color={Colors[theme].tint} />
+                  </View>
+                  <ThemedText style={styles.metricLabel}>ECG</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {connectedDeviceId && ecgMicroVolts !== 0
+                      ? ecgMicroVolts
+                      : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>µV</ThemedText>
+                </View>
+              </View>
+            )}
+
             <View style={styles.metricsRow}>
               <View
                 style={[
                   styles.metricCard,
+                  showRawEcgCards ? styles.metricCardFull : undefined,
                   { borderColor: Colors[theme].border },
                 ]}
               >
@@ -1480,27 +1811,29 @@ export default function MonitorScreen() {
                 </ThemedText>
               </View>
 
-              <View
-                style={[
-                  styles.metricCard,
-                  { borderColor: Colors[theme].border },
-                ]}
-              >
-                <View style={styles.metricIconContainer}>
-                  <Activity size={24} color={Colors[theme].tint} />
+              {!showRawEcgCards && (
+                <View
+                  style={[
+                    styles.metricCard,
+                    { borderColor: Colors[theme].border },
+                  ]}
+                >
+                  <View style={styles.metricIconContainer}>
+                    <Activity size={24} color={Colors[theme].tint} />
+                  </View>
+                  <ThemedText style={styles.metricLabel}>RR</ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {connectedDeviceId && rrMs > 0 ? rrMs : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>
+                    {rrSource === "ppi"
+                      ? "ms · PPI"
+                      : rrSource === "hr_derived"
+                      ? "ms · HR"
+                      : "ms"}
+                  </ThemedText>
                 </View>
-                <ThemedText style={styles.metricLabel}>RR</ThemedText>
-                <ThemedText style={styles.metricValue}>
-                  {connectedDeviceId && rrMs > 0 ? rrMs : "—"}
-                </ThemedText>
-                <ThemedText style={styles.metricUnit}>
-                  {rrSource === "ppi"
-                    ? "ms · PPI"
-                    : rrSource === "hr_derived"
-                    ? "ms · HR"
-                    : "ms"}
-                </ThemedText>
-              </View>
+              )}
             </View>
 
             <View style={styles.metricsRow}>
@@ -1536,6 +1869,43 @@ export default function MonitorScreen() {
                 <ThemedText style={styles.metricUnit}>ms²</ThemedText>
               </View>
             </View>
+
+            {connectedDeviceId && isSkinTemperatureSupported && (
+              <View style={styles.metricsRow}>
+                <View
+                  style={[
+                    styles.metricCard,
+                    styles.metricCardFull,
+                    { borderColor: Colors[theme].border },
+                  ]}
+                >
+                  <View style={styles.metricIconContainer}>
+                    <Thermometer
+                      size={24}
+                      color={
+                        skinTemperatureC > 38
+                          ? "#EF4444"
+                          : Colors[theme].tint
+                      }
+                    />
+                  </View>
+                  <ThemedText style={styles.metricLabel}>
+                    Temperatura cute
+                  </ThemedText>
+                  <ThemedText style={styles.metricValue}>
+                    {skinTemperatureC > 0
+                      ? skinTemperatureC.toFixed(1)
+                      : "—"}
+                  </ThemedText>
+                  <ThemedText style={styles.metricUnit}>°C</ThemedText>
+                  <ThemedText style={[styles.metricUnit, { marginTop: 6 }]}>
+                    {skinTemperatureC > 0
+                      ? `${((skinTemperatureC * 9) / 5 + 32).toFixed(1)} °F`
+                      : "—"}
+                  </ThemedText>
+                </View>
+              </View>
+            )}
           </View>
         </ThemedView>
 
@@ -1639,7 +2009,7 @@ export default function MonitorScreen() {
                 onPress={disconnectDevice}
               >
                 <ThemedText style={styles.buttonText}>
-                  Disconnetti {connectedDeviceName}
+                  {getDisconnectButtonLabel()}
                 </ThemedText>
               </TouchableOpacity>
               {debugMode && (
@@ -1715,9 +2085,58 @@ const styles = StyleSheet.create({
   header: {
     padding: 20,
     paddingTop: 60,
+    zIndex: 20,
+    overflow: "visible",
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 5,
+    zIndex: 21,
   },
   title: {
-    marginBottom: 5,
+    flex: 1,
+    marginBottom: 0,
+  },
+  deviceMenuWrap: {
+    position: "relative",
+    zIndex: 22,
+  },
+  deviceMenuButton: {
+    padding: 4,
+  },
+  deviceMenuDropdown: {
+    position: "absolute",
+    top: 32,
+    right: 0,
+    minWidth: 180,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 6,
+    zIndex: 30,
+  },
+  deviceMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  deviceMenuItemText: {
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  deviceMenuItemTextDanger: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#EF4444",
   },
   subtitle: {
     fontSize: 14,
@@ -1822,6 +2241,9 @@ const styles = StyleSheet.create({
   },
   metricCardFull: {
     flex: 1,
+  },
+  metricCardHighlight: {
+    borderWidth: 2,
   },
   metricIconContainer: {
     marginBottom: 8,
