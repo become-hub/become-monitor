@@ -36,7 +36,7 @@ MonitorUI → family muse → MuseBleModule → Android GATT (service 0xfe8d)
 
 1. **Catalog** — `features/devices/muse/muse-products.ts`
    - `MuseProductId`, matchers, `capabilities` (`eeg`, `bandPowers`, `ppg`, …)
-   - Tests in `services/__tests__/muse-products.test.ts`
+   - Tests in `features/devices/muse/__tests__/muse-products.test.ts`
    - Asset + `components/muse-device-card.tsx`
 
 2. **Native** — `android/.../muse/`
@@ -44,7 +44,7 @@ MonitorUI → family muse → MuseBleModule → Android GATT (service 0xfe8d)
    - Bridge `MuseBleModule.kt` / `MuseBlePackage` (already registered in `MainApplication`)
    - Unit tests under `android/.../muse/`
 
-3. **JS bridge** — `services/muse-ble-sdk.ts` + `muse-device-setup.ts`
+3. **JS bridge** — `features/devices/muse/muse-ble-sdk.ts` + `muse-device-setup.ts`
    - `startMuseStreamingForProduct` — no FTU
    - Types: EEG, band powers, PPG, HR
 
