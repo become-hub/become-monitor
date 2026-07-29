@@ -13,6 +13,7 @@ import {
 const PRODUCT_IMAGES: Record<PolarProductImageKey, number> = {
   polar360: require("@/assets/images/polar360.webp"),
   polarLoop: require("@/assets/images/polar-loop.png"),
+  polarH10: require("@/assets/images/polar-h10.png"),
 };
 
 type PolarDeviceCardProps = {

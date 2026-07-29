@@ -20,6 +20,8 @@ export interface FlushSessionTrackInput {
   userId?: number;
   authToken?: string;
   sessionId?: string | null;
+  /** H10: solo buffer live, skip offline PPI Polar. */
+  skipOfflinePpi?: boolean;
 }
 
 export interface FlushSessionTrackResult {
@@ -40,31 +42,33 @@ export async function flushSessionTrack(
   let startedAt = sessionTrackBuffer.getStartedAt();
   let path: string | undefined;
 
-  try {
-    await polarSdk.stopPpiOfflineRecording(input.deviceId);
-  } catch (error: any) {
-    console.warn(
-      "flushSessionTrack: stop offline soft-fail:",
-      error?.message || error
-    );
-  }
-
-  try {
-    offlineTrack = await polarSdk.fetchLatestPpiOfflineRecord(input.deviceId);
-    if (offlineTrack.samples.length > 0) {
-      source = "polar_offline_ppi";
-      samples = mapOfflineSamplesToTrack(
-        offlineTrack.samples,
-        offlineTrack.startedAt
+  if (!input.skipOfflinePpi) {
+    try {
+      await polarSdk.stopPpiOfflineRecording(input.deviceId);
+    } catch (error: any) {
+      console.warn(
+        "flushSessionTrack: stop offline soft-fail:",
+        error?.message || error
       );
-      startedAt = offlineTrack.startedAt ?? startedAt;
-      path = offlineTrack.path;
     }
-  } catch (error: any) {
-    console.warn(
-      "flushSessionTrack: offline fetch failed, using live buffer:",
-      error?.message || error
-    );
+
+    try {
+      offlineTrack = await polarSdk.fetchLatestPpiOfflineRecord(input.deviceId);
+      if (offlineTrack.samples.length > 0) {
+        source = "polar_offline_ppi";
+        samples = mapOfflineSamplesToTrack(
+          offlineTrack.samples,
+          offlineTrack.startedAt
+        );
+        startedAt = offlineTrack.startedAt ?? startedAt;
+        path = offlineTrack.path;
+      }
+    } catch (error: any) {
+      console.warn(
+        "flushSessionTrack: offline fetch failed, using live buffer:",
+        error?.message || error
+      );
+    }
   }
 
   const payload: TrackUploadPayload = {

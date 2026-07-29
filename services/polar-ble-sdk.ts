@@ -18,6 +18,18 @@ export interface PolarHrData {
     hr: number;
     contactDetected: boolean;
     contactSupported: boolean;
+    /** Native RR intervals (ms) from ECG — H10 via startHrStreaming. */
+    rrsMs?: number[];
+}
+
+export interface PolarEcgData {
+    deviceId: string;
+    /** Last sample voltage in µV. */
+    voltageUv: number;
+    avgVoltageUv: number;
+    timestamp: number;
+    sampleCount: number;
+    voltagesUv?: number[];
 }
 
 export interface PolarPpiSample {
@@ -30,6 +42,14 @@ export interface PolarPpiSample {
 export interface PolarPpiData {
     deviceId: string;
     samples: PolarPpiSample[];
+}
+
+export interface PolarSkinTemperatureData {
+    deviceId: string;
+    /** Latest skin temperature value (Celsius). */
+    temperatureC: number;
+    timestamp: number;
+    sampleCount: number;
 }
 
 export interface PolarOfflinePpiSample {
@@ -59,7 +79,12 @@ export type PolarEventType =
     | "onPairingFailed"
     | "onHeartRateReceived"
     | "onPpiDataReceived"
-    | "onPpiStreamError";
+    | "onPpiStreamError"
+    | "onHrStreamError"
+    | "onSkinTemperatureReceived"
+    | "onSkinTemperatureStreamError"
+    | "onEcgDataReceived"
+    | "onEcgStreamError";
 
 class PolarBleSdk {
     private eventEmitter: NativeEventEmitter;
@@ -163,6 +188,30 @@ class PolarBleSdk {
         return PolarBleModule.stopPpiStreaming();
     }
 
+    async startHrStreaming(deviceId: string): Promise<void> {
+        return PolarBleModule.startHrStreaming(deviceId);
+    }
+
+    async stopHrStreaming(): Promise<void> {
+        return PolarBleModule.stopHrStreaming();
+    }
+
+    async startEcgStreaming(deviceId: string): Promise<void> {
+        return PolarBleModule.startEcgStreaming(deviceId);
+    }
+
+    async stopEcgStreaming(): Promise<void> {
+        return PolarBleModule.stopEcgStreaming();
+    }
+
+    async startSkinTemperatureStreaming(deviceId: string): Promise<void> {
+        return PolarBleModule.startSkinTemperatureStreaming(deviceId);
+    }
+
+    async stopSkinTemperatureStreaming(): Promise<void> {
+        return PolarBleModule.stopSkinTemperatureStreaming();
+    }
+
     async startPpiOfflineRecording(deviceId: string): Promise<void> {
         return PolarBleModule.startPpiOfflineRecording(deviceId);
     }
@@ -250,6 +299,26 @@ class PolarBleSdk {
     ): void;
     addEventListener(
         event: "onPpiStreamError",
+        callback: (error: { error: string }) => void
+    ): void;
+    addEventListener(
+        event: "onHrStreamError",
+        callback: (error: { error: string }) => void
+    ): void;
+    addEventListener(
+        event: "onSkinTemperatureReceived",
+        callback: (data: PolarSkinTemperatureData) => void
+    ): void;
+    addEventListener(
+        event: "onSkinTemperatureStreamError",
+        callback: (error: { error: string }) => void
+    ): void;
+    addEventListener(
+        event: "onEcgDataReceived",
+        callback: (data: PolarEcgData) => void
+    ): void;
+    addEventListener(
+        event: "onEcgStreamError",
         callback: (error: { error: string }) => void
     ): void;
     addEventListener(event: PolarEventType, callback: (data: any) => void): void {

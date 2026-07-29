@@ -10,6 +10,8 @@ import com.gabriele.muscogiuri.becomemonitor.polar.PolarOfflineRecordingManager
 import com.gabriele.muscogiuri.becomemonitor.polar.PolarStreamManager
 import com.polar.sdk.api.PolarBleApi
 import com.polar.sdk.api.PolarBleApiDefaultImpl
+import com.polar.sdk.api.model.EcgSample
+import com.polar.sdk.api.model.PolarHrData
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.schedulers.Schedulers
@@ -193,6 +195,8 @@ class PolarBleModule @JvmOverloads constructor(
         // Setup device disconnected callback
         deviceManager.onDeviceDisconnected = { info ->
             streamManager.stopPpiStreaming()
+            streamManager.stopHrStreaming()
+            streamManager.stopEcgStreaming()
             ftuManager.onDeviceDisconnected(info.deviceId)
             MonitorForegroundService.stop(reactApplicationContext)
             sendEvent("onDeviceDisconnected", Arguments.createMap().apply {
@@ -219,13 +223,82 @@ class PolarBleModule @JvmOverloads constructor(
             ftuManager.onFeatureReady(deviceId, feature)
         }
 
-        // Setup heart rate callback
-        deviceManager.onHeartRateReceived = { identifier, data ->
-            sendEvent("onHeartRateReceived", Arguments.createMap().apply {
-                putString("deviceId", identifier)
-                putInt("hr", data.hr)
-                putBoolean("contactDetected", data.contactStatus)
-                putBoolean("contactSupported", data.contactStatusSupported)
+        // Setup heart rate callback (360/Loop fallback when HR stream inactive)
+        deviceManager.onHeartRateReceived = hrCb@{ identifier, data ->
+            if (streamManager.isHrStreaming()) {
+                return@hrCb
+            }
+            sendEvent("onHeartRateReceived", hrSampleToMap(identifier, data))
+        }
+
+        streamManager.onHrDataReceived = { deviceId, hrData ->
+            hrData.samples.forEach { sample ->
+                sendEvent("onHeartRateReceived", hrSampleToMap(deviceId, sample))
+            }
+        }
+
+        streamManager.onHrStreamError = { error ->
+            sendEvent("onHrStreamError", Arguments.createMap().apply {
+                putString("error", error.message ?: "Unknown error")
+            })
+        }
+
+        streamManager.onEcgDataReceived = ecgCb@{ deviceId, ecgData ->
+            val samples = ecgData.samples
+            if (samples.isEmpty()) {
+                return@ecgCb
+            }
+            val voltages = Arguments.createArray()
+            var sum = 0
+            var count = 0
+            samples.forEach { sample ->
+                if (sample is EcgSample) {
+                    voltages.pushInt(sample.voltage)
+                    sum += sample.voltage
+                    count += 1
+                }
+            }
+            val last = samples.last()
+            val lastVoltage = if (last is EcgSample) last.voltage else 0
+            val avgVoltage = if (count > 0) sum / count else lastVoltage
+            sendEvent("onEcgDataReceived", Arguments.createMap().apply {
+                putString("deviceId", deviceId)
+                putInt("voltageUv", lastVoltage)
+                putInt("avgVoltageUv", avgVoltage)
+                putDouble("timestamp", last.timeStamp.toDouble())
+                putInt("sampleCount", samples.size)
+                putArray("voltagesUv", voltages)
+            })
+        }
+
+        streamManager.onEcgStreamError = { error ->
+            sendEvent("onEcgStreamError", Arguments.createMap().apply {
+                putString("error", error.message ?: "Unknown error")
+            })
+        }
+
+        // Setup Skin Temperature data callback (360/Loop)
+        streamManager.onSkinTemperatureDataReceived = skinTempCb@{ deviceId, temperatureData ->
+            val samples = temperatureData.samples
+            if (samples.isEmpty()) {
+                return@skinTempCb
+            }
+
+            val last = samples.last()
+            sendEvent(
+                "onSkinTemperatureReceived",
+                Arguments.createMap().apply {
+                    putString("deviceId", deviceId)
+                    putDouble("temperatureC", last.temperature.toDouble())
+                    putDouble("timestamp", last.timeStamp.toDouble())
+                    putInt("sampleCount", samples.size)
+                }
+            )
+        }
+
+        streamManager.onSkinTemperatureStreamError = { error ->
+            sendEvent("onSkinTemperatureStreamError", Arguments.createMap().apply {
+                putString("error", error.message ?: "Unknown error")
             })
         }
 
@@ -375,6 +448,124 @@ class PolarBleModule @JvmOverloads constructor(
                 }
         } catch (e: Exception) {
             promise.reject("STOP_PPI_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun startHrStreaming(deviceId: String, promise: Promise) {
+        try {
+            val disposable = streamManager.startHrStreaming(deviceId)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe({
+                    promise.resolve(null)
+                }, { error ->
+                    promise.reject(
+                        "HR_STREAM_ERROR",
+                        "${error.javaClass.simpleName}: ${error.message}"
+                    )
+                })
+            disposables.add(disposable)
+        } catch (e: Exception) {
+            promise.reject("HR_STREAM_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun stopHrStreaming(promise: Promise) {
+        try {
+            streamManager.stopHrStreaming()
+                .onSuccess { promise.resolve(null) }
+                .onFailure { error ->
+                    promise.reject("STOP_HR_ERROR", error.message)
+                }
+        } catch (e: Exception) {
+            promise.reject("STOP_HR_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun startEcgStreaming(deviceId: String, promise: Promise) {
+        try {
+            val disposable = streamManager.startEcgStreaming(deviceId)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe({
+                    promise.resolve(null)
+                }, { error ->
+                    promise.reject(
+                        "ECG_STREAM_ERROR",
+                        "${error.javaClass.simpleName}: ${error.message}"
+                    )
+                })
+            disposables.add(disposable)
+        } catch (e: Exception) {
+            promise.reject("ECG_STREAM_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun stopEcgStreaming(promise: Promise) {
+        try {
+            streamManager.stopEcgStreaming()
+                .onSuccess { promise.resolve(null) }
+                .onFailure { error ->
+                    promise.reject("STOP_ECG_ERROR", error.message)
+                }
+        } catch (e: Exception) {
+            promise.reject("STOP_ECG_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun startSkinTemperatureStreaming(deviceId: String, promise: Promise) {
+        try {
+            val disposable =
+                streamManager.startSkinTemperatureStreaming(deviceId)
+                    .subscribeOn(Schedulers.io())
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .subscribe({
+                        promise.resolve(null)
+                    }, { error ->
+                        promise.reject(
+                            "SKIN_TEMP_STREAM_ERROR",
+                            "${error.javaClass.simpleName}: ${error.message}"
+                        )
+                    })
+            disposables.add(disposable)
+        } catch (e: Exception) {
+            promise.reject("SKIN_TEMP_STREAM_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun stopSkinTemperatureStreaming(promise: Promise) {
+        try {
+            streamManager.stopSkinTemperatureStreaming()
+                .onSuccess { promise.resolve(null) }
+                .onFailure { error ->
+                    promise.reject("STOP_SKIN_TEMP_ERROR", error.message)
+                }
+        } catch (e: Exception) {
+            promise.reject("STOP_SKIN_TEMP_ERROR", e.message)
+        }
+    }
+
+    private fun hrSampleToMap(
+        deviceId: String,
+        sample: PolarHrData.PolarHrSample
+    ): WritableMap {
+        return Arguments.createMap().apply {
+            putString("deviceId", deviceId)
+            putInt("hr", sample.hr)
+            putBoolean("contactDetected", sample.contactStatus)
+            putBoolean("contactSupported", sample.contactStatusSupported)
+            val rrs = sample.rrsMs
+            if (rrs.isNotEmpty()) {
+                val rrsArray = Arguments.createArray()
+                rrs.forEach { rr -> rrsArray.pushInt(rr) }
+                putArray("rrsMs", rrsArray)
+            }
         }
     }
 

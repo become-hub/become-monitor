@@ -2,9 +2,21 @@
  * Catalogo prodotti Polar supportati (BLE name matching + metadata UI).
  */
 
-export type PolarProductId = 'polar_360' | 'polar_loop';
+export type PolarProductId = 'polar_360' | 'polar_loop' | 'polar_h10';
 
-export type PolarProductImageKey = 'polar360' | 'polarLoop';
+export type PolarProductImageKey = 'polar360' | 'polarLoop' | 'polarH10';
+
+export interface PolarProductCapabilities {
+  opticalPpg: boolean;
+  ecg: boolean;
+  hr: boolean;
+  ppi: boolean;
+  rawPpg: boolean;
+  rawEcg: boolean;
+  accelerometer: boolean;
+  skinTemperature: boolean;
+  ftuRequired: boolean;
+}
 
 export interface PolarProduct {
   id: PolarProductId;
@@ -14,16 +26,7 @@ export interface PolarProduct {
   imageKey: PolarProductImageKey;
   shortDescriptionIt: string;
   shortDescriptionEn: string;
-  capabilities: {
-    opticalPpg: boolean;
-    ecg: boolean;
-    hr: boolean;
-    ppi: boolean;
-    rawPpg: boolean;
-    accelerometer: boolean;
-    skinTemperature: boolean;
-    ftuRequired: boolean;
-  };
+  capabilities: PolarProductCapabilities;
 }
 
 export const POLAR_PRODUCTS: Record<PolarProductId, PolarProduct> = {
@@ -42,6 +45,7 @@ export const POLAR_PRODUCTS: Record<PolarProductId, PolarProduct> = {
       hr: true,
       ppi: true,
       rawPpg: true,
+      rawEcg: false,
       accelerometer: true,
       skinTemperature: true,
       ftuRequired: true,
@@ -49,7 +53,7 @@ export const POLAR_PRODUCTS: Record<PolarProductId, PolarProduct> = {
   },
   polar_loop: {
     id: 'polar_loop',
-    displayName: 'Polar Loop',
+    displayName: 'Polar Loop Gen 2',
     bleNameMatchers: ['loop'],
     imageKey: 'polarLoop',
     shortDescriptionIt:
@@ -62,21 +66,44 @@ export const POLAR_PRODUCTS: Record<PolarProductId, PolarProduct> = {
       hr: true,
       ppi: true,
       rawPpg: true,
+      rawEcg: false,
       accelerometer: true,
       skinTemperature: true,
       ftuRequired: true,
     },
   },
+  polar_h10: {
+    id: 'polar_h10',
+    displayName: 'Polar H10',
+    bleNameMatchers: ['h10'],
+    imageKey: 'polarH10',
+    shortDescriptionIt:
+      'Collega il Polar H10 (ECG) per HR e RR nativi nelle app Become Hub',
+    shortDescriptionEn:
+      'Connect Polar H10 (ECG) for native HR and RR in Become Hub apps',
+    capabilities: {
+      opticalPpg: false,
+      ecg: true,
+      hr: true,
+      ppi: false,
+      rawPpg: false,
+      rawEcg: true,
+      accelerometer: true,
+      skinTemperature: false,
+      ftuRequired: false,
+    },
+  },
 };
 
-/** Ordine overview / catalogo (360 prima, poi Loop). */
+/** Ordine overview / catalogo (360, Loop, H10). */
 export const POLAR_PRODUCT_LIST: PolarProduct[] = [
   POLAR_PRODUCTS.polar_360,
   POLAR_PRODUCTS.polar_loop,
+  POLAR_PRODUCTS.polar_h10,
 ];
 
 /**
- * Risolve il prodotto Polar dal nome BLE. H10 / Sense / altri → null.
+ * Risolve il prodotto Polar dal nome BLE. Sense / altri non supportati → null.
  */
 export function resolvePolarProduct(
   deviceName: string | null | undefined

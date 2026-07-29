@@ -180,6 +180,9 @@ export default function DocsScreen() {
                         {strings.docs.signalPolarLoop}
                       </ThemedText>
                       <ThemedText style={[styles.tableCell, styles.tableHeader]}>
+                        {strings.docs.signalPolarH10}
+                      </ThemedText>
+                      <ThemedText style={[styles.tableCell, styles.tableHeader]}>
                         {strings.docs.signalUsedInApp}
                       </ThemedText>
                     </View>
@@ -194,6 +197,9 @@ export default function DocsScreen() {
                           </ThemedText>
                           <ThemedText style={styles.tableCell}>
                             {row.polarLoop}
+                          </ThemedText>
+                          <ThemedText style={styles.tableCell}>
+                            {row.polarH10}
                           </ThemedText>
                           <ThemedText style={styles.tableCell}>
                             {usedLabel(strings.docs, row.usedInApp)}

@@ -1,8 +1,10 @@
 import {
   ensurePolarReady,
+  startPolarStreamingForProduct,
   startPpiStreamingWithFallback,
   type PolarSetupSdk,
 } from "../polar-device-setup";
+import { POLAR_PRODUCTS } from "../polar-products";
 
 describe("polar-device-setup", () => {
   const createSdk = (overrides: Partial<PolarSetupSdk> = {}): PolarSetupSdk => ({
@@ -44,6 +46,17 @@ describe("polar-device-setup", () => {
         error: "FTU_TIMEOUT",
       });
     });
+
+    it("returns ready immediately when requireFtu is false", async () => {
+      const sdk = createSdk({
+        ensureFirstTimeUse: jest.fn(),
+      });
+
+      await expect(
+        ensurePolarReady("ABC", sdk, { requireFtu: false })
+      ).resolves.toEqual({ status: "ready" });
+      expect(sdk.ensureFirstTimeUse).not.toHaveBeenCalled();
+    });
   });
 
   describe("startPpiStreamingWithFallback", () => {
@@ -78,6 +91,44 @@ describe("polar-device-setup", () => {
       expect(log.log).toHaveBeenCalledWith(
         "🔄 Usando modalità fallback: HRV calcolato da HR"
       );
+    });
+  });
+
+  describe("startPolarStreamingForProduct", () => {
+    it("uses PPI path for 360", async () => {
+      const sdk = createSdk();
+      const log = { log: jest.fn() };
+
+      await expect(
+        startPolarStreamingForProduct(
+          POLAR_PRODUCTS.polar_360,
+          "ABC",
+          sdk,
+          log
+        )
+      ).resolves.toEqual({ ppi: true, hr: false, ecg: false });
+      expect(sdk.startPpiStreaming).toHaveBeenCalledWith("ABC");
+    });
+
+    it("uses HR+ECG path for H10 without PPI", async () => {
+      const sdk = createSdk({
+        startPpiStreaming: jest.fn(),
+        startHrStreaming: jest.fn().mockResolvedValue(undefined),
+        startEcgStreaming: jest.fn().mockResolvedValue(undefined),
+      });
+      const log = { log: jest.fn() };
+
+      await expect(
+        startPolarStreamingForProduct(
+          POLAR_PRODUCTS.polar_h10,
+          "H10-1",
+          sdk,
+          log
+        )
+      ).resolves.toEqual({ ppi: false, hr: true, ecg: true });
+      expect(sdk.startPpiStreaming).not.toHaveBeenCalled();
+      expect(sdk.startHrStreaming).toHaveBeenCalledWith("H10-1");
+      expect(sdk.startEcgStreaming).toHaveBeenCalledWith("H10-1");
     });
   });
 });

@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 
+import type { PolarProductId } from '@/services/polar-products';
+
 export interface DiscoveredPolarDevice {
     deviceId: string;
     name: string;
-    productId: 'polar_360' | 'polar_loop';
+    productId: PolarProductId;
     displayName: string;
 }
 

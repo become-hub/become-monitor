@@ -1,6 +1,7 @@
 package com.gabriele.muscogiuri.becomemonitor.polar
 
 import com.polar.sdk.api.PolarBleApi
+import com.polar.sdk.api.model.PolarHrData
 import com.polar.sdk.api.model.PolarPpiData
 import io.reactivex.rxjava3.android.plugins.RxAndroidPlugins
 import io.reactivex.rxjava3.core.Flowable
@@ -109,6 +110,28 @@ class PolarStreamManagerTest {
     @Test
     fun `test isStreaming returns false initially`() {
         assert(!streamManager.isStreaming())
+    }
+
+    @Test
+    fun `test startHrStreaming emits HR data`() {
+        val deviceId = "TEST-H10"
+        val hrSample = PolarHrData.PolarHrSample(72, 72, 0, listOf(820), true, true, true)
+        val testHrData = PolarHrData(listOf(hrSample))
+        whenever(mockApi.startHrStreaming(deviceId))
+            .thenReturn(Flowable.just(testHrData).delay(1, TimeUnit.SECONDS, testScheduler))
+
+        var receivedDeviceId: String? = null
+        streamManager.onHrDataReceived = { id, data ->
+            receivedDeviceId = id
+            assert(data.samples.isNotEmpty())
+        }
+
+        val observer = streamManager.startHrStreaming(deviceId).test()
+        testScheduler.advanceTimeBy(2, TimeUnit.SECONDS)
+
+        observer.assertComplete()
+        assert(receivedDeviceId == deviceId)
+        verify(mockApi).startHrStreaming(deviceId)
     }
 
     @Test
