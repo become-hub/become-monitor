@@ -1438,81 +1438,103 @@ export default function MonitorScreen() {
           )}
 
           <View style={styles.metricsGrid}>
-            <View
-              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
-            >
-              <View style={styles.metricIconContainer}>
-                <Heart size={24} color={Colors[theme].tint} />
+            <View style={styles.metricsRow}>
+              <View
+                style={[
+                  styles.metricCard,
+                  styles.metricCardFull,
+                  { borderColor: Colors[theme].border },
+                ]}
+              >
+                <View style={styles.metricIconContainer}>
+                  <Heart size={24} color={Colors[theme].tint} />
+                </View>
+                <ThemedText style={styles.metricLabel}>Heart Rate</ThemedText>
+                <ThemedText style={styles.metricValue}>
+                  {connectedDeviceId && heartRate > 0 ? heartRate : "—"}
+                </ThemedText>
+                <ThemedText style={styles.metricUnit}>BPM</ThemedText>
               </View>
-              <ThemedText style={styles.metricLabel}>Heart Rate</ThemedText>
-              <ThemedText style={styles.metricValue}>
-                {connectedDeviceId && heartRate > 0 ? heartRate : "—"}
-              </ThemedText>
-              <ThemedText style={styles.metricUnit}>BPM</ThemedText>
             </View>
 
-            <View
-              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
-            >
-              <View style={styles.metricIconContainer}>
-                <Activity size={24} color={Colors[theme].tint} />
+            <View style={styles.metricsRow}>
+              <View
+                style={[
+                  styles.metricCard,
+                  { borderColor: Colors[theme].border },
+                ]}
+              >
+                <View style={styles.metricIconContainer}>
+                  <Activity size={24} color={Colors[theme].tint} />
+                </View>
+                <ThemedText style={styles.metricLabel}>HRV (RMSSD)</ThemedText>
+                <ThemedText style={styles.metricValue}>
+                  {connectedDeviceId && hrv > 0 ? hrv : "—"}
+                </ThemedText>
+                <ThemedText style={styles.metricUnit}>
+                  {connectedDeviceId && hrv > 0
+                    ? "ms"
+                    : connectedDeviceId && ppiWindow.current.length > 0
+                    ? `${ppiWindow.current.length}/${WINDOW_SIZE}`
+                    : "ms"}
+                </ThemedText>
               </View>
-              <ThemedText style={styles.metricLabel}>HRV (RMSSD)</ThemedText>
-              <ThemedText style={styles.metricValue}>
-                {connectedDeviceId && hrv > 0 ? hrv : "—"}
-              </ThemedText>
-              <ThemedText style={styles.metricUnit}>
-                {connectedDeviceId && hrv > 0
-                  ? "ms"
-                  : connectedDeviceId && ppiWindow.current.length > 0
-                  ? `${ppiWindow.current.length}/${WINDOW_SIZE}`
-                  : "ms"}
-              </ThemedText>
+
+              <View
+                style={[
+                  styles.metricCard,
+                  { borderColor: Colors[theme].border },
+                ]}
+              >
+                <View style={styles.metricIconContainer}>
+                  <Activity size={24} color={Colors[theme].tint} />
+                </View>
+                <ThemedText style={styles.metricLabel}>RR</ThemedText>
+                <ThemedText style={styles.metricValue}>
+                  {connectedDeviceId && rrMs > 0 ? rrMs : "—"}
+                </ThemedText>
+                <ThemedText style={styles.metricUnit}>
+                  {rrSource === "ppi"
+                    ? "ms · PPI"
+                    : rrSource === "hr_derived"
+                    ? "ms · HR"
+                    : "ms"}
+                </ThemedText>
+              </View>
             </View>
 
-            <View
-              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
-            >
-              <View style={styles.metricIconContainer}>
-                <Activity size={24} color={Colors[theme].tint} />
+            <View style={styles.metricsRow}>
+              <View
+                style={[
+                  styles.metricCard,
+                  { borderColor: Colors[theme].border },
+                ]}
+              >
+                <View style={styles.metricIconContainer}>
+                  <Zap size={24} color={Colors[theme].tint} />
+                </View>
+                <ThemedText style={styles.metricLabel}>HF Power</ThemedText>
+                <ThemedText style={styles.metricValue}>
+                  {connectedDeviceId && hfPower > 0 ? hfPower : "—"}
+                </ThemedText>
+                <ThemedText style={styles.metricUnit}>ms²</ThemedText>
               </View>
-              <ThemedText style={styles.metricLabel}>RR</ThemedText>
-              <ThemedText style={styles.metricValue}>
-                {connectedDeviceId && rrMs > 0 ? rrMs : "—"}
-              </ThemedText>
-              <ThemedText style={styles.metricUnit}>
-                {rrSource === "ppi"
-                  ? "ms · PPI"
-                  : rrSource === "hr_derived"
-                  ? "ms · HR"
-                  : "ms"}
-              </ThemedText>
-            </View>
 
-            <View
-              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
-            >
-              <View style={styles.metricIconContainer}>
-                <Zap size={24} color={Colors[theme].tint} />
+              <View
+                style={[
+                  styles.metricCard,
+                  { borderColor: Colors[theme].border },
+                ]}
+              >
+                <View style={styles.metricIconContainer}>
+                  <Zap size={24} color={Colors[theme].tint} />
+                </View>
+                <ThemedText style={styles.metricLabel}>LF Power</ThemedText>
+                <ThemedText style={styles.metricValue}>
+                  {connectedDeviceId && lfPower > 0 ? lfPower : "—"}
+                </ThemedText>
+                <ThemedText style={styles.metricUnit}>ms²</ThemedText>
               </View>
-              <ThemedText style={styles.metricLabel}>LF Power</ThemedText>
-              <ThemedText style={styles.metricValue}>
-                {connectedDeviceId && lfPower > 0 ? lfPower : "—"}
-              </ThemedText>
-              <ThemedText style={styles.metricUnit}>ms²</ThemedText>
-            </View>
-
-            <View
-              style={[styles.metricCard, { borderColor: Colors[theme].border }]}
-            >
-              <View style={styles.metricIconContainer}>
-                <Zap size={24} color={Colors[theme].tint} />
-              </View>
-              <ThemedText style={styles.metricLabel}>HF Power</ThemedText>
-              <ThemedText style={styles.metricValue}>
-                {connectedDeviceId && hfPower > 0 ? hfPower : "—"}
-              </ThemedText>
-              <ThemedText style={styles.metricUnit}>ms²</ThemedText>
             </View>
           </View>
         </ThemedView>
@@ -1620,23 +1642,25 @@ export default function MonitorScreen() {
                   Disconnetti {connectedDeviceName}
                 </ThemedText>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.button,
-                  styles.flushButton,
-                  { backgroundColor: Colors[theme].tint },
-                ]}
-                onPress={() => handleFlushTrack(null)}
-                disabled={isFlushingTrack}
-              >
-                {isFlushingTrack ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <ThemedText style={styles.buttonText}>
-                    Simula endSession / Flush track
-                  </ThemedText>
-                )}
-              </TouchableOpacity>
+              {debugMode && (
+                <TouchableOpacity
+                  style={[
+                    styles.button,
+                    styles.flushButton,
+                    { backgroundColor: Colors[theme].tint },
+                  ]}
+                  onPress={() => handleFlushTrack(null)}
+                  disabled={isFlushingTrack}
+                >
+                  {isFlushingTrack ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <ThemedText style={styles.buttonText}>
+                      Simula endSession / Flush track
+                    </ThemedText>
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
           )}
 
@@ -1783,17 +1807,21 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   metricsGrid: {
+    gap: 12,
+  },
+  metricsRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 12,
   },
   metricCard: {
     flex: 1,
-    minWidth: "45%",
     padding: 20,
     borderRadius: 12,
     borderWidth: 1,
     alignItems: "center",
+  },
+  metricCardFull: {
+    flex: 1,
   },
   metricIconContainer: {
     marginBottom: 8,
