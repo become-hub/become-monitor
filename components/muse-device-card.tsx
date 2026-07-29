@@ -8,7 +8,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import {
   MuseProduct,
   MuseProductImageKey,
-} from "@/services/muse-products";
+} from "@/features/devices/muse/muse-products";
 
 const PRODUCT_IMAGES: Record<MuseProductImageKey, number> = {
   muse2: require("@/assets/images/muse-2.png"),

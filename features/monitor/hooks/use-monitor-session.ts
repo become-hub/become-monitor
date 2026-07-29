@@ -15,28 +15,28 @@ import {
   PolarPpiData,
   PolarSkinTemperatureData,
   polarSdk,
-} from "@/services/polar-ble-sdk";
+} from "@/features/devices/polar/polar-ble-sdk";
 import {
   ensurePolarReady,
   startPolarStreamingForProduct,
-} from "@/services/polar-device-setup";
+} from "@/features/devices/polar/polar-device-setup";
 import {
   isSupportedPolarDevice,
   PolarProduct,
   resolvePolarProduct,
-} from "@/services/polar-products";
+} from "@/features/devices/polar/polar-products";
 import {
   MuseBandPowers,
   MuseDeviceInfo,
   MuseEegSample,
   museSdk,
-} from "@/services/muse-ble-sdk";
-import { startMuseStreamingForProduct } from "@/services/muse-device-setup";
+} from "@/features/devices/muse/muse-ble-sdk";
+import { startMuseStreamingForProduct } from "@/features/devices/muse/muse-device-setup";
 import {
   isSupportedMuseDevice,
   MuseProduct,
   resolveMuseProduct,
-} from "@/services/muse-products";
+} from "@/features/devices/muse/muse-products";
 import { captureException, logToSentry } from "@/services/sentry";
 import { resolveRrInterval, type RrSource } from "@/services/rr-interval";
 import { sessionTrackBuffer } from "@/services/session-track-buffer";

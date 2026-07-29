@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
-import type { MuseProductId } from "@/services/muse-products";
-import type { PolarProductId } from "@/services/polar-products";
+import type { MuseProductId } from "@/features/devices/muse/muse-products";
+import type { PolarProductId } from "@/features/devices/polar/polar-products";
 
 export type DiscoveredDeviceFamily = "polar" | "muse";
 

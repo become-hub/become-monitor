@@ -10,8 +10,8 @@ import { useTheme } from "@/contexts/ThemeContext";
 import {
   getMuseProductBadge,
   isSupportedMuseDevice,
-} from "@/services/muse-products";
-import { getPolarProductBadge } from "@/services/polar-products";
+} from "@/features/devices/muse/muse-products";
+import { getPolarProductBadge } from "@/features/devices/polar/polar-products";
 import type { DiscoveredDevice } from "@/stores/scan-store";
 import { Search, Trash2 } from "lucide-react-native";
 import { ActivityIndicator, TouchableOpacity, View } from "react-native";

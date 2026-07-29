@@ -26,10 +26,10 @@ Polar **360** and **Loop Gen 2** behavior must stay identical unless explicitly 
 
 ## Checklist — new Polar product
 
-1. **Catalog** — `services/polar-products.ts`
+1. **Catalog** — `features/devices/polar/polar-products.ts`
    - Add `PolarProductId`, matchers, `imageKey`, `POLAR_PRODUCT_LIST` entry
    - Set `capabilities` (`ppi`, `ecg`, `rawEcg`, `ftuRequired`, …)
-   - Tests in `services/__tests__/polar-products.test.ts`
+   - Tests in `features/devices/polar/__tests__/polar-products.test.ts`
    - Asset under `assets/images/` + `components/polar-device-card.tsx`
 
 2. **Scan / overview**
@@ -38,10 +38,10 @@ Polar **360** and **Loop Gen 2** behavior must stay identical unless explicitly 
 
 3. **Native streaming** (Android)
    - Extend `PolarStreamManager.kt` additively (PPI path untouched)
-   - Bridge in `PolarBleModule.kt` + types in `services/polar-ble-sdk.ts`
+   - Bridge in `PolarBleModule.kt` + types in `features/devices/polar/polar-ble-sdk.ts`
    - H10 pattern: `startHrStreaming` (RR in `rrsMs`), `startEcgStreaming` (µV)
 
-4. **Setup** — `services/polar-device-setup.ts`
+4. **Setup** — `features/devices/polar/polar-device-setup.ts`
    - `ensurePolarReady(..., { requireFtu })` — default `true`
    - `startPolarStreamingForProduct(product, deviceId, sdk)` — product branch
 

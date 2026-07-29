@@ -34,7 +34,7 @@ MonitorUI → family muse → MuseBleModule → Android GATT (service 0xfe8d)
 
 ## Checklist — new Muse product or signal
 
-1. **Catalog** — `services/muse-products.ts`
+1. **Catalog** — `features/devices/muse/muse-products.ts`
    - `MuseProductId`, matchers, `capabilities` (`eeg`, `bandPowers`, `ppg`, …)
    - Tests in `services/__tests__/muse-products.test.ts`
    - Asset + `components/muse-device-card.tsx`

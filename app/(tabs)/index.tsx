@@ -11,8 +11,8 @@ import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLocale } from "@/hooks/use-locale";
-import { MUSE_PRODUCT_LIST } from "@/services/muse-products";
-import { POLAR_PRODUCT_LIST } from "@/services/polar-products";
+import { MUSE_PRODUCT_LIST } from "@/features/devices/muse/muse-products";
+import { POLAR_PRODUCT_LIST } from "@/features/devices/polar/polar-products";
 
 export default function HomeScreen() {
   const { theme } = useTheme();
