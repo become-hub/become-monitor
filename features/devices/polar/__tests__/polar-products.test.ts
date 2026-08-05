@@ -1,11 +1,12 @@
 /**
- * Test catalogo Polar: matchers BLE 360 / Loop / H10
+ * Test catalogo Polar: matchers BLE + availability gate
  */
 
 import {
   getPolarProductBadge,
   isSupportedPolarDevice,
   POLAR_PRODUCT_LIST,
+  POLAR_PRODUCTS,
   resolvePolarProduct,
 } from '../polar-products';
 
@@ -23,9 +24,9 @@ describe('polar-products', () => {
       expect(resolvePolarProduct('polar loop xyz')?.id).toBe('polar_loop');
     });
 
-    it('riconosce Polar H10', () => {
-      expect(resolvePolarProduct('Polar H10')?.id).toBe('polar_h10');
-      expect(resolvePolarProduct('POLAR H10 ABC')?.id).toBe('polar_h10');
+    it('non espone Polar H10 quando availability è off', () => {
+      expect(resolvePolarProduct('Polar H10')).toBeNull();
+      expect(resolvePolarProduct('POLAR H10 ABC')).toBeNull();
     });
 
     it('ignora dispositivi non supportati', () => {
@@ -39,10 +40,10 @@ describe('polar-products', () => {
   });
 
   describe('isSupportedPolarDevice', () => {
-    it('true per 360, Loop e H10', () => {
+    it('true per 360 e Loop; false per H10 (gated)', () => {
       expect(isSupportedPolarDevice('Polar 360')).toBe(true);
       expect(isSupportedPolarDevice('Polar Loop')).toBe(true);
-      expect(isSupportedPolarDevice('Polar H10')).toBe(true);
+      expect(isSupportedPolarDevice('Polar H10')).toBe(false);
     });
   });
 
@@ -50,18 +51,33 @@ describe('polar-products', () => {
     it('restituisce display name o fallback', () => {
       expect(getPolarProductBadge('Polar 360 ABC')).toBe('Polar 360');
       expect(getPolarProductBadge('Polar Loop')).toBe('Polar Loop Gen 2');
-      expect(getPolarProductBadge('Polar H10')).toBe('Polar H10');
+      expect(getPolarProductBadge('Polar H10')).toBe('Polar');
       expect(getPolarProductBadge('Something')).toBe('Polar');
     });
   });
 
   describe('POLAR_PRODUCT_LIST', () => {
-    it('espone 360, Loop e H10 in ordine', () => {
+    it('espone solo prodotti disponibili (360, Loop)', () => {
       expect(POLAR_PRODUCT_LIST.map((p) => p.id)).toEqual([
         'polar_360',
         'polar_loop',
-        'polar_h10',
       ]);
+    });
+  });
+
+  describe('POLAR_PRODUCTS (catalogo completo)', () => {
+    it('mantiene H10 definito con capabilities anche se gated', () => {
+      expect(POLAR_PRODUCTS.polar_h10.id).toBe('polar_h10');
+      expect(POLAR_PRODUCTS.polar_h10.capabilities.rawEcg).toBe(true);
+      expect(POLAR_PRODUCTS.polar_h10.capabilities.ftuRequired).toBe(false);
+      expect(POLAR_PRODUCTS.polar_h10.capabilities.ppi).toBe(false);
+    });
+
+    it('nasconde skin temp UI su 360; la mostra su Loop (stream+UI)', () => {
+      expect(POLAR_PRODUCTS.polar_360.capabilities.skinTemperature).toBe(false);
+      expect(POLAR_PRODUCTS.polar_360.capabilities.skinTemperatureUi).toBe(false);
+      expect(POLAR_PRODUCTS.polar_loop.capabilities.skinTemperature).toBe(true);
+      expect(POLAR_PRODUCTS.polar_loop.capabilities.skinTemperatureUi).toBe(true);
     });
   });
 });

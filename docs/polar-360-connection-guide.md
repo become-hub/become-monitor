@@ -4,26 +4,45 @@ Allineata alla documentazione ufficiale Polar BLE SDK
 ([Polar360.md](https://github.com/polarofficial/polar-ble-sdk/blob/master/documentation/products/Polar360.md),
 [FirstTimeUse.md](https://github.com/polarofficial/polar-ble-sdk/blob/master/documentation/FirstTimeUse.md)).
 
+> **Nota availability:** Polar H10 e Muse 2 restano integrati nel codice (SDK / GATT / catalogo) ma sono **spenti** per connect / pair / UI tramite [`constants/device-availability.ts`](../constants/device-availability.ts) (`polar_h10: false`, `muse_2: false`). Per riattivarli, impostare i flag a `true`.
+
 ## Dispositivi compatibili
 
-Dispositivi supportati:
+Dispositivi supportati (attivi in app):
 
 - **Polar 360**
 - **Polar Loop Gen 2**
-- **Polar H10** (fascia petto ECG)
 
-360 e Loop condividono lo stesso profilo SDK (PPG ottico, HR, PPI, ACC, skin temp, FTU). **H10** usa ECG a contatto: HR + RR nativi (`rrsMs`) ed ECG grezzo (µV) in streaming; **nessun FTU** e **nessun PPI offline**.
+360 e Loop condividono lo stesso profilo SDK di base (PPG ottico, HR, PPI, ACC, FTU).
+
+| | P.360 | P.Loop2 |
+|--|-------|---------|
+| Temperatura cute | No | Sì |
 
 ## Requisiti preliminari
 
-- Polar 360, Loop Gen 2 o H10 carico / con batteria sufficiente.
+- Polar 360 o Loop Gen 2 carico / con batteria sufficiente.
 - **Smartphone Android 13 o superiore** (API 33+): versioni precedenti non consentono l'installazione dell'app.
 - Bluetooth attivo.
-- App Augmented Monitor installata (versione corrente: **1.0.0**).
+- App Augmented Monitor installata (versione corrente: **1.2.0**).
 - Connessione Internet stabile (per autenticazione Become / Ably).
 - Consenso ai permessi richiesti: Bluetooth, notifiche (per lo streaming a schermo spento).
 - **Non** usare Polar Flow durante il collegamento con Augmented Monitor (chiudere Flow se aperta).
 - **Non** abbinare il Polar dalle Impostazioni Bluetooth di sistema: il pairing va fatto dall'app SDK.
+
+## Guida rapida (allineata alla modale in-app)
+
+1. **Factory reset** — Attacca il Polar al caricatore e verifica che i LED ruotino. Con una graffetta premi il tastino nascosto dietro al cinturino (parte alta).
+2. Tieni premuto **circa 5 secondi**, poi rilascia.
+3. Attendi che i LED si riaccendano e riprendano a ruotare.
+4. Stacca il device e **indossalo** sul polso a contatto con la pelle.
+5. In Augmented Monitor, tab **Monitor** → **«Cerca dispositivo Polar»**.
+6. **Seleziona** il dispositivo dall’elenco.
+7. Acconsenti a **tutti** i permessi richiesti (Bluetooth, notifiche, ecc.).
+8. Alla **prima connessione**, se tutto è ok, compare il pannello **«Inserisci il codice a 4 cifre sul PC»**.
+9. Inserisci le 4 cifre sul PC: collegamento completato, pronti per lo **streaming**.
+
+> In Docs → Guida Connessione Polar la stessa procedura si apre in una **modale** nell’app (non come link esterno).
 
 ## 1. Prima accensione
 
@@ -39,37 +58,25 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Augm
 2. Apri l'app Augmented Monitor.
 3. Consenti all'app i permessi Bluetooth e, se richiesto, le **notifiche**.
 4. Vai su **Monitor** e avvia **"Cerca Dispositivo Polar"**.
-5. Quando compaiono i Polar supportati nell’elenco, **seleziona** quello che vuoi usare (360, Loop o H10). L’app **non** si connette automaticamente al primo trovato.
+5. Quando compaiono i Polar supportati nell’elenco, **seleziona** quello che vuoi usare (360 o Loop). L’app **non** si connette automaticamente al primo trovato.
 6. Al primo collegamento l'app:
    - completa il pairing BLE
-   - **360 / Loop:** esegue il **First Time Use** (configurazione dispositivo via SDK) e, se necessario, **riavvia** il Polar
-   - **H10:** salta FTU; avvia subito HR (con RR nativi) ed ECG grezzo
+   - esegue il **First Time Use** (configurazione dispositivo via SDK) e, se necessario, **riavvia** il Polar
    - alla riconnessione **dello stesso** `deviceId` avvia lo streaming verso Become
-   - **360 / Loop:** avvia **offline recording PPI** sul Polar (tracciato grezzo in memoria device); se fallisce, accumula un buffer live in-app
-   - **H10:** solo buffer live in-app (`rrSource: ecg_rr`); niente offline PPI
-   - calcola il tracciato **RR** (da PPI su 360/Loop, da `rrsMs` su H10, altrimenti `60000/HR` solo se non c’è grezzo)
+   - avvia **offline recording PPI** sul Polar (tracciato grezzo in memoria device); se fallisce, accumula un buffer live in-app
+   - calcola il tracciato **RR** (da PPI, altrimenti `60000/HR` solo se non c’è grezzo)
    - avvia un **servizio in primo piano** con notifica persistente (dispositivo collegato + HR, HRV, LF, HF), così lo streaming continua anche a schermo bloccato
 
 ### Live vs flush a fine sessione (spike)
 
-- **Live**: HR / PPI o RR ECG / HRV restano in streaming verso Ably (`heartRate`) per la visibilità in Hub.
+- **Live**: HR / PPI / HRV restano in streaming verso Ably (`heartRate`) per la visibilità in Hub.
 - **Tracciato intero**: a fine sessione Hub pubblica su `private:{userId}` l’evento Ably **`endSession`** (payload opzionale `{ "sessionId": "..." }`). L’app:
-  1. **360 / Loop:** ferma l’offline recording PPI, scarica il record dal Polar (o usa il buffer live)
-  2. **H10:** usa solo il buffer live (RR `ecg_rr`)
-  3. costruisce un payload grezzo `ppiTrack` (sample con `ppiMs`/`hr`, `rrMs`, `rrSource`)
-  4. fa **POST** a `EXPO_PUBLIC_TRACK_UPLOAD_URL` con `Authorization: Bearer {authToken}`
-  5. **360 / Loop:** rimuove il record offline dal device dopo upload ok
+  1. ferma l’offline recording PPI, scarica il record dal Polar (o usa il buffer live)
+  2. costruisce un payload grezzo `ppiTrack` (sample con `ppiMs`/`hr`, `rrMs`, `rrSource`)
+  3. fa **POST** a `EXPO_PUBLIC_TRACK_UPLOAD_URL` con `Authorization: Bearer {authToken}`
+  4. rimuove il record offline dal device dopo upload ok
 - Se `EXPO_PUBLIC_TRACK_UPLOAD_URL` è vuoto, lo spike fa **dry-run** (solo log).
 - In Monitor, con **debug mode** attivo, è disponibile il bottone **“Simula endSession / Flush track”** per test senza Hub.
-
-### Monitor — card grezze H10
-
-Con H10 connesso, oltre a HR e metriche derivate (RMSSD, LF/HF), l’app mostra in evidenza:
-
-- **RR (ECG)** — ultimo intervallo da `rrsMs` nativo (`ecg_rr`)
-- **ECG** — ultimo campione in µV dallo streaming SDK
-
-Su H10 **non** viene mostrato RR derivato da `60000/HR` quando è disponibile RR grezzo.
 
 Esempio payload POST:
 
@@ -144,22 +151,21 @@ Durante lo streaming, la barra delle notifiche mostra il nome del Polar collegat
 
 ## Confronto segnali / capacità (scientifico)
 
-Fonte: profilo Polar BLE SDK (360 / Loop / H10) + protocollo Muse BLE GATT (Muse 2). Tabella allineata all’accordion in-app (tab Documentazione). Per i passi Muse vedi [muse-2-connection-guide.md](./muse-2-connection-guide.md).
+Fonte: profilo Polar BLE SDK (360 / Loop). Tabella allineata all’accordion in-app (tab Documentazione).
 
-| Segnale / metrica | Polar 360 | Polar Loop Gen 2 | Polar H10 | Muse 2 | Note scientifiche | Usato oggi in Augmented Monitor |
-| --- | --- | --- | --- | --- | --- | --- |
-| Principio di sensing | PPG ottico (LED verde) | PPG ottico (stesso profilo SDK) | ECG a contatto (fascia toracica) | EEG dry electrodes (4ch) + PPG fronte | Modalità diverse: Polar cardiaco vs Muse EEG | Sì |
-| ECG | No | No | Sì (streaming SDK) | No (EEG, non ECG) | H10: µV; Muse misura EEG | Sì (solo H10) |
-| EEG (4 canali) | No | No | No | Sì TP9/AF7/AF8/TP10 (~256 Hz) | GATT diretto (community protocol) | Sì (Muse) |
-| HR (BPM) | Sì (online) | Sì | Sì | Sì (da PPG) | PPG (360/Loop/Muse) o ECG (H10) | Sì |
-| PPI / PP interval | Sì (da PPG) | Sì | No | No | Base HRV time-domain su 360/Loop | Sì (360/Loop) |
-| RR (ms) | Da PPI o `60000/HR` fallback | Idem | Nativo da `rrsMs` | No (HR da PPG) | `rrSource`: `ppi`, `ecg_rr`, `hr_derived` | Sì (Polar) |
-| HRV (RMSSD) | Derivata da RR/PPI | Derivata da RR/PPI | Derivata da RR ECG | No in UI Muse | Calcolo app Polar | Sì (Polar) |
-| LF / HF / bande | LF/HF da finestra RR | LF/HF da finestra RR | LF/HF da finestra RR | Bande EEG relative δ…γ | Polar spettrale RR; Muse bande EEG | Sì |
-| PPG grezzo | Sì (SDK) | Stesso profilo SDK | No | Sì (3 stream; HR in UI) | Muse ambient/IR/red | Sì (HR Muse; Polar offline/live) |
-| Accelerometro | Sì | Sì | Sì (SDK; non in UI) | Sì (protocollo; non in UI MVP) | Fuori scope UI | No |
-| Temperatura cute | Sì (1-4 Hz) | Sì | No | No | Skin temperature | Sì (360/Loop) |
-| FTU obbligatorio | Sì | Sì | No | No | Solo famiglia 360/Loop | Sì (dove previsto) |
+| Segnale / metrica | P.360 | P.Loop2 | Note scientifiche | Usato oggi in Augmented Monitor |
+| --- | --- | --- | --- | --- |
+| Principio di sensing | PPG ottico (LED verde) | PPG ottico (stesso profilo SDK) | PPG ottico al polso | Sì |
+| ECG | No | No | Wristband PPG, non ECG | — |
+| HR (BPM) | Sì (online) | Sì | Da PPG | Sì |
+| PPI / PP interval | Sì (da PPG) | Sì | Base HRV time-domain | Sì |
+| RR (ms) | Da PPI o `60000/HR` fallback | Idem | `rrSource`: `ppi`, `hr_derived` | Sì |
+| HRV (RMSSD) | Derivata da RR/PPI | Derivata da RR/PPI | Calcolo in-app | Sì |
+| LF / HF | Da finestra RR | Da finestra RR | Spettrale RR | Sì |
+| PPG grezzo | Sì (SDK) | Stesso profilo SDK | Offline / live track | Sì |
+| Accelerometro | Sì | Sì | Fuori scope UI | No |
+| Temperatura cute | No | Sì | Solo Loop Gen 2 | Sì (solo Loop) |
+| FTU obbligatorio | Sì | Sì | Famiglia 360/Loop | Sì |
 
 ## Disconnessione del dispositivo
 

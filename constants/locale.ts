@@ -89,19 +89,15 @@ export interface LocaleStrings {
         polar360ConnectionGuide: string;
         polar360GuideDescription: string;
         viewPolar360Guide: string;
+        polarSetupGuideTitle: string;
+        polarSetupGuideSubtitle: string;
+        polarSetupGuideDone: string;
+        polarSetupGuideSteps: string[];
         muse2ConnectionGuide: string;
         muse2GuideDescription: string;
         viewMuse2Guide: string;
         deviceComparison: string;
         deviceComparisonIntro: string;
-        signalThemeSensing: string;
-        signalThemeSensingDesc: string;
-        signalThemeCardiac: string;
-        signalThemeCardiacDesc: string;
-        signalThemeRaw: string;
-        signalThemeRawDesc: string;
-        signalThemeAppUsage: string;
-        signalThemeAppUsageDesc: string;
         signalMetric: string;
         signalPolar360: string;
         signalPolarLoop: string;
@@ -241,7 +237,7 @@ export const translations: Record<Language, LocaleStrings> = {
             appOverview: 'Panoramica App',
             appOverviewDescription: 'Augmented Monitor è un\'app professionale per il monitoraggio della variabilità della frequenza cardiaca (HRV) progettata per atleti, professionisti della salute ed entusiasti del benessere.',
             deviceConnection: 'Connessione Dispositivo',
-            deviceConnectionDescription: 'Collega un Polar (360 / Loop / H10) o un Muse 2 via Bluetooth. Dopo la scansione scegli il device dall\'elenco (un device alla volta). Polar: HR/HRV/RR (+ FTU su 360/Loop). Muse: EEG, bande e HR da PPG. A fine sessione Polar, Ably endSession può flushare il tracciato PPI grezzo.',
+            deviceConnectionDescription: 'Collega un Polar 360 o Loop Gen 2 via Bluetooth. Dopo la scansione scegli il device dall\'elenco (un device alla volta). Polar: HR/HRV/RR (+ FTU). A fine sessione, Ably endSession può flushare il tracciato PPI grezzo.',
             polar360SetupGuide: 'Guida Setup Polar',
             keyFeatures: 'Caratteristiche Principali',
             heartRateMonitoring: 'Monitoraggio Frequenza Cardiaca',
@@ -254,24 +250,30 @@ export const translations: Record<Language, LocaleStrings> = {
             hrvMetrics: 'Metriche HRV',
             hrvMetricsDescription: '• RMSSD (Root Mean Square of Successive Differences)\n• Potenza LF (Low Frequency)\n• Potenza HF (High Frequency)\n• Analisi finestra scorrevole di 30 secondi',
             supportedDevices: 'Dispositivi Supportati',
-            supportedDevicesDescription: '• Polar 360\n• Polar Loop Gen 2\n• Polar H10 (ECG, RR nativi)\n• Muse 2 (EEG 4 canali, bande, HR da PPG)\n\n360 e Loop: PPG ottico + FTU. H10: ECG toracico. Muse 2: BLE GATT diretto (niente Mind Monitor / Polar Flow).',
+            supportedDevicesDescription: '• Polar 360\n• Polar Loop Gen 2\n\n360 e Loop: PPG ottico + FTU obbligatorio via SDK (niente Polar Flow).',
             deviceGuides: 'Guide Connessione Dispositivi',
             polar360ConnectionGuide: 'Guida Connessione Polar',
-            polar360GuideDescription: 'Guida passo-passo per Polar 360, Loop Gen 2 e H10: scansione, selezione dispositivo, FTU (360/Loop), autenticazione Become e streaming.',
-            viewPolar360Guide: 'Visualizza Guida Polar',
+            polar360GuideDescription: 'Come collegare Polar 360 o Loop Gen 2 ad Augmented Monitor: reset, scansione, permessi e codice Become.',
+            viewPolar360Guide: 'Apri guida setup',
+            polarSetupGuideTitle: 'Setup Polar 360 / Loop 2',
+            polarSetupGuideSubtitle: 'Segui questi passaggi nell’ordine indicato. Vale per Polar 360 e Polar Loop Gen 2.',
+            polarSetupGuideDone: 'Ho capito',
+            polarSetupGuideSteps: [
+                'Assicurati di aver resettato di fabbrica il device: attaccalo al caricatore e verifica che i LED ruotino. Con una graffetta premi il tastino nascosto dietro al cinturino, nella parte alta.',
+                'Tieni premuto per circa 5 secondi, poi rilascia.',
+                'Attendi che i LED si riaccendano e riprendano a ruotare.',
+                'Stacca il device dal caricatore e indossalo sul polso, a contatto con la pelle.',
+                'Apri Augmented Monitor, vai alla tab Monitor e tocca «Cerca dispositivo Polar».',
+                'Seleziona il tuo dispositivo dall’elenco.',
+                'Acconsenti a tutti i permessi richiesti dall’app (Bluetooth, notifiche, ecc.).',
+                'Alla prima connessione, se tutto è andato bene, compare il pannello «Inserisci il codice a 4 cifre sul PC».',
+                'Inserisci le 4 cifre sul PC: il collegamento è completo e puoi avviare lo streaming.',
+            ],
             deviceComparison: 'Confronto dispositivi',
-            deviceComparisonIntro: 'Differenze scientifiche tra Polar e Muse 2. Espandi un tema per la tabella.',
-            signalThemeSensing: 'Sensing e FTU',
-            signalThemeSensingDesc: 'Principio di misura e First Time Use obbligatorio.',
-            signalThemeCardiac: 'Intervalli cardiaci, HRV e bande EEG',
-            signalThemeCardiacDesc: 'HR, PPI, RR e bande EEG Muse derivate in-app.',
-            signalThemeRaw: 'Segnali grezzi SDK',
-            signalThemeRawDesc: 'PPG grezzo, ECG, accelerometro e temperatura cute disponibili via SDK/protocollo.',
-            signalThemeAppUsage: 'Cosa usa Augmented Monitor',
-            signalThemeAppUsageDesc: 'Segnali streammati e metriche calcolate oggi nell\'app.',
+            deviceComparisonIntro: 'Segnali e capacità per dispositivo (Sì / No).',
             signalMetric: 'Segnale / metrica',
-            signalPolar360: 'Polar 360',
-            signalPolarLoop: 'Polar Loop Gen 2',
+            signalPolar360: 'P.360',
+            signalPolarLoop: 'P.Loop2',
             signalPolarH10: 'Polar H10',
             signalMuse2: 'Muse 2',
             signalNotes: 'Note scientifiche',
@@ -306,7 +308,7 @@ export const translations: Record<Language, LocaleStrings> = {
             signalNoteRawPpg: 'Segnale AFE grezzo Polar; Muse 2 ha 3 stream PPG (ambient/IR/red) usati per HR.',
             signalNoteRawEcg: 'Ultimo campione µV da startEcgStreaming; mostrato in Monitor solo su H10.',
             signalNoteAcc: 'Movimento / activity. Non usato in UI corrente (né Polar né Muse MVP).',
-            signalNoteSkinTemp: 'Skin temperature (1–4 Hz) su 360/Loop; assente su H10/Muse.',
+            signalNoteSkinTemp: 'Temperatura cute: in Augmented Monitor solo su Polar Loop Gen 2 (stream + card). Su Polar 360 non è nel perimetro app; assente su H10/Muse.',
             signalNoteFtu: 'Dati antropometrici via SDK (360/Loop) prima delle misure 24/7; H10 e Muse non richiedono FTU.',
             muse2ConnectionGuide: 'Guida Connessione Muse 2',
             muse2GuideDescription: 'Guida per collegare Muse 2: scansione BLE, EEG, bande e HR da PPG (senza Mind Monitor).',
@@ -407,7 +409,7 @@ export const translations: Record<Language, LocaleStrings> = {
             appOverview: 'App Overview',
             appOverviewDescription: 'Augmented Monitor is a professional heart rate variability (HRV) monitoring app designed for athletes, health professionals, and wellness enthusiasts.',
             deviceConnection: 'Device Connection',
-            deviceConnectionDescription: 'Connect a Polar (360 / Loop / H10) or Muse 2 via Bluetooth. After scanning, pick the device from the list (one device at a time). Polar: HR/HRV/RR (+ FTU on 360/Loop). Muse: EEG, bands, and PPG HR. At Polar session end, Ably endSession can flush the raw PPI track.',
+            deviceConnectionDescription: 'Connect a Polar 360 or Loop Gen 2 via Bluetooth. After scanning, pick the device from the list (one device at a time). Polar: HR/HRV/RR (+ FTU). At session end, Ably endSession can flush the raw PPI track.',
             polar360SetupGuide: 'Polar Setup Guide',
             keyFeatures: 'Key Features',
             heartRateMonitoring: 'Heart Rate Monitoring',
@@ -420,24 +422,30 @@ export const translations: Record<Language, LocaleStrings> = {
             hrvMetrics: 'HRV Metrics',
             hrvMetricsDescription: '• RMSSD (Root Mean Square of Successive Differences)\n• LF Power (Low Frequency)\n• HF Power (High Frequency)\n• 30-second rolling window analysis',
             supportedDevices: 'Supported Devices',
-            supportedDevicesDescription: '• Polar 360\n• Polar Loop Gen 2\n• Polar H10 (ECG, native RR)\n• Muse 2 (4-ch EEG, bands, PPG HR)\n\n360 and Loop: optical PPG + FTU. H10: chest ECG. Muse 2: direct BLE GATT (no Mind Monitor / Polar Flow).',
+            supportedDevicesDescription: '• Polar 360\n• Polar Loop Gen 2\n\n360 and Loop: optical PPG + required FTU via SDK (no Polar Flow).',
             deviceGuides: 'Device Connection Guides',
             polar360ConnectionGuide: 'Polar Connection Guide',
-            polar360GuideDescription: 'Step-by-step guide for Polar 360, Loop Gen 2, and H10: scan, device selection, FTU (360/Loop), Become auth, and streaming.',
-            viewPolar360Guide: 'View Polar Guide',
+            polar360GuideDescription: 'How to connect Polar 360 or Loop Gen 2 to Augmented Monitor: reset, scan, permissions, and Become code.',
+            viewPolar360Guide: 'Open setup guide',
+            polarSetupGuideTitle: 'Polar 360 / Loop 2 setup',
+            polarSetupGuideSubtitle: 'Follow these steps in order. Applies to Polar 360 and Polar Loop Gen 2.',
+            polarSetupGuideDone: 'Got it',
+            polarSetupGuideSteps: [
+                'Factory-reset the device first: plug it into the charger and make sure the LEDs are rotating. Use a paperclip to press the hidden button behind the strap, on the upper part.',
+                'Hold for about 5 seconds, then release.',
+                'Wait until the LEDs light up again and start rotating.',
+                'Unplug the device and wear it on your wrist, against the skin.',
+                'Open Augmented Monitor, go to the Monitor tab, and tap “Search Polar device”.',
+                'Select your device from the list.',
+                'Allow every permission the app requests (Bluetooth, notifications, etc.).',
+                'On the first connection, if everything worked, you will see “Enter the 4-digit code on the PC”.',
+                'Enter the 4 digits on the PC: pairing is complete and you are ready to stream.',
+            ],
             deviceComparison: 'Device comparison',
-            deviceComparisonIntro: 'Scientific differences between Polar and Muse 2. Expand a theme for the table.',
-            signalThemeSensing: 'Sensing and FTU',
-            signalThemeSensingDesc: 'Measurement principle and required First Time Use.',
-            signalThemeCardiac: 'Cardiac intervals, HRV and EEG bands',
-            signalThemeCardiacDesc: 'HR, PPI, RR, and Muse EEG bands derived in-app.',
-            signalThemeRaw: 'Raw SDK signals',
-            signalThemeRawDesc: 'Raw PPG, ECG, accelerometer, and skin temperature via SDK/protocol.',
-            signalThemeAppUsage: 'What Augmented Monitor uses',
-            signalThemeAppUsageDesc: 'Signals streamed and metrics computed in the app today.',
+            deviceComparisonIntro: 'Signals and capabilities by device (Yes / No).',
             signalMetric: 'Signal / metric',
-            signalPolar360: 'Polar 360',
-            signalPolarLoop: 'Polar Loop Gen 2',
+            signalPolar360: 'P.360',
+            signalPolarLoop: 'P.Loop2',
             signalPolarH10: 'Polar H10',
             signalMuse2: 'Muse 2',
             signalNotes: 'Scientific notes',
@@ -472,7 +480,7 @@ export const translations: Record<Language, LocaleStrings> = {
             signalNoteRawPpg: 'Polar raw AFE PPG; Muse 2 has 3 PPG streams (ambient/IR/red) used for HR.',
             signalNoteRawEcg: 'Latest µV sample from startEcgStreaming; shown in Monitor on H10 only.',
             signalNoteAcc: 'Motion / activity. Not used in current UI (Polar or Muse MVP).',
-            signalNoteSkinTemp: 'Skin temperature (1–4 Hz) on 360/Loop; not on H10/Muse.',
+            signalNoteSkinTemp: 'Skin temperature: in Augmented Monitor on Polar Loop Gen 2 only (stream + card). Not in app scope for Polar 360; not on H10/Muse.',
             signalNoteFtu: 'Anthropometric data via SDK (360/Loop) before 24/7 measures; H10 and Muse do not require FTU.',
             muse2ConnectionGuide: 'Muse 2 Connection Guide',
             muse2GuideDescription: 'Guide to connect Muse 2: BLE scan, EEG, bands, and PPG HR (no Mind Monitor).',

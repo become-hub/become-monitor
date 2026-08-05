@@ -26,7 +26,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import packageJson from "../../package.json";
+import { APP_VERSION } from "@/constants/app-version";
 
 export default function SettingsScreen() {
   const { theme, themePreference, updateThemePreference } = useTheme();
@@ -217,7 +217,7 @@ export default function SettingsScreen() {
   const handleAbout = () => {
     Alert.alert(
       "About Augmented Monitor",
-      `Version ${packageJson.version}\n\nProfessional HRV monitoring solution for athletes and health professionals.\n\n© 2025 Become Hub`,
+      `Version ${APP_VERSION}\n\nProfessional HRV monitoring solution for athletes and health professionals.\n\n© 2025 Become Hub`,
       [{ text: "OK" }]
     );
   };
@@ -569,7 +569,7 @@ export default function SettingsScreen() {
           <ThemedView style={styles.infoCard}>
             <ThemedText style={styles.infoLabel}>Version</ThemedText>
             <ThemedText style={styles.infoValue}>
-              {packageJson.version}
+              {APP_VERSION}
             </ThemedText>
           </ThemedView>
 

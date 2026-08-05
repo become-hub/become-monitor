@@ -47,9 +47,13 @@ export default function MonitorScreen() {
         />
 
         <MonitorStatusSection
-          bluetoothStateText={session.getBluetoothStateText()}
-          deviceStatusText={session.getDeviceStatusText()}
+          bluetoothPowered={session.bluetoothPowered}
+          deviceName={
+            session.connectedDeviceId ? session.connectedDeviceName || null : null
+          }
           streamingStatusText={session.getStreamingStatusText()}
+          isStreamingLive={session.isStreamingLive}
+          ablyPulseTick={session.ablyPulseTick}
           deviceCode={session.deviceCode}
           userId={session.userId}
           appId={session.appId}
@@ -60,48 +64,51 @@ export default function MonitorScreen() {
           authCode={session.authCode}
         />
 
-        <ThemedView style={monitorStyles.metricsSection}>
-          <ThemedText type="subtitle" style={monitorStyles.sectionTitle}>
-            {session.isMuseConnected
-              ? "Metriche Muse 2"
-              : session.isH10Connected
-              ? "Metriche H10 disponibili"
-              : "Metriche Cardiache"}
-          </ThemedText>
+        {session.connectedDeviceId ? (
+          <ThemedView style={monitorStyles.metricsSection}>
+            <ThemedText type="subtitle" style={monitorStyles.sectionTitle}>
+              {session.isMuseConnected
+                ? "Metriche Muse 2"
+                : session.isH10Connected
+                ? "Metriche H10 disponibili"
+                : "Metriche Cardiache"}
+            </ThemedText>
 
-          {session.isMuseConnected ? (
-            <MuseMetricsGrid
-              connectedDeviceId={session.connectedDeviceId}
-              eegTp9={session.eegTp9}
-              eegAf7={session.eegAf7}
-              eegAf8={session.eegAf8}
-              eegTp10={session.eegTp10}
-              bandDelta={session.bandDelta}
-              bandTheta={session.bandTheta}
-              bandAlpha={session.bandAlpha}
-              bandBeta={session.bandBeta}
-              bandGamma={session.bandGamma}
-              museHr={session.museHr}
-              museBattery={session.museBattery}
-            />
-          ) : (
-            <PolarMetricsGrid
-              connectedDeviceId={session.connectedDeviceId}
-              heartRate={session.heartRate}
-              hrv={session.hrv}
-              lfPower={session.lfPower}
-              hfPower={session.hfPower}
-              rrMs={session.rrMs}
-              rrSource={session.rrSource}
-              ecgMicroVolts={session.ecgMicroVolts}
-              skinTemperatureC={session.skinTemperatureC}
-              ppiWindowLength={session.ppiWindowLength}
-              isH10Connected={session.isH10Connected}
-              showRawEcgCards={session.showRawEcgCards}
-              isSkinTemperatureSupported={session.isSkinTemperatureSupported}
-            />
-          )}
-        </ThemedView>
+            {session.isMuseConnected ? (
+              <MuseMetricsGrid
+                connectedDeviceId={session.connectedDeviceId}
+                eegTp9={session.eegTp9}
+                eegAf7={session.eegAf7}
+                eegAf8={session.eegAf8}
+                eegTp10={session.eegTp10}
+                bandDelta={session.bandDelta}
+                bandTheta={session.bandTheta}
+                bandAlpha={session.bandAlpha}
+                bandBeta={session.bandBeta}
+                bandGamma={session.bandGamma}
+                museHr={session.museHr}
+                museBattery={session.museBattery}
+              />
+            ) : (
+              <PolarMetricsGrid
+                connectedDeviceId={session.connectedDeviceId}
+                heartRate={session.heartRate}
+                hrv={session.hrv}
+                lfPower={session.lfPower}
+                hfPower={session.hfPower}
+                rrMs={session.rrMs}
+                rrSource={session.rrSource}
+                ecgMicroVolts={session.ecgMicroVolts}
+                skinTemperatureC={session.skinTemperatureC}
+                ppiWindowLength={session.ppiWindowLength}
+                isSignalLost={session.isSignalLost}
+                isH10Connected={session.isH10Connected}
+                showRawEcgCards={session.showRawEcgCards}
+                isSkinTemperatureSupported={session.isSkinTemperatureSupported}
+              />
+            )}
+          </ThemedView>
+        ) : null}
 
         <MonitorActions
           connectedDeviceId={session.connectedDeviceId}

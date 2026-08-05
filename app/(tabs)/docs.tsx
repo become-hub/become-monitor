@@ -1,11 +1,13 @@
 import { AppFooter } from "@/components/app-footer";
+import { PolarSetupGuideModal } from "@/components/polar-setup-guide-modal";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { isDeviceAvailable } from "@/constants/device-availability";
 import { LocaleStrings } from "@/constants/locale";
 import {
-  getSignalRowsForTheme,
-  POLAR_SIGNAL_THEMES,
-  SignalUsedInApp,
+  getAvailableSignalDevices,
+  getSignalValue,
+  POLAR_SIGNAL_ROWS,
 } from "@/constants/polar-signal-comparison";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -15,9 +17,8 @@ import {
   AlertTriangle,
   BarChart3,
   Bluetooth,
+  BookOpen,
   CheckCircle,
-  ChevronDown,
-  ChevronUp,
   Cloud,
   ExternalLink,
   Heart,
@@ -34,48 +35,29 @@ import {
   View,
 } from "react-native";
 
-function docString(
-  docs: LocaleStrings["docs"],
-  key: string
-): string {
+function docString(docs: LocaleStrings["docs"], key: string): string {
   const short = key.replace(/^docs\./, "") as keyof LocaleStrings["docs"];
   const value = docs[short];
   return typeof value === "string" ? value : key;
 }
 
-function usedLabel(
-  docs: LocaleStrings["docs"],
-  used: SignalUsedInApp
-): string {
-  switch (used) {
-    case "yes":
-      return docs.signalUsedYes;
-    case "no":
-      return docs.signalUsedNo;
-    case "derived":
-      return docs.signalUsedDerived;
-    default:
-      return docs.signalUsedNa;
-  }
-}
-
 export default function DocsScreen() {
   const { theme } = useTheme();
   const { strings } = useLocale();
-  const [expandedThemeId, setExpandedThemeId] = useState<string | null>(
-    "sensing"
-  );
+  const comparisonDevices = getAvailableSignalDevices();
+  const showMuse2 = isDeviceAvailable("muse_2");
+  const [polarGuideVisible, setPolarGuideVisible] = useState(false);
 
   const openLink = (url: string) => {
     Linking.openURL(url);
   };
 
-  const toggleTheme = (id: string) => {
-    setExpandedThemeId((current) => (current === id ? null : id));
-  };
-
   return (
     <ThemedView style={styles.container}>
+      <PolarSetupGuideModal
+        visible={polarGuideVisible}
+        onClose={() => setPolarGuideVisible(false)}
+      />
       <ScrollView style={styles.scrollView}>
         <ThemedView style={styles.header}>
           <ThemedText type="title" style={styles.title}>
@@ -118,37 +100,35 @@ export default function DocsScreen() {
                 styles.linkButton,
                 { borderColor: Colors[theme].tint, marginTop: 12 },
               ]}
-              onPress={() =>
-                openLink(
-                  "https://github.com/become-hub/become-monitor/blob/main/docs/polar-360-connection-guide.md"
-                )
-              }
+              onPress={() => setPolarGuideVisible(true)}
             >
               <View style={styles.linkContent}>
+                <BookOpen size={16} color={Colors[theme].tint} />
                 <ThemedText style={styles.linkText}>
                   {strings.docs.polar360SetupGuide}
                 </ThemedText>
-                <ExternalLink size={16} />
               </View>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.linkButton,
-                { borderColor: Colors[theme].tint, marginTop: 12 },
-              ]}
-              onPress={() =>
-                openLink(
-                  "https://github.com/become-hub/become-monitor/blob/main/docs/muse-2-connection-guide.md"
-                )
-              }
-            >
-              <View style={styles.linkContent}>
-                <ThemedText style={styles.linkText}>
-                  {strings.docs.muse2ConnectionGuide}
-                </ThemedText>
-                <ExternalLink size={16} />
-              </View>
-            </TouchableOpacity>
+            {showMuse2 && (
+              <TouchableOpacity
+                style={[
+                  styles.linkButton,
+                  { borderColor: Colors[theme].tint, marginTop: 12 },
+                ]}
+                onPress={() =>
+                  openLink(
+                    "https://github.com/become-hub/become-monitor/blob/main/docs/muse-2-connection-guide.md"
+                  )
+                }
+              >
+                <View style={styles.linkContent}>
+                  <ThemedText style={styles.linkText}>
+                    {strings.docs.muse2ConnectionGuide}
+                  </ThemedText>
+                  <ExternalLink size={16} />
+                </View>
+              </TouchableOpacity>
+            )}
           </ThemedView>
         </ThemedView>
 
@@ -160,86 +140,55 @@ export default function DocsScreen() {
             {strings.docs.deviceComparisonIntro}
           </ThemedText>
 
-          {POLAR_SIGNAL_THEMES.map((themeItem) => {
-            const expanded = expandedThemeId === themeItem.id;
-            const rows = getSignalRowsForTheme(themeItem.id);
-            return (
-              <ThemedView key={themeItem.id} style={styles.accordionCard}>
-                <TouchableOpacity
-                  style={styles.accordionHeader}
-                  onPress={() => toggleTheme(themeItem.id)}
-                  accessibilityRole="button"
-                >
-                  <View style={styles.accordionHeaderText}>
-                    <ThemedText style={styles.cardTitle}>
-                      {docString(strings.docs, themeItem.titleKey)}
-                    </ThemedText>
-                    <ThemedText style={styles.accordionDesc}>
-                      {docString(strings.docs, themeItem.descriptionKey)}
-                    </ThemedText>
-                  </View>
-                  {expanded ? (
-                    <ChevronUp size={20} color={Colors[theme].tint} />
-                  ) : (
-                    <ChevronDown size={20} color={Colors[theme].tint} />
-                  )}
-                </TouchableOpacity>
-
-                {expanded && (
-                  <View style={styles.table}>
-                    <View style={[styles.tableRow, styles.tableHeaderRow]}>
-                      <ThemedText style={[styles.tableCell, styles.tableHeader]}>
-                        {strings.docs.signalMetric}
-                      </ThemedText>
-                      <ThemedText style={[styles.tableCell, styles.tableHeader]}>
-                        {strings.docs.signalPolar360}
-                      </ThemedText>
-                      <ThemedText style={[styles.tableCell, styles.tableHeader]}>
-                        {strings.docs.signalPolarLoop}
-                      </ThemedText>
-                      <ThemedText style={[styles.tableCell, styles.tableHeader]}>
-                        {strings.docs.signalPolarH10}
-                      </ThemedText>
-                      <ThemedText style={[styles.tableCell, styles.tableHeader]}>
-                        {strings.docs.signalMuse2}
-                      </ThemedText>
-                      <ThemedText style={[styles.tableCell, styles.tableHeader]}>
-                        {strings.docs.signalUsedInApp}
+          <ThemedView style={styles.comparisonCard}>
+            <View style={styles.comparisonTable}>
+              <View style={styles.comparisonHeaderRow}>
+                <View style={styles.comparisonMetricCol} />
+                  {comparisonDevices.map((device) => (
+                    <View key={device.column} style={styles.comparisonDeviceCol}>
+                      <ThemedText
+                        style={styles.comparisonDeviceHeader}
+                        numberOfLines={1}
+                      >
+                        {device.shortLabel}
                       </ThemedText>
                     </View>
-                    {rows.map((row) => (
-                      <View key={row.id} style={styles.tableBlock}>
-                        <View style={styles.tableRow}>
-                          <ThemedText style={[styles.tableCell, styles.metricCell]}>
-                            {docString(strings.docs, row.metricKey)}
-                          </ThemedText>
-                          <ThemedText style={styles.tableCell}>
-                            {row.polar360}
-                          </ThemedText>
-                          <ThemedText style={styles.tableCell}>
-                            {row.polarLoop}
-                          </ThemedText>
-                          <ThemedText style={styles.tableCell}>
-                            {row.polarH10}
-                          </ThemedText>
-                          <ThemedText style={styles.tableCell}>
-                            {row.muse2}
-                          </ThemedText>
-                          <ThemedText style={styles.tableCell}>
-                            {usedLabel(strings.docs, row.usedInApp)}
-                          </ThemedText>
-                        </View>
-                        <ThemedText style={styles.noteText}>
-                          {strings.docs.signalNotes}:{" "}
-                          {docString(strings.docs, row.scientificNoteKey)}
+                  ))}
+              </View>
+
+              {POLAR_SIGNAL_ROWS.map((row) => (
+                <View key={row.id} style={styles.comparisonRow}>
+                  <View style={styles.comparisonMetricCol}>
+                    <ThemedText
+                      style={styles.comparisonMetricLabel}
+                      numberOfLines={2}
+                    >
+                      {docString(strings.docs, row.metricKey)}
+                    </ThemedText>
+                  </View>
+                  {comparisonDevices.map((device) => {
+                    const value = getSignalValue(row, device.column);
+                    const isNo = value.toLowerCase() === "no";
+                    return (
+                      <View
+                        key={device.column}
+                        style={styles.comparisonDeviceCol}
+                      >
+                        <ThemedText
+                          style={[
+                            styles.metricValue,
+                            isNo && styles.metricValueNo,
+                          ]}
+                        >
+                          {value}
                         </ThemedText>
                       </View>
-                    ))}
-                  </View>
-                )}
-              </ThemedView>
-            );
-          })}
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
+          </ThemedView>
         </ThemedView>
 
         <ThemedView style={styles.section}>
@@ -334,50 +283,48 @@ export default function DocsScreen() {
                 styles.linkButton,
                 { borderColor: Colors[theme].tint, marginTop: 12 },
               ]}
-              onPress={() =>
-                openLink(
-                  "https://github.com/become-hub/become-monitor/blob/main/docs/polar-360-connection-guide.md"
-                )
-              }
+              onPress={() => setPolarGuideVisible(true)}
             >
               <View style={styles.linkContent}>
+                <BookOpen size={16} color={Colors[theme].tint} />
                 <ThemedText style={styles.linkText}>
                   {strings.docs.viewPolar360Guide}
                 </ThemedText>
-                <ExternalLink size={16} />
               </View>
             </TouchableOpacity>
           </ThemedView>
 
-          <ThemedView style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Bluetooth size={20} color={Colors[theme].tint} />
-              <ThemedText style={styles.cardTitle}>
-                {strings.docs.muse2ConnectionGuide}
-              </ThemedText>
-            </View>
-            <ThemedText style={styles.cardText}>
-              {strings.docs.muse2GuideDescription}
-            </ThemedText>
-            <TouchableOpacity
-              style={[
-                styles.linkButton,
-                { borderColor: Colors[theme].tint, marginTop: 12 },
-              ]}
-              onPress={() =>
-                openLink(
-                  "https://github.com/become-hub/become-monitor/blob/main/docs/muse-2-connection-guide.md"
-                )
-              }
-            >
-              <View style={styles.linkContent}>
-                <ThemedText style={styles.linkText}>
-                  {strings.docs.viewMuse2Guide}
+          {showMuse2 && (
+            <ThemedView style={styles.card}>
+              <View style={styles.cardHeader}>
+                <Bluetooth size={20} color={Colors[theme].tint} />
+                <ThemedText style={styles.cardTitle}>
+                  {strings.docs.muse2ConnectionGuide}
                 </ThemedText>
-                <ExternalLink size={16} />
               </View>
-            </TouchableOpacity>
-          </ThemedView>
+              <ThemedText style={styles.cardText}>
+                {strings.docs.muse2GuideDescription}
+              </ThemedText>
+              <TouchableOpacity
+                style={[
+                  styles.linkButton,
+                  { borderColor: Colors[theme].tint, marginTop: 12 },
+                ]}
+                onPress={() =>
+                  openLink(
+                    "https://github.com/become-hub/become-monitor/blob/main/docs/muse-2-connection-guide.md"
+                  )
+                }
+              >
+                <View style={styles.linkContent}>
+                  <ThemedText style={styles.linkText}>
+                    {strings.docs.viewMuse2Guide}
+                  </ThemedText>
+                  <ExternalLink size={16} />
+                </View>
+              </TouchableOpacity>
+            </ThemedView>
+          )}
         </ThemedView>
 
         <ThemedView style={styles.section}>
@@ -486,26 +433,52 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.1)",
   },
-  accordionCard: {
-    padding: 12,
+  comparisonCard: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderRadius: 12,
-    marginBottom: 12,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.1)",
+    overflow: "hidden",
   },
-  accordionHeader: {
+  comparisonTable: {
+    width: "100%",
+  },
+  comparisonHeaderRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 8,
+    alignItems: "flex-end",
+    paddingBottom: 10,
+    marginBottom: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(0,0,0,0.12)",
   },
-  accordionHeaderText: {
+  comparisonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(0,0,0,0.08)",
+  },
+  comparisonMetricCol: {
+    flex: 1.6,
+    paddingRight: 8,
+    justifyContent: "center",
+  },
+  comparisonDeviceCol: {
     flex: 1,
+    alignItems: "flex-end",
+    justifyContent: "center",
+    paddingLeft: 4,
   },
-  accordionDesc: {
+  comparisonDeviceHeader: {
+    fontSize: 12,
+    fontWeight: "700",
+    textAlign: "right",
+    lineHeight: 16,
+  },
+  comparisonMetricLabel: {
     fontSize: 13,
-    opacity: 0.7,
-    marginTop: 4,
+    fontWeight: "600",
     lineHeight: 18,
   },
   cardHeader: {
@@ -523,45 +496,16 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     opacity: 0.8,
   },
-  table: {
-    marginTop: 12,
-    gap: 10,
-  },
-  tableHeaderRow: {
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(0,0,0,0.12)",
-    paddingBottom: 8,
-  },
-  tableRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 4,
-  },
-  tableBlock: {
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(0,0,0,0.1)",
-  },
-  tableCell: {
-    width: "48%",
-    fontSize: 12,
-    lineHeight: 16,
-    opacity: 0.85,
-    marginBottom: 4,
-  },
-  tableHeader: {
-    fontWeight: "700",
-    opacity: 1,
-  },
-  metricCell: {
+  metricValue: {
+    fontSize: 14,
     fontWeight: "600",
-    width: "100%",
+    opacity: 0.9,
+    textAlign: "right",
   },
-  noteText: {
-    fontSize: 12,
-    opacity: 0.7,
-    lineHeight: 16,
-    marginTop: 4,
+  metricValueNo: {
+    color: "#9CA3AF",
+    fontWeight: "500",
+    opacity: 1,
   },
   linkButton: {
     padding: 16,
@@ -572,12 +516,11 @@ const styles = StyleSheet.create({
   linkContent: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: 12,
   },
   linkText: {
     fontSize: 16,
     fontWeight: "500",
     flex: 1,
-    marginLeft: 12,
   },
 });

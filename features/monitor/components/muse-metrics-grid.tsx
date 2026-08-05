@@ -4,8 +4,6 @@
  */
 
 import { ThemedText } from "@/components/themed-text";
-import { Colors } from "@/constants/theme";
-import { useTheme } from "@/contexts/ThemeContext";
 import { Heart } from "lucide-react-native";
 import { View } from "react-native";
 import { MetricCard } from "./metric-card";
@@ -40,13 +38,11 @@ export function MuseMetricsGrid({
   museHr,
   museBattery,
 }: MuseMetricsGridProps) {
-  const { theme } = useTheme();
-
   return (
     <>
       {connectedDeviceId && eegAf7 === 0 && (
         <ThemedText style={monitorStyles.waitingText}>
-          ⏳ In attesa di EEG dal Muse…
+          In attesa di EEG dal Muse…
         </ThemedText>
       )}
 
@@ -104,22 +100,14 @@ export function MuseMetricsGrid({
           />
         </View>
         <View style={monitorStyles.metricsRow}>
-          <View
-            style={[
-              monitorStyles.metricCard,
-              monitorStyles.metricCardHighlight,
-              { borderColor: Colors[theme].tint },
-            ]}
-          >
-            <View style={monitorStyles.metricIconContainer}>
-              <Heart size={24} color={Colors[theme].tint} />
-            </View>
-            <ThemedText style={monitorStyles.metricLabel}>HR (PPG)</ThemedText>
-            <ThemedText style={monitorStyles.metricValue}>
-              {museHr > 0 ? museHr : "—"}
-            </ThemedText>
-            <ThemedText style={monitorStyles.metricUnit}>BPM</ThemedText>
-          </View>
+          <MetricCard
+            label="HR (PPG)"
+            value={museHr > 0 ? museHr : "—"}
+            unit="BPM"
+            icon={Heart}
+            pulse={museHr > 0}
+            highlighted
+          />
           <MetricCard
             label="Batteria"
             value={museBattery > 0 ? museBattery.toFixed(0) : "—"}

@@ -8,6 +8,7 @@ import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { isMuseFamilyAvailable } from "@/constants/device-availability";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLocale } from "@/hooks/use-locale";
@@ -18,6 +19,7 @@ export default function HomeScreen() {
   const { theme } = useTheme();
   const { strings, language } = useLocale();
   const router = useRouter();
+  const museAvailable = isMuseFamilyAvailable();
 
   const handleStartPress = () => {
     router.push("/(tabs)/monitor");
@@ -43,21 +45,16 @@ export default function HomeScreen() {
           </ThemedText>
           <ThemedText style={styles.deviceDescription}>
             {language === "en"
-              ? "Connect a Polar or Muse device to start monitoring in Become Hub apps"
-              : "Connetti un dispositivo Polar o Muse per iniziare a monitorare nelle app Become Hub"}
+              ? museAvailable
+                ? "Connect a Polar or Muse device to start monitoring in Become Hub apps"
+                : "Connect a Polar device to start monitoring in Become Hub apps"
+              : museAvailable
+                ? "Connetti un dispositivo Polar o Muse per iniziare a monitorare nelle app Become Hub"
+                : "Connetti un dispositivo Polar per iniziare a monitorare nelle app Become Hub"}
           </ThemedText>
         </ThemedView>
 
         <ThemedView style={styles.section}>
-          <View style={styles.poweredByRow}>
-            <ThemedText style={styles.poweredByText}>powered by</ThemedText>
-            <Image
-              source={require("@/assets/images/polar-logo.webp")}
-              style={styles.polarLogo}
-              contentFit="contain"
-            />
-          </View>
-
           {POLAR_PRODUCT_LIST.map((product) => (
             <PolarDeviceCard
               key={product.id}
@@ -143,22 +140,6 @@ const styles = StyleSheet.create({
   section: {
     padding: 20,
     paddingTop: 0,
-  },
-  poweredByRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 6,
-    marginBottom: 12,
-  },
-  polarLogo: {
-    width: 60,
-    height: 30,
-  },
-  poweredByText: {
-    fontSize: 12,
-    opacity: 0.6,
-    fontWeight: "500",
   },
   docsLink: {
     flexDirection: "row",

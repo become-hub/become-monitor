@@ -3,6 +3,8 @@
  * Famiglia separata da Polar — non modificare polar-products.
  */
 
+import { isDeviceAvailable } from "@/constants/device-availability";
+
 export type MuseProductId = "muse_2";
 
 export type MuseProductImageKey = "muse2";
@@ -45,7 +47,10 @@ export const MUSE_PRODUCTS: Record<MuseProductId, MuseProduct> = {
   },
 };
 
-export const MUSE_PRODUCT_LIST: MuseProduct[] = [MUSE_PRODUCTS.muse_2];
+/** Solo prodotti con availability on. */
+export const MUSE_PRODUCT_LIST: MuseProduct[] = (
+  [MUSE_PRODUCTS.muse_2] as const
+).filter((p) => isDeviceAvailable(p.id));
 
 /**
  * Risolve il prodotto Muse dal nome BLE. Matchers più lunghi/specifici prima.

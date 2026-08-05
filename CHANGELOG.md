@@ -4,6 +4,22 @@ Tutte le modifiche rilevanti a Augmented Monitor.
 
 Il formato si ispira a [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [1.2.0] — Device gates + Monitor UX + Polar setup
+
+### Added
+- Flag `device-availability` per spegnere H10/Muse in UI senza rimuovere il codice
+- Guida setup Polar 360 / Loop Gen 2 in modale in-app (Docs)
+- Temperatura cute in Monitor su Loop Gen 2; non in perimetro app sul 360
+- Reset metriche e stop pulse cuore quando il sensore non rileva più segnale
+
+### Changed
+- Streaming locale (PPI / skin temp) avviato dopo FTU, indipendente dall’auth Become
+- Tab Docs: confronto dispositivi a colonne (Sì/No), intestazioni P.360 / P.Loop2
+- Heartbeat UI più morbido; polish card Monitor e stato sessione
+
+### Fixed
+- Asset PNG Polar (H10/Loop) corretti per build Android AAPT
+
 ## [1.1.0] — Feature architecture + CI
 
 ### Changed

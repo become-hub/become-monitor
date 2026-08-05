@@ -1,5 +1,11 @@
 .PHONY: prebuild clean-prebuild android virtual-smartphone ios apk logs test test-watch test-coverage test-ci clean-test help
 
+# nvm non è disponibile nelle recipe Make (shell non-login): sourciare e usare l’alias default
+# così Gradle trova `node` (errore tipico: Cannot run program "node").
+define WITH_NVM_DEFAULT
+. "$$HOME/.nvm/nvm.sh" && nvm use default
+endef
+
 # Prebuild dell'app con clean per rigenerare completamente le cartelle native
 prebuild:
 	@echo "🔧 Esecuzione prebuild con clean..."
@@ -16,14 +22,39 @@ clean-prebuild:
 android:
 	@echo "📱 Avvio app su dispositivo Android fisico..."
 	@echo "☕ Configurazione Java 17 e Android SDK..."
+	@echo "🧹 Reset ADB e rimozione target non-USB (Expo fallisce su emulator zombie)..."
+	@adb kill-server >/dev/null 2>&1 || true
+	@adb start-server >/dev/null
+	@sleep 1
+	@adb devices | awk 'NR>1 && $$2=="device" && ($$1 ~ /^emulator-/ || $$1 ~ /:/) { print $$1 }' | while read -r serial; do \
+		adb disconnect "$$serial" >/dev/null 2>&1 || true; \
+	done
 	@echo "🔍 Verificando dispositivi collegati..."
-	@adb devices
+	@adb devices -l
 	@echo "🚀 Avvio su dispositivo fisico..."
 	@echo "⚠️  Se non vedi il tuo smartphone nella lista sopra, abilita il debug USB!"
+	@$(WITH_NVM_DEFAULT) && \
 	export JAVA_HOME=/opt/homebrew/opt/openjdk@17 && \
 	export ANDROID_HOME=$$HOME/Library/Android/sdk && \
-	export PATH=$$PATH:$$ANDROID_HOME/platform-tools:$$ANDROID_HOME/cmdline-tools/latest/bin && \
-	npx expo run:android --device
+	export PATH="$$PATH:$$ANDROID_HOME/platform-tools:$$ANDROID_HOME/cmdline-tools/latest/bin" && \
+	DEVICE_SERIAL=$$(adb devices | awk 'NR>1 && $$2=="device" && $$1 !~ /^emulator-/ && $$1 !~ /:/ { print $$1; exit }') && \
+	if [ -z "$$DEVICE_SERIAL" ]; then \
+		echo "❌ Nessun dispositivo USB fisico trovato. Collega il telefono e abilita debug USB."; \
+		exit 1; \
+	fi && \
+	DEVICE_NAME=$$(adb -s "$$DEVICE_SERIAL" shell getprop ro.product.model | tr -d '\r') && \
+	if [ -z "$$DEVICE_NAME" ]; then DEVICE_NAME="$$DEVICE_SERIAL"; fi && \
+	echo "📲 Device selezionato: $$DEVICE_SERIAL ($$DEVICE_NAME)" && \
+	adb devices | awk 'NR>1 && $$2=="device" && ($$1 ~ /^emulator-/ || $$1 ~ /:/) { print $$1 }' | while read -r serial; do \
+		adb disconnect "$$serial" >/dev/null 2>&1 || true; \
+	done && \
+	cd android && ./gradlew --stop >/dev/null 2>&1 || true && \
+	cd .. && \
+	adb devices | awk 'NR>1 && $$2=="device" && ($$1 ~ /^emulator-/ || $$1 ~ /:/) { print $$1 }' | while read -r serial; do \
+		adb disconnect "$$serial" >/dev/null 2>&1 || true; \
+	done && \
+	export ANDROID_SERIAL="$$DEVICE_SERIAL" && \
+	npx expo run:android --device "$$DEVICE_NAME"
 	@echo "✅ App avviata su dispositivo Android!"
 
 # Avvia l'app su emulatore Android
@@ -33,9 +64,12 @@ virtual-smartphone:
 	@echo "🔍 Verificando emulatori disponibili..."
 	@adb devices
 	@echo "🚀 Avvio su emulatore..."
+	@$(WITH_NVM_DEFAULT) && \
 	export JAVA_HOME=/opt/homebrew/opt/openjdk@17 && \
 	export ANDROID_HOME=$$HOME/Library/Android/sdk && \
-	export PATH=$$PATH:$$ANDROID_HOME/platform-tools:$$ANDROID_HOME/cmdline-tools/latest/bin && \
+	export PATH="$$PATH:$$ANDROID_HOME/platform-tools:$$ANDROID_HOME/cmdline-tools/latest/bin" && \
+	cd android && ./gradlew --stop >/dev/null 2>&1 || true && \
+	cd .. && \
 	npx expo run:android
 	@echo "✅ App avviata su emulatore Android!"
 
@@ -56,10 +90,12 @@ apk:
 		echo "✅ Cartelle native esistenti, salto il prebuild per preservare le icone personalizzate"; \
 	fi
 	@echo "🏗️  Build APK in corso..."
+	@$(WITH_NVM_DEFAULT) && \
 	export JAVA_HOME=/opt/homebrew/opt/openjdk@17 && \
 	export ANDROID_HOME=$$HOME/Library/Android/sdk && \
-	export PATH=$$PATH:$$ANDROID_HOME/platform-tools:$$ANDROID_HOME/cmdline-tools/latest/bin && \
-	cd android && ./gradlew assembleRelease
+	export PATH="$$PATH:$$ANDROID_HOME/platform-tools:$$ANDROID_HOME/cmdline-tools/latest/bin" && \
+	cd android && ./gradlew --stop >/dev/null 2>&1 || true && \
+	./gradlew assembleRelease
 	@echo "📝 Lettura versione da package.json..."
 	@VERSION=$$(node -p "require('./package.json').version") && \
 	APK_NAME="become-monitor-v$$VERSION.apk" && \

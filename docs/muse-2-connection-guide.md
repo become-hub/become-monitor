@@ -1,5 +1,7 @@
 # Guida al Collegamento Muse 2 con Augmented Monitor
 
+> **Attualmente disabilitato in app.** Muse 2 resta nel codice (catalogo, `MuseBleModule`, setup/streaming) ma connect / pair / UI / docs in-app sono spenti via [`constants/device-availability.ts`](../constants/device-availability.ts) (`muse_2: false`). Per riattivare: impostare `muse_2: true`.
+
 Integrazione **BLE diretta** (GATT Android nativo), senza SDK Interaxon ufficiale e **senza** Mind Monitor / OSC.
 
 ## Dispositivo compatibile
@@ -13,7 +15,7 @@ Stack isolato da Polar (`MuseBleModule` + `muse-*` JS). Un solo device alla volt
 - Muse 2 carico e acceso (LED / pairing mode secondo il manuale headset).
 - **Smartphone Android 13 o superiore** (API 33+).
 - Bluetooth attivo.
-- App Augmented Monitor installata (versione corrente: **1.0.0**).
+- App Augmented Monitor installata (versione corrente: **1.2.0**).
 - Connessione Internet stabile (autenticazione Become / Ably live).
 - Consenso ai permessi: Bluetooth, notifiche (streaming a schermo spento).
 - **Non** è richiesto Mind Monitor, OSC, né Polar Flow.

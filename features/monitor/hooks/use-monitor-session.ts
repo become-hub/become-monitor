@@ -37,6 +37,7 @@ import {
   MuseProduct,
   resolveMuseProduct,
 } from "@/features/devices/muse/muse-products";
+import { isMuseFamilyAvailable } from "@/constants/device-availability";
 import { captureException, logToSentry } from "@/services/sentry";
 import { resolveRrInterval, type RrSource } from "@/services/rr-interval";
 import { sessionTrackBuffer } from "@/services/session-track-buffer";
@@ -106,6 +107,11 @@ export function useMonitorSession() {
   const [ablyStatus, setAblyStatus] = useState<ConnectionStatus>(
     ConnectionStatus.DISCONNECTED
   );
+  const [ablyPulseTick, setAblyPulseTick] = useState(0);
+
+  const bumpAblyPulse = () => {
+    setAblyPulseTick((tick) => tick + 1);
+  };
 
   // Metrics - Polar
   const [heartRate, setHeartRate] = useState(0);
@@ -116,6 +122,8 @@ export function useMonitorSession() {
   const [rrSource, setRrSource] = useState<RrSource | null>(null);
   const [ecgMicroVolts, setEcgMicroVolts] = useState(0);
   const [skinTemperatureC, setSkinTemperatureC] = useState(0);
+  /** True after we had live metrics and then lost contact / HR while still connected. */
+  const [isSignalLost, setIsSignalLost] = useState(false);
 
   // Metrics - Muse
   const [connectedFamily, setConnectedFamily] = useState<"polar" | "muse" | null>(null);
@@ -159,9 +167,15 @@ export function useMonitorSession() {
   const biometricInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const authStreamInFlightRef = useRef(false);
   const streamReadyDeviceRef = useRef<string | null>(null);
+  /** Local PPI/HR/skin streams started (independent of Become auth / Ably). */
+  const localStreamingDeviceRef = useRef<string | null>(null);
   const authSessionDeviceRef = useRef<string | null>(null);
   const pairingBlockedRef = useRef(false);
   const pendingPostFtuReconnectRef = useRef<string | null>(null);
+  /** Debounce reset when device stays connected but leaves the wrist. */
+  const signalLossTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPositiveSignalAtRef = useRef(0);
+  const SIGNAL_LOSS_MS = 2500;
 
   // Derived state
   const connectedProduct: PolarProduct | null = resolvePolarProduct(connectedDeviceName);
@@ -169,7 +183,8 @@ export function useMonitorSession() {
   const isH10Connected = connectedProduct?.id === "polar_h10";
   const isMuseConnected = connectedFamily === "muse" || connectedMuseProduct != null;
   const isSkinTemperatureSupported =
-    !isMuseConnected && connectedProduct?.capabilities.skinTemperature === true;
+    !isMuseConnected &&
+    connectedProduct?.capabilities.skinTemperatureUi === true;
   const showRawEcgCards =
     !isMuseConnected && connectedProduct?.capabilities.rawEcg === true;
   const titleDisplayName = isMuseConnected
@@ -280,9 +295,19 @@ export function useMonitorSession() {
     data.samples.forEach((sample) => {
       const ppiMs = sample.ppi;
 
-      if (ppiMs < 300 || ppiMs > 2000) {
-        console.log(`Monitor: ⚠️ Filtrato PPI fuori range: ${ppiMs}ms`);
+      if (sample.blocker || ppiMs < 300 || ppiMs > 2000) {
+        console.log(
+          `Monitor: ⚠️ Filtrato PPI` +
+            (sample.blocker ? " (blocker)" : ` fuori range: ${ppiMs}ms`)
+        );
+        noteMissingSignal();
         return;
+      }
+
+      notePositiveSignal();
+      if (sample.hr > 0) {
+        setHeartRate(sample.hr);
+        heartRateRef.current = sample.hr;
       }
 
       const resolved = resolveRrInterval({
@@ -360,6 +385,7 @@ export function useMonitorSession() {
             },
             userStateHRV.deviceCode
           );
+          bumpAblyPulse();
         } else {
           console.log("❌ CONDIZIONI NON SODDISFATTE - Non invio dati ad Ably");
         }
@@ -444,8 +470,13 @@ export function useMonitorSession() {
       }
 
       const startDeviceStreaming = async () => {
+        if (localStreamingDeviceRef.current === deviceId) {
+          console.log("Monitor: streaming locale già avviato per", deviceId);
+          return;
+        }
         if (isMuse && museProduct) {
           await startMuseStreamingForProduct(museProduct, museSdk);
+          localStreamingDeviceRef.current = deviceId;
         } else if (isMuse && !museProduct) {
           console.warn("Monitor: Muse product non risolto per", name);
           logToSentry("Muse product unresolved", "warn", {
@@ -454,8 +485,14 @@ export function useMonitorSession() {
           });
         } else if (polarProduct) {
           await startPolarStreamingForProduct(polarProduct, deviceId, polarSdk);
+          localStreamingDeviceRef.current = deviceId;
         }
       };
+
+      // Local metrics (PPI / skin temp) must not wait for Become auth — HR already
+      // arrives via BLE notifications; streams need an explicit SDK start.
+      console.log("💓 Avvio streaming device (locale, indipendente da auth)...");
+      await startDeviceStreaming();
 
       const storedAuthData = await StorageService.getAuthDataForDevice(deviceId);
 
@@ -485,7 +522,7 @@ export function useMonitorSession() {
             storedAuthData.deviceCode
           );
 
-          console.log("💓 Avvio streaming device...");
+          // Streaming locale già avviato post-FTU; qui solo Ably / track.
           await startDeviceStreaming();
 
           startBiometricSending();
@@ -583,7 +620,6 @@ export function useMonitorSession() {
                 pollResponse.deviceCode
               );
 
-              console.log("💓 Avvio streaming device...");
               await startDeviceStreaming();
 
               startBiometricSending();
@@ -622,6 +658,17 @@ export function useMonitorSession() {
       const hf = hfPowerRef.current;
       const deviceLabel =
         connectedDeviceNameRef.current || connectedDeviceIdRef.current || "Polar";
+
+      // Watchdog: if HR events stop entirely while still connected, clear stale UI.
+      if (
+        connectedDeviceIdRef.current &&
+        hr > 0 &&
+        lastPositiveSignalAtRef.current > 0 &&
+        Date.now() - lastPositiveSignalAtRef.current >= SIGNAL_LOSS_MS
+      ) {
+        clearLiveBiometricMetrics();
+        return;
+      }
 
       if (debugMode) {
         console.log("🔍 DEBUG BIOMETRIC SENDING - Controllo condizioni:");
@@ -667,6 +714,7 @@ export function useMonitorSession() {
               },
           userStateBiometric.deviceCode
         );
+        bumpAblyPulse();
       } else {
         const isCriticalIssue =
           !ablyService.current ||
@@ -702,7 +750,69 @@ export function useMonitorSession() {
     }
   };
 
+  const cancelSignalLossClear = () => {
+    if (signalLossTimeoutRef.current) {
+      clearTimeout(signalLossTimeoutRef.current);
+      signalLossTimeoutRef.current = null;
+    }
+  };
+
+  /** Clear live metrics while keeping the BLE connection (off-wrist / no contact). */
+  const clearLiveBiometricMetrics = () => {
+    cancelSignalLossClear();
+    setHeartRate(0);
+    heartRateRef.current = 0;
+    setHrv(0);
+    hrvRef.current = 0;
+    setLfPower(0);
+    lfPowerRef.current = 0;
+    setHfPower(0);
+    hfPowerRef.current = 0;
+    setRrMs(0);
+    setRrSource(null);
+    rrSourceRef.current = null;
+    setEcgMicroVolts(0);
+    setSkinTemperatureC(0);
+    skinTemperatureCRef.current = 0;
+    setMuseHr(0);
+    ppiWindow.current = [];
+    setIsSignalLost(true);
+    console.log("Monitor: 📭 Nessun segnale dal sensore — metriche resettate");
+  };
+
+  const notePositiveSignal = () => {
+    cancelSignalLossClear();
+    lastPositiveSignalAtRef.current = Date.now();
+    setIsSignalLost(false);
+    // Sliding silence watchdog: if no further valid samples arrive, clear UI.
+    signalLossTimeoutRef.current = setTimeout(() => {
+      signalLossTimeoutRef.current = null;
+      if (heartRateRef.current > 0) {
+        clearLiveBiometricMetrics();
+      }
+    }, SIGNAL_LOSS_MS);
+  };
+
+  const noteMissingSignal = () => {
+    if (heartRateRef.current <= 0) {
+      return;
+    }
+    // Keep any existing silence timer from the last valid beat; otherwise start one.
+    if (signalLossTimeoutRef.current) {
+      return;
+    }
+    signalLossTimeoutRef.current = setTimeout(() => {
+      signalLossTimeoutRef.current = null;
+      if (heartRateRef.current > 0) {
+        clearLiveBiometricMetrics();
+      }
+    }, SIGNAL_LOSS_MS);
+  };
+
   const resetDeviceState = () => {
+    cancelSignalLossClear();
+    lastPositiveSignalAtRef.current = 0;
+    localStreamingDeviceRef.current = null;
     resetScanState();
     resetUserState();
     setHeartRate(0);
@@ -713,6 +823,7 @@ export function useMonitorSession() {
     setRrSource(null);
     setEcgMicroVolts(0);
     setSkinTemperatureC(0);
+    setIsSignalLost(false);
     setConnectedFamily(null);
     setEegTp9(0);
     setEegAf7(0);
@@ -776,21 +887,31 @@ export function useMonitorSession() {
     clearDiscoveredDevices();
     setScanStartTime(Date.now());
     setScanningState(true);
-    console.log("Monitor: 🔍 Avvio scansione Polar + Muse...");
+    const museScanEnabled = isMuseFamilyAvailable();
+    console.log(
+      museScanEnabled
+        ? "Monitor: 🔍 Avvio scansione Polar + Muse..."
+        : "Monitor: 🔍 Avvio scansione Polar..."
+    );
 
     try {
-      await Promise.all([
-        polarSdk.startScan(),
-        museSdk.startScan().catch((e) => {
-          console.warn("Monitor: Muse scan non disponibile", e);
-        }),
-      ]);
+      const scanTasks: Promise<unknown>[] = [polarSdk.startScan()];
+      if (museScanEnabled) {
+        scanTasks.push(
+          museSdk.startScan().catch((e) => {
+            console.warn("Monitor: Muse scan non disponibile", e);
+          })
+        );
+      }
+      await Promise.all(scanTasks);
 
       setTimeout(async () => {
         const currentState = useScanStore.getState();
         if (currentState.isScanning) {
           await polarSdk.stopScan();
-          await museSdk.stopScan().catch(() => {});
+          if (museScanEnabled) {
+            await museSdk.stopScan().catch(() => {});
+          }
           setScanningState(false);
           console.log("Monitor: ⏱️ Timeout scansione completo");
 
@@ -802,7 +923,9 @@ export function useMonitorSession() {
             console.log("Monitor: ⚠️ Nessun dispositivo trovato dopo timeout scansione - mostro alert");
             Alert.alert(
               "Difficoltà di connessione",
-              "Nessun Polar o Muse trovato. Prova a spegnere e riaccendere il Bluetooth, poi ripeti la ricerca.",
+              museScanEnabled
+                ? "Nessun Polar o Muse trovato. Prova a spegnere e riaccendere il Bluetooth, poi ripeti la ricerca."
+                : "Nessun Polar trovato. Prova a spegnere e riaccendere il Bluetooth, poi ripeti la ricerca.",
               [{ text: "Chiudi", style: "cancel" }]
             );
           }
@@ -825,10 +948,15 @@ export function useMonitorSession() {
     setIsConnectingSelected(true);
     try {
       await polarSdk.stopScan();
-      await museSdk.stopScan().catch(() => {});
+      if (isMuseFamilyAvailable()) {
+        await museSdk.stopScan().catch(() => {});
+      }
       setScanningState(false);
       await StorageService.setLastDeviceId(deviceId);
       if (resolvedFamily === "muse") {
+        if (!isMuseFamilyAvailable()) {
+          throw new Error("Muse non disponibile in questa build");
+        }
         await museSdk.connectToDevice(deviceId);
       } else {
         await polarSdk.connectToDevice(deviceId);
@@ -959,33 +1087,36 @@ export function useMonitorSession() {
   };
 
   const getBluetoothStateText = () => {
-    return bluetoothPowered ? "🟢 Acceso" : "🔴 Spento";
+    return bluetoothPowered ? "Acceso" : "Spento";
   };
 
   const getStreamingStatusText = () => {
     if (!connectedDeviceId) {
-      return "🔴 Disconnesso";
+      return "Disconnesso";
     }
     if (ablyStatus === ConnectionStatus.CONNECTED) {
       if (heartRate > 0) {
-        return "🟢 Connesso";
-      } else {
-        return "🟠 In attesa dati";
+        return "Connesso";
       }
-    } else if (ablyStatus === ConnectionStatus.CONNECTING) {
-      return "🟡 Connessione...";
-    } else {
-      return "🔴 Disconnesso";
+      return "In attesa dati";
     }
+    if (ablyStatus === ConnectionStatus.CONNECTING) {
+      return "Connessione...";
+    }
+    return "Disconnesso";
   };
 
   const getDeviceStatusText = () => {
     if (connectedDeviceId && connectedDeviceName) {
-      return `🟢 ${connectedDeviceName}`;
-    } else {
-      return "🔴 Nessun device";
+      return connectedDeviceName;
     }
+    return "Nessun device";
   };
+
+  const isStreamingLive =
+    !!connectedDeviceId &&
+    ablyStatus === ConnectionStatus.CONNECTED &&
+    heartRate > 0;
 
   const getDisconnectButtonLabel = () => {
     if (isMuseConnected) {
@@ -1103,7 +1234,9 @@ export function useMonitorSession() {
         console.log(`Monitor: 🔁 Post-FTU reconnect automatico a ${device.deviceId}`);
         pendingPostFtuReconnectRef.current = null;
         polarSdk.stopScan();
-        museSdk.stopScan().catch(() => {});
+        if (isMuseFamilyAvailable()) {
+          museSdk.stopScan().catch(() => {});
+        }
         setScanningState(false);
         polarSdk.connectToDevice(device.deviceId);
       }
@@ -1195,8 +1328,24 @@ export function useMonitorSession() {
     });
 
     polarSdk.addEventListener("onHeartRateReceived", (data: PolarHrData) => {
-      console.log(`Monitor: 💓 HR=${data.hr} BPM`);
-      setHeartRate(data.hr);
+      console.log(
+        `Monitor: 💓 HR=${data.hr} BPM` +
+          (data.contactSupported
+            ? ` contact=${data.contactDetected ? "yes" : "no"}`
+            : "")
+      );
+
+      const noContact =
+        data.contactSupported === true && data.contactDetected === false;
+      if (noContact || data.hr <= 0) {
+        // Keep last values briefly (anti-flicker), then clear so UI shows no signal.
+        noteMissingSignal();
+      } else {
+        notePositiveSignal();
+        setHeartRate(data.hr);
+        heartRateRef.current = data.hr;
+      }
+      const hrForStream = data.hr > 0 ? data.hr : heartRateRef.current;
 
       const product = resolvePolarProduct(connectedDeviceNameRef.current);
       const nativeRrs = data.rrsMs?.filter((rr) => Number.isFinite(rr) && rr >= 300 && rr <= 2000);
@@ -1205,14 +1354,17 @@ export function useMonitorSession() {
         nativeRrs.forEach((rr) => {
           const resolved = resolveRrInterval({
             ecgRrMs: rr,
-            hrBpm: data.hr,
+            hrBpm: hrForStream > 0 ? hrForStream : undefined,
           });
           if (resolved) {
             setRrMs(resolved.rrMs);
             setRrSource(resolved.rrSource);
             rrSourceRef.current = resolved.rrSource;
           }
-          sessionTrackBuffer.pushEcgRr({ rrMs: rr, hr: data.hr });
+          sessionTrackBuffer.pushEcgRr({
+            rrMs: rr,
+            hr: hrForStream > 0 ? hrForStream : undefined,
+          });
           ppiWindow.current.push(rr);
           if (ppiWindow.current.length > WINDOW_SIZE) {
             ppiWindow.current.shift();
@@ -1242,6 +1394,7 @@ export function useMonitorSession() {
 
         const userStateHr = useUserStore.getState();
         if (
+          hrForStream > 0 &&
           userStateHr.authToken &&
           ablyService.current &&
           userStateHr.userId &&
@@ -1253,7 +1406,7 @@ export function useMonitorSession() {
             "heartRate",
             {
               deviceId: connectedDeviceId,
-              heartRate: data.hr,
+              heartRate: hrForStream,
               hrv: hrvValue,
               lfPower: lfPowerValue,
               hfPower: hfPowerValue,
@@ -1261,6 +1414,7 @@ export function useMonitorSession() {
             },
             userStateHr.deviceCode
           );
+          bumpAblyPulse();
         }
         return;
       }
@@ -1337,6 +1491,7 @@ export function useMonitorSession() {
             },
             userStateHRFallback.deviceCode
           );
+          bumpAblyPulse();
         } else {
           console.log("❌ HR FALLBACK - Condizioni non soddisfatte");
         }
@@ -1363,132 +1518,151 @@ export function useMonitorSession() {
       setSkinTemperatureC(data.temperatureC);
     });
 
+    polarSdk.addEventListener("onSkinTemperatureStreamError", (error: any) => {
+      console.log("Monitor: ⚠️ Skin Temperature Stream Error:", error?.error);
+    });
+
     polarSdk.addEventListener("onEcgStreamError", (error: any) => {
       console.log("Monitor: ⚠️ ECG Stream Error:", error.error);
     });
 
-    // Muse SDK listeners
-    try {
-      museSdk.addEventListener("onMuseDeviceFound", (device: MuseDeviceInfo) => {
-        if (!isSupportedMuseDevice(device.name)) {
-          return;
-        }
-        const product = resolveMuseProduct(device.name);
-        if (!product) {
-          return;
-        }
-        console.log(`Monitor: 📡 Muse trovato: ${device.name} (${device.deviceId})`);
-        setDeviceFound(true);
-        setFoundDeviceName(device.name);
-        const discovered: DiscoveredDevice = {
-          deviceId: device.deviceId,
-          name: device.name,
-          family: "muse",
-          productId: product.id,
-          displayName: product.displayName,
-        };
-        upsertDiscoveredDevice(discovered);
-      });
-
-      museSdk.addEventListener("onMuseDeviceConnected", (device: MuseDeviceInfo) => {
-        console.log(`Monitor: ✅ Muse connesso a ${device.name}`);
-        setIsConnectingSelected(false);
-        setConnectedDeviceId(device.deviceId);
-        setConnectedDeviceIdInStore(device.deviceId);
-        setConnectedDeviceName(device.name);
-        setConnectedFamily("muse");
-        setFoundDeviceName("");
-        clearDiscoveredDevices();
-        StorageService.setLastDeviceId(device.deviceId);
-        StorageService.updateDeviceName(device.name, device.deviceId);
-        StorageService.updateDeviceId(device.deviceId);
-        if (
-          streamReadyDeviceRef.current === device.deviceId ||
-          authSessionDeviceRef.current === device.deviceId ||
-          authStreamInFlightRef.current
-        ) {
-          return;
-        }
-        launchAuthAndStream(device.deviceId, device.name, "muse");
-      });
-
-      museSdk.addEventListener("onMuseDeviceDisconnected", (_device: MuseDeviceInfo) => {
-        console.log("Monitor: ⚠️ Muse disconnesso");
-        setNotification({
-          type: "error",
-          message: "Dispositivo disconnesso",
+    // Muse SDK listeners (solo se famiglia Muse abilitata)
+    if (isMuseFamilyAvailable()) {
+      try {
+        museSdk.addEventListener("onMuseDeviceFound", (device: MuseDeviceInfo) => {
+          if (!isSupportedMuseDevice(device.name)) {
+            return;
+          }
+          const product = resolveMuseProduct(device.name);
+          if (!product) {
+            return;
+          }
+          console.log(`Monitor: 📡 Muse trovato: ${device.name} (${device.deviceId})`);
+          setDeviceFound(true);
+          setFoundDeviceName(device.name);
+          const discovered: DiscoveredDevice = {
+            deviceId: device.deviceId,
+            name: device.name,
+            family: "muse",
+            productId: product.id,
+            displayName: product.displayName,
+          };
+          upsertDiscoveredDevice(discovered);
         });
-        setTimeout(() => setNotification(null), 5000);
-        setConnectedDeviceId(null);
-        setConnectedDeviceIdInStore(null);
-        setConnectedDeviceName("");
-        setConnectedFamily(null);
-        setFoundDeviceName("");
-        setIsConnectingSelected(false);
-        authStreamInFlightRef.current = false;
-        streamReadyDeviceRef.current = null;
-        authSessionDeviceRef.current = null;
-        if (pollInterval.current) {
-          clearInterval(pollInterval.current);
-          pollInterval.current = null;
-        }
-        stopBiometricSending();
-        polarSdk.stopMonitorForegroundService().catch(() => {});
-        ablyService.current?.close();
-        resetDeviceState();
-      });
 
-      museSdk.addEventListener("onMuseEegSample", (data: MuseEegSample) => {
-        setEegTp9(data.tp9);
-        setEegAf7(data.af7);
-        setEegAf8(data.af8);
-        setEegTp10(data.tp10);
-      });
+        museSdk.addEventListener("onMuseDeviceConnected", (device: MuseDeviceInfo) => {
+          console.log(`Monitor: ✅ Muse connesso a ${device.name}`);
+          setIsConnectingSelected(false);
+          setConnectedDeviceId(device.deviceId);
+          setConnectedDeviceIdInStore(device.deviceId);
+          setConnectedDeviceName(device.name);
+          setConnectedFamily("muse");
+          setFoundDeviceName("");
+          clearDiscoveredDevices();
+          StorageService.setLastDeviceId(device.deviceId);
+          StorageService.updateDeviceName(device.name, device.deviceId);
+          StorageService.updateDeviceId(device.deviceId);
+          if (
+            streamReadyDeviceRef.current === device.deviceId ||
+            authSessionDeviceRef.current === device.deviceId ||
+            authStreamInFlightRef.current
+          ) {
+            return;
+          }
+          launchAuthAndStream(device.deviceId, device.name, "muse");
+        });
 
-      museSdk.addEventListener("onMuseBandPowers", (data: MuseBandPowers) => {
-        setBandDelta(data.delta);
-        setBandTheta(data.theta);
-        setBandAlpha(data.alpha);
-        setBandBeta(data.beta);
-        setBandGamma(data.gamma);
-      });
+        museSdk.addEventListener("onMuseDeviceDisconnected", (_device: MuseDeviceInfo) => {
+          console.log("Monitor: ⚠️ Muse disconnesso");
+          setNotification({
+            type: "error",
+            message: "Dispositivo disconnesso",
+          });
+          setTimeout(() => setNotification(null), 5000);
+          setConnectedDeviceId(null);
+          setConnectedDeviceIdInStore(null);
+          setConnectedDeviceName("");
+          setConnectedFamily(null);
+          setFoundDeviceName("");
+          setIsConnectingSelected(false);
+          authStreamInFlightRef.current = false;
+          streamReadyDeviceRef.current = null;
+          authSessionDeviceRef.current = null;
+          if (pollInterval.current) {
+            clearInterval(pollInterval.current);
+            pollInterval.current = null;
+          }
+          stopBiometricSending();
+          polarSdk.stopMonitorForegroundService().catch(() => {});
+          ablyService.current?.close();
+          resetDeviceState();
+        });
 
-      museSdk.addEventListener("onMuseHeartRate", (data) => {
-        setMuseHr(data.hr);
-        setHeartRate(data.hr);
-      });
+        museSdk.addEventListener("onMuseEegSample", (data: MuseEegSample) => {
+          setEegTp9(data.tp9);
+          setEegAf7(data.af7);
+          setEegAf8(data.af8);
+          setEegTp10(data.tp10);
+        });
 
-      museSdk.addEventListener("onMuseTelemetry", (data) => {
-        setMuseBattery(data.batteryPercent);
-      });
+        museSdk.addEventListener("onMuseBandPowers", (data: MuseBandPowers) => {
+          setBandDelta(data.delta);
+          setBandTheta(data.theta);
+          setBandAlpha(data.alpha);
+          setBandBeta(data.beta);
+          setBandGamma(data.gamma);
+        });
 
-      museSdk.addEventListener("onMuseStreamError", (error) => {
-        console.log("Monitor: ⚠️ Muse stream error:", error.error);
-        logToSentry("Muse stream error", "error", {
+        museSdk.addEventListener("onMuseHeartRate", (data) => {
+          if (data.hr > 0) {
+            notePositiveSignal();
+            setMuseHr(data.hr);
+            setHeartRate(data.hr);
+            heartRateRef.current = data.hr;
+          } else {
+            noteMissingSignal();
+          }
+        });
+
+        museSdk.addEventListener("onMuseTelemetry", (data) => {
+          setMuseBattery(data.batteryPercent);
+        });
+
+        museSdk.addEventListener("onMuseStreamError", (error) => {
+          console.log("Monitor: ⚠️ Muse stream error:", error.error);
+          logToSentry("Muse stream error", "error", {
+            deviceFamily: "muse",
+            error: error.error ?? "unknown",
+          });
+        });
+      } catch (e) {
+        console.warn("Monitor: MuseBleModule non disponibile", e);
+        captureException(e, {
           deviceFamily: "muse",
-          error: error.error ?? "unknown",
+          phase: "muse_module_init",
         });
-      });
-    } catch (e) {
-      console.warn("Monitor: MuseBleModule non disponibile", e);
-      captureException(e, {
-        deviceFamily: "muse",
-        phase: "muse_module_init",
-      });
+      }
     }
 
     return () => {
       polarSdk.stopScan();
-      museSdk.stopScan().catch(() => {});
+      if (isMuseFamilyAvailable()) {
+        museSdk.stopScan().catch(() => {});
+      }
       if (connectedDeviceId) {
         polarSdk.disconnectFromDevice(connectedDeviceId);
-        museSdk.disconnectFromDevice(connectedDeviceId).catch(() => {});
+        if (isMuseFamilyAvailable()) {
+          museSdk.disconnectFromDevice(connectedDeviceId).catch(() => {});
+        }
       }
       polarSdk.removeAllListeners();
-      museSdk.removeAllListeners();
+      if (isMuseFamilyAvailable()) {
+        museSdk.removeAllListeners();
+      }
       if (pollInterval.current) {
         clearInterval(pollInterval.current);
       }
+      cancelSignalLossClear();
       stopBiometricSending();
       polarSdk.stopMonitorForegroundService().catch(() => {});
       ablyService.current?.close();
@@ -1525,6 +1699,8 @@ export function useMonitorSession() {
     deviceCode,
     appId,
     ablyStatus,
+    ablyPulseTick,
+    isStreamingLive,
 
     // Metrics - Polar
     heartRate,
@@ -1535,6 +1711,7 @@ export function useMonitorSession() {
     rrSource,
     ecgMicroVolts,
     skinTemperatureC,
+    isSignalLost,
     ppiWindowLength: ppiWindow.current.length,
 
     // Metrics - Muse

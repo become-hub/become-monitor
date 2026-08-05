@@ -2,6 +2,8 @@
  * Catalogo prodotti Polar supportati (BLE name matching + metadata UI).
  */
 
+import { isDeviceAvailable } from '@/constants/device-availability';
+
 export type PolarProductId = 'polar_360' | 'polar_loop' | 'polar_h10';
 
 export type PolarProductImageKey = 'polar360' | 'polarLoop' | 'polarH10';
@@ -14,7 +16,10 @@ export interface PolarProductCapabilities {
   rawPpg: boolean;
   rawEcg: boolean;
   accelerometer: boolean;
+  /** Start SDK skin-temperature stream when true (Loop Gen 2 only in this app). */
   skinTemperature: boolean;
+  /** Show skin-temperature card in Monitor when true (Loop Gen 2 only; not in scope for Polar 360). */
+  skinTemperatureUi: boolean;
   ftuRequired: boolean;
 }
 
@@ -47,7 +52,8 @@ export const POLAR_PRODUCTS: Record<PolarProductId, PolarProduct> = {
       rawPpg: true,
       rawEcg: false,
       accelerometer: true,
-      skinTemperature: true,
+      skinTemperature: false,
+      skinTemperatureUi: false,
       ftuRequired: true,
     },
   },
@@ -69,6 +75,7 @@ export const POLAR_PRODUCTS: Record<PolarProductId, PolarProduct> = {
       rawEcg: false,
       accelerometer: true,
       skinTemperature: true,
+      skinTemperatureUi: true,
       ftuRequired: true,
     },
   },
@@ -90,17 +97,20 @@ export const POLAR_PRODUCTS: Record<PolarProductId, PolarProduct> = {
       rawEcg: true,
       accelerometer: true,
       skinTemperature: false,
+      skinTemperatureUi: false,
       ftuRequired: false,
     },
   },
 };
 
-/** Ordine overview / catalogo (360, Loop, H10). */
-export const POLAR_PRODUCT_LIST: PolarProduct[] = [
-  POLAR_PRODUCTS.polar_360,
-  POLAR_PRODUCTS.polar_loop,
-  POLAR_PRODUCTS.polar_h10,
-];
+/** Ordine overview / catalogo — solo prodotti con availability on. */
+export const POLAR_PRODUCT_LIST: PolarProduct[] = (
+  [
+    POLAR_PRODUCTS.polar_360,
+    POLAR_PRODUCTS.polar_loop,
+    POLAR_PRODUCTS.polar_h10,
+  ] as const
+).filter((p) => isDeviceAvailable(p.id));
 
 /**
  * Risolve il prodotto Polar dal nome BLE. Sense / altri non supportati → null.
