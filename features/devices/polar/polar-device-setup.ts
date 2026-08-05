@@ -94,7 +94,7 @@ export async function startPolarStreamingForProduct(
   if (product.capabilities.ppi) {
     const ppi = await startPpiStreamingWithFallback(deviceId, sdk, log);
 
-    // 360/Loop can expose skin temperature (online streaming).
+    // Skin temperature stream when capability is on (UI may still be hidden).
     if (product.capabilities.skinTemperature && sdk.startSkinTemperatureStreaming) {
       try {
         await sdk.startSkinTemperatureStreaming(deviceId);

@@ -1,5 +1,7 @@
 # Guida al Collegamento Muse 2 con Augmented Monitor
 
+> **Attualmente disabilitato in app.** Muse 2 resta nel codice (catalogo, `MuseBleModule`, setup/streaming) ma connect / pair / UI / docs in-app sono spenti via [`constants/device-availability.ts`](../constants/device-availability.ts) (`muse_2: false`). Per riattivare: impostare `muse_2: true`.
+
 Integrazione **BLE diretta** (GATT Android nativo), senza SDK Interaxon ufficiale e **senza** Mind Monitor / OSC.
 
 ## Dispositivo compatibile

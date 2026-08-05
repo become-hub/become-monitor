@@ -41,6 +41,14 @@ export function PolarDeviceCard({
         contentFit="contain"
       />
       <View style={styles.content}>
+        <View style={styles.poweredByRow}>
+          <ThemedText style={styles.poweredByText}>powered by</ThemedText>
+          <Image
+            source={require("@/assets/images/polar-logo.webp")}
+            style={styles.polarLogo}
+            contentFit="contain"
+          />
+        </View>
         <ThemedText type="subtitle" style={styles.title}>
           {product.displayName}
         </ThemedText>
@@ -76,6 +84,22 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  poweredByRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 6,
+    marginBottom: 6,
+  },
+  polarLogo: {
+    width: 52,
+    height: 24,
+  },
+  poweredByText: {
+    fontSize: 11,
+    opacity: 0.6,
+    fontWeight: "500",
   },
   title: {
     marginBottom: 6,

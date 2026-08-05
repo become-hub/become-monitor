@@ -7,15 +7,42 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
+import { isMuseFamilyAvailable } from "@/constants/device-availability";
 import {
   getMuseProductBadge,
   isSupportedMuseDevice,
+  MUSE_PRODUCTS,
+  type MuseProductId,
 } from "@/features/devices/muse/muse-products";
-import { getPolarProductBadge } from "@/features/devices/polar/polar-products";
+import {
+  getPolarProductBadge,
+  POLAR_PRODUCTS,
+  type PolarProductId,
+} from "@/features/devices/polar/polar-products";
 import type { DiscoveredDevice } from "@/stores/scan-store";
+import { Image } from "expo-image";
 import { Search, Trash2 } from "lucide-react-native";
 import { ActivityIndicator, TouchableOpacity, View } from "react-native";
 import { monitorStyles } from "./monitor-styles";
+
+const POLAR_DEVICE_IMAGES: Record<PolarProductId, number> = {
+  polar_360: require("@/assets/images/polar360.webp"),
+  polar_loop: require("@/assets/images/polar-loop.png"),
+  polar_h10: require("@/assets/images/polar-h10.png"),
+};
+
+const MUSE_DEVICE_IMAGES: Record<MuseProductId, number> = {
+  muse_2: require("@/assets/images/muse-2.png"),
+};
+
+function getDiscoveredDeviceImage(device: DiscoveredDevice): number | null {
+  if (device.family === "muse") {
+    const product = MUSE_PRODUCTS[device.productId as MuseProductId];
+    return product ? MUSE_DEVICE_IMAGES[product.id] : null;
+  }
+  const product = POLAR_PRODUCTS[device.productId as PolarProductId];
+  return product ? POLAR_DEVICE_IMAGES[product.id] : null;
+}
 
 interface MonitorActionsProps {
   connectedDeviceId: string | null;
@@ -78,7 +105,9 @@ export function MonitorActions({
               <View style={monitorStyles.buttonContent}>
                 <Search size={20} color="#fff" />
                 <ThemedText style={monitorStyles.buttonText}>
-                  Cerca Dispositivo Polar / Muse
+                  {isMuseFamilyAvailable()
+                    ? "Cerca Dispositivo Polar / Muse"
+                    : "Cerca Dispositivo Polar"}
                 </ThemedText>
               </View>
             )}
@@ -97,41 +126,56 @@ export function MonitorActions({
                   </ThemedText>
                 </View>
               )}
-              {discoveredDevices.map((device) => (
-                <TouchableOpacity
-                  key={device.deviceId}
-                  style={[
-                    monitorStyles.discoveredItem,
-                    { borderColor: Colors[theme].border },
-                  ]}
-                  onPress={() => onSelectAndConnect(device.deviceId, device.family)}
-                  disabled={isConnectingSelected}
-                >
-                  <View style={monitorStyles.discoveredItemText}>
-                    <ThemedText style={monitorStyles.discoveredName}>
-                      {device.name}
-                    </ThemedText>
-                    <View
-                      style={[
-                        monitorStyles.productBadge,
-                        { backgroundColor: Colors[theme].tint },
-                      ]}
-                    >
-                      <ThemedText style={monitorStyles.productBadgeText}>
+              {discoveredDevices.map((device) => {
+                const deviceImage = getDiscoveredDeviceImage(device);
+                return (
+                  <TouchableOpacity
+                    key={device.deviceId}
+                    style={[
+                      monitorStyles.discoveredItem,
+                      { borderColor: Colors[theme].border },
+                    ]}
+                    onPress={() =>
+                      onSelectAndConnect(device.deviceId, device.family)
+                    }
+                    disabled={isConnectingSelected}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Connetti ${device.displayName}`}
+                  >
+                    <View style={monitorStyles.discoveredIconWrap}>
+                      {deviceImage != null ? (
+                        <Image
+                          source={deviceImage}
+                          style={monitorStyles.discoveredDeviceImage}
+                          contentFit="contain"
+                        />
+                      ) : null}
+                    </View>
+                    <View style={monitorStyles.discoveredItemText}>
+                      <ThemedText
+                        style={monitorStyles.discoveredName}
+                        numberOfLines={1}
+                      >
                         {device.displayName}
                       </ThemedText>
+                      <ThemedText
+                        style={monitorStyles.discoveredDeviceId}
+                        numberOfLines={1}
+                      >
+                        {device.deviceId}
+                      </ThemedText>
                     </View>
-                  </View>
-                  <ThemedText
-                    style={[
-                      monitorStyles.connectHint,
-                      { color: Colors[theme].tint },
-                    ]}
-                  >
-                    Connetti
-                  </ThemedText>
-                </TouchableOpacity>
-              ))}
+                    <ThemedText
+                      style={[
+                        monitorStyles.connectHint,
+                        { color: Colors[theme].tint },
+                      ]}
+                    >
+                      Connetti
+                    </ThemedText>
+                  </TouchableOpacity>
+                );
+              })}
             </ThemedView>
           )}
 

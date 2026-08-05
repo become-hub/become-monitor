@@ -1,4 +1,5 @@
 import {
+  MUSE_PRODUCT_LIST,
   MUSE_PRODUCTS,
   getMuseProductBadge,
   isSupportedMuseDevice,
@@ -6,10 +7,10 @@ import {
 } from "../muse-products";
 
 describe("muse-products", () => {
-  it("riconosce Muse 2 da nome BLE", () => {
-    expect(resolveMuseProduct("Muse-2A3B")?.id).toBe("muse_2");
-    expect(resolveMuseProduct("Muse S")?.id).toBe("muse_2");
-    expect(resolveMuseProduct("Muse 2")?.id).toBe("muse_2");
+  it("non risolve Muse 2 quando availability è off", () => {
+    expect(resolveMuseProduct("Muse-2A3B")).toBeNull();
+    expect(resolveMuseProduct("Muse S")).toBeNull();
+    expect(resolveMuseProduct("Muse 2")).toBeNull();
   });
 
   it("ignora device non Muse", () => {
@@ -18,13 +19,17 @@ describe("muse-products", () => {
     expect(resolveMuseProduct(null)).toBeNull();
   });
 
-  it("isSupportedMuseDevice", () => {
-    expect(isSupportedMuseDevice("Muse-2200")).toBe(true);
+  it("isSupportedMuseDevice è false con Muse gated", () => {
+    expect(isSupportedMuseDevice("Muse-2200")).toBe(false);
     expect(isSupportedMuseDevice("Polar 360")).toBe(false);
   });
 
-  it("badge e capabilities", () => {
-    expect(getMuseProductBadge("Muse 2")).toBe("Muse 2");
+  it("MUSE_PRODUCT_LIST è vuota quando Muse è off", () => {
+    expect(MUSE_PRODUCT_LIST).toEqual([]);
+  });
+
+  it("catalogo completo e badge fallback restano definiti", () => {
+    expect(getMuseProductBadge("Muse 2")).toBe("Muse");
     expect(MUSE_PRODUCTS.muse_2.capabilities.eeg).toBe(true);
     expect(MUSE_PRODUCTS.muse_2.capabilities.ppg).toBe(true);
     expect(MUSE_PRODUCTS.muse_2.capabilities.ftuRequired).toBe(false);

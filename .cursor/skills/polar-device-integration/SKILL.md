@@ -16,7 +16,8 @@ Polar **360** and **Loop Gen 2** behavior must stay identical unless explicitly 
 | FTU | `ensurePolarReady(..., { requireFtu: true })` default | `requireFtu: false` when `capabilities.ftuRequired === false` |
 | Live stream | `startPpiStreaming` + HR fallback | Branch on `capabilities` — never call PPI for non-PPI devices |
 | Offline track | `startPpiOfflineRecording` + flush fetch/remove | Skip offline PPI; live buffer only |
-| Monitor grid | PPI/HR RR cards as today | Extra raw cards only when `capabilities.rawEcg` |
+| Monitor grid | PPI/HR RR cards; **skin temp card only if `skinTemperatureUi`** (Loop Gen 2 yes, Polar 360 no — intentional app scope) | Extra raw cards only when `capabilities.rawEcg` |
+| Skin temperature | 360: `skinTemperature`/`skinTemperatureUi` false; Loop: both true | Usually false unless product ships the metric in Monitor |
 | RR source | `ppi` > `hr_derived` | `ecg_rr` from `rrsMs`; never `60000/HR` if raw RR exists |
 | Auth | Per-`deviceId` token in `StorageService` | Same — no auto-connect on scan |
 
@@ -67,14 +68,15 @@ Polar **360** and **Loop Gen 2** behavior must stay identical unless explicitly 
 
 ## Capability matrix (reference)
 
-| Signal | 360 / Loop | H10 |
-|--------|------------|-----|
-| Sensing | PPG | ECG |
-| FTU | Yes | No |
-| PPI | Yes | No |
-| RR | PPI or HR-derived | Native `rrsMs` (`ecg_rr`) |
-| Raw ECG µV | No | Yes (Monitor) |
-| Offline PPI flush | Yes | No (live buffer only) |
+| Signal | 360 | Loop Gen 2 | H10 |
+|--------|-----|------------|-----|
+| Sensing | PPG | PPG | ECG |
+| FTU | Yes | Yes | No |
+| PPI | Yes | Yes | No |
+| RR | PPI or HR-derived | PPI or HR-derived | Native `rrsMs` (`ecg_rr`) |
+| Raw ECG µV | No | No | Yes (Monitor) |
+| Skin temperature (Monitor) | No (out of app scope) | Yes (stream + card) | No |
+| Offline PPI flush | Yes | Yes | No (live buffer only) |
 
 ## UI rule
 

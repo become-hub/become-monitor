@@ -14,6 +14,8 @@ This app is **Expo Router + React Native**, with **Android-only** native modules
 
 Import Polar/Muse from `@/features/devices/polar/*` and `@/features/devices/muse/*` (no `services/` re-export shims).
 
+User-facing connect / pair / catalog visibility is gated by [`constants/device-availability.ts`](../constants/device-availability.ts) (H10 and Muse 2 can be off while code stays integrated).
+
 ## What the `android-clean-architecture` skill must NOT drive here
 
 Do **not** introduce ECC-style Gradle modules (`domain/`, `data/`, `presentation/`), Hilt/Koin, Room/SQLDelight, or KMP solely to match that skill.

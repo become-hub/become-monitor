@@ -24,6 +24,7 @@ interface PolarMetricsGridProps {
   ecgMicroVolts: number;
   skinTemperatureC: number;
   ppiWindowLength: number;
+  isSignalLost?: boolean;
   isH10Connected: boolean;
   showRawEcgCards: boolean;
   isSkinTemperatureSupported: boolean;
@@ -42,6 +43,7 @@ export function PolarMetricsGrid({
   ecgMicroVolts,
   skinTemperatureC,
   ppiWindowLength,
+  isSignalLost = false,
   isH10Connected,
   showRawEcgCards,
   isSkinTemperatureSupported,
@@ -52,7 +54,9 @@ export function PolarMetricsGrid({
     <>
       {connectedDeviceId && heartRate === 0 && (
         <ThemedText style={monitorStyles.waitingText}>
-          ⏳ In attesa di dati dal dispositivo...
+          {isSignalLost
+            ? "Nessun segnale dal sensore — riposiziona il dispositivo sul polso"
+            : "In attesa di dati dal dispositivo…"}
         </ThemedText>
       )}
       {isH10Connected && (
@@ -70,6 +74,7 @@ export function PolarMetricsGrid({
             unit="BPM"
             icon={Heart}
             fullWidth
+            pulse={!!connectedDeviceId && heartRate > 0}
           />
         </View>
 
