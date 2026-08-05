@@ -24,7 +24,7 @@ Dispositivi supportati (attivi in app):
 - Polar 360 o Loop Gen 2 carico / con batteria sufficiente.
 - **Smartphone Android 13 o superiore** (API 33+): versioni precedenti non consentono l'installazione dell'app.
 - Bluetooth attivo.
-- App Augmented Monitor installata (versione corrente: **1.0.0**).
+- App Augmented Monitor installata (versione corrente: **1.2.0**).
 - Connessione Internet stabile (per autenticazione Become / Ably).
 - Consenso ai permessi richiesti: Bluetooth, notifiche (per lo streaming a schermo spento).
 - **Non** usare Polar Flow durante il collegamento con Augmented Monitor (chiudere Flow se aperta).
