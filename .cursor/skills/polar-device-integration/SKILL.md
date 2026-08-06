@@ -28,10 +28,10 @@ Polar **360** and **Loop Gen 2** behavior must stay identical unless explicitly 
 ## Checklist — new Polar product
 
 1. **Catalog** — `features/devices/polar/polar-products.ts`
-   - Add `PolarProductId`, matchers, `imageKey`, `POLAR_PRODUCT_LIST` entry
+   - Add `PolarProductId`, matchers, `POLAR_PRODUCTS` entry (`id` must match map key via `satisfies`)
    - Set `capabilities` (`ppi`, `ecg`, `rawEcg`, `ftuRequired`, …)
    - Tests in `features/devices/polar/__tests__/polar-products.test.ts`
-   - Asset under `assets/images/` + `components/polar-device-card.tsx`
+   - Asset under `assets/images/` + `Record<PolarProductId, …>` in `components/polar-device-card.tsx` (no separate `imageKey`)
 
 2. **Scan / overview**
    - `stores/scan-store.ts` uses `PolarProductId`
@@ -52,19 +52,26 @@ Polar **360** and **Loop Gen 2** behavior must stay identical unless explicitly 
    - **Prefer raw signals in UI** when `capabilities.rawEcg` or native RR exists
    - Calculated metrics (RMSSD, LF/HF) secondary to raw cards
 
-6. **Track buffer / flush**
+6. **Ably live** — `services/polar-ably-payload.ts` via `buildPolarAblyHeartRatePayload`
+   - Event name `heartRate`; body always uses `hr` (not `heartRate` field)
+   - `deviceModel: PolarProductId | null` from `resolvePolarProductId`
+   - No `date` field — `AblyService.sendMessage` adds `timestamp`
+   - Do **not** reintroduce legacy `AblyService.sendHeartRate`
+
+7. **Track buffer / flush**
    - `services/rr-interval.ts` — extend `RrSource` if needed (`ecg_rr`)
    - `session-track-buffer.ts` — product-specific push helpers
    - `session-track-flush.ts` — `skipOfflinePpi` for non-PPI products
 
-7. **Docs (same PR)** — workspace rule
+8. **Docs (same PR)** — workspace rule
    - `constants/polar-signal-comparison.ts` + `app/(tabs)/docs.tsx` (column per device)
    - `constants/locale.ts` strings
    - `docs/polar-360-connection-guide.md` (or focused guide)
 
-8. **Tests**
+9. **Tests**
    - Existing FTU/PPI/setup tests must stay green
    - Add separate cases for new product; Kotlin tests for new stream methods
+   - Polar Ably payload contract tests in `services/__tests__/polar-ably-payload.test.ts`
 
 ## Capability matrix (reference)
 
