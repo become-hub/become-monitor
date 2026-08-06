@@ -1,12 +1,16 @@
 /**
  * Builds Polar live Ably `heartRate` payloads (360 / Loop).
  * Keeps RR/PPI/skin-temp contract in one place for streaming + periodic send.
+ * Time is added by AblyService.sendMessage as `timestamp` (no duplicate `date`).
  */
 
+import type { PolarProductId } from "@/features/devices/polar/polar-products";
 import type { RrSource } from "./rr-interval";
 
 export type PolarAblyHeartRateInput = {
   deviceId: string | null;
+  /** Catalog product id (`PolarProductId`); null if unresolved. */
+  deviceModel: PolarProductId | null;
   /** Heart rate bpm (> 0 expected by callers before send). */
   hr: number;
   hrv?: number | null;
@@ -21,15 +25,12 @@ export type PolarAblyHeartRateInput = {
   ppiMs?: number | null;
   /** Loop Gen 2 skin temp °C; always null on 360 / when absent. */
   skinTemperatureC?: number | null;
-  date: string;
-  /** Stream callbacks historically use `heartRate`; periodic sender uses `hr`. */
-  hrField?: "hr" | "heartRate";
 };
 
 export type PolarAblyHeartRatePayload = {
   deviceId: string | null;
-  hr?: number;
-  heartRate?: number;
+  deviceModel: PolarProductId | null;
+  hr: number;
   hrv: number | null;
   lfPower: number | null;
   hfPower: number | null;
@@ -37,7 +38,6 @@ export type PolarAblyHeartRatePayload = {
   rrSource: RrSource | null;
   ppiMs: number | null;
   skinTemperatureC: number | null;
-  date: string;
 };
 
 function positiveOrNull(value: number | null | undefined): number | null {
@@ -54,8 +54,10 @@ export function buildPolarAblyHeartRatePayload(
       ? positiveOrNull(input.ppiMs ?? input.rrMs)
       : null;
 
-  const payload: PolarAblyHeartRatePayload = {
+  return {
     deviceId: input.deviceId,
+    deviceModel: input.deviceModel,
+    hr: input.hr,
     hrv: positiveOrNull(input.hrv),
     lfPower: positiveOrNull(input.lfPower),
     hfPower: positiveOrNull(input.hfPower),
@@ -63,14 +65,5 @@ export function buildPolarAblyHeartRatePayload(
     rrSource,
     ppiMs,
     skinTemperatureC: positiveOrNull(input.skinTemperatureC),
-    date: input.date,
   };
-
-  if (input.hrField === "heartRate") {
-    payload.heartRate = input.hr;
-  } else {
-    payload.hr = input.hr;
-  }
-
-  return payload;
 }

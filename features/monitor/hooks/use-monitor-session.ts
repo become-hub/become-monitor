@@ -25,6 +25,7 @@ import {
   isSupportedPolarDevice,
   PolarProduct,
   resolvePolarProduct,
+  resolvePolarProductId,
 } from "@/features/devices/polar/polar-products";
 import {
   MuseBandPowers,
@@ -375,12 +376,12 @@ export function useMonitorSession() {
           userStateHRV.deviceCode
         ) {
           console.log("✅ TUTTE LE CONDIZIONI SODDISFATTE - Invio dati ad Ably");
-          const timestamp = new Date().toISOString();
           ablyService.current.sendMessage(
             userStateHRV.userId,
             "heartRate",
             buildPolarAblyHeartRatePayload({
               deviceId: connectedDeviceId,
+              deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
               hr: heartRate,
               hrv: hrvValue,
               lfPower: lfPowerValue,
@@ -389,8 +390,6 @@ export function useMonitorSession() {
               rrSource: resolved?.rrSource ?? null,
               ppiMs: resolved?.rrSource === "ppi" ? ppiMs : null,
               skinTemperatureC: skinTemperatureCRef.current,
-              date: timestamp,
-              hrField: "heartRate",
             }),
             userStateHRV.deviceCode
           );
@@ -696,7 +695,6 @@ export function useMonitorSession() {
         hr > 0
       ) {
         console.log("✅ BIOMETRIC SENDING - Invio dati ad Ably");
-        const timestamp = new Date().toISOString();
         const isMuse = connectedFamilyRef.current === "muse";
         const currentRrMs = rrMsRef.current;
         const currentRrSource = rrSourceRef.current;
@@ -713,10 +711,10 @@ export function useMonitorSession() {
                 beta: bandBetaRef.current || null,
                 delta: bandDeltaRef.current || null,
                 gamma: bandGammaRef.current || null,
-                date: timestamp,
               }
             : buildPolarAblyHeartRatePayload({
                 deviceId: connectedDeviceIdRef.current,
+                deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
                 hr,
                 hrv: currentHrv,
                 lfPower: lf,
@@ -725,7 +723,6 @@ export function useMonitorSession() {
                 rrSource: currentRrSource,
                 ppiMs: currentRrSource === "ppi" ? currentRrMs : null,
                 skinTemperatureC: skinTemperatureCRef.current,
-                date: timestamp,
               }),
           userStateBiometric.deviceCode
         );
@@ -1419,12 +1416,12 @@ export function useMonitorSession() {
           userStateHr.userId &&
           userStateHr.deviceCode
         ) {
-          const timestamp = new Date().toISOString();
           ablyService.current.sendMessage(
             userStateHr.userId,
             "heartRate",
             buildPolarAblyHeartRatePayload({
               deviceId: connectedDeviceId,
+              deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
               hr: hrForStream,
               hrv: hrvValue,
               lfPower: lfPowerValue,
@@ -1433,8 +1430,6 @@ export function useMonitorSession() {
               rrSource: rrSourceRef.current,
               ppiMs: null,
               skinTemperatureC: skinTemperatureCRef.current,
-              date: timestamp,
-              hrField: "heartRate",
             }),
             userStateHr.deviceCode
           );
@@ -1503,12 +1498,12 @@ export function useMonitorSession() {
           userStateHRFallback.deviceCode
         ) {
           console.log("✅ HR FALLBACK - Invio dati ad Ably");
-          const timestamp = new Date().toISOString();
           ablyService.current.sendMessage(
             userStateHRFallback.userId,
             "heartRate",
             buildPolarAblyHeartRatePayload({
               deviceId: connectedDeviceId,
+              deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
               hr: data.hr,
               hrv: hrvValue,
               lfPower: lfPowerValue,
@@ -1517,8 +1512,6 @@ export function useMonitorSession() {
               rrSource: resolved?.rrSource ?? null,
               ppiMs: null,
               skinTemperatureC: skinTemperatureCRef.current,
-              date: timestamp,
-              hrField: "heartRate",
             }),
             userStateHRFallback.deviceCode
           );

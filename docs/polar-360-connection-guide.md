@@ -83,6 +83,7 @@ Esempio payload Ably live `heartRate` (360 / Loop):
 ```json
 {
   "deviceId": "...",
+  "deviceModel": "polar_loop",
   "hr": 74,
   "hrv": 42,
   "lfPower": 1200,
@@ -91,7 +92,6 @@ Esempio payload Ably live `heartRate` (360 / Loop):
   "rrSource": "ppi",
   "ppiMs": 812,
   "skinTemperatureC": 33.4,
-  "date": "ISO",
   "type": "heartRate",
   "code": "deviceCode",
   "timestamp": "ISO"
@@ -100,6 +100,8 @@ Esempio payload Ably live `heartRate` (360 / Loop):
 
 Note:
 
+- `deviceModel` è un `PolarProductId` (`polar_360` | `polar_loop` | `polar_h10`), o `null` se il nome BLE non risolve; Hub può mapparlo a `POLAR_PRODUCTS[id].displayName`.
+- `timestamp` è aggiunto da `AblyService.sendMessage` (non c’è un campo `date` duplicato).
 - `rrSource` è `"ppi"` (preferito), `"hr_derived"` in fallback, o `"ecg_rr"` su dispositivi ECG.
 - `ppiMs` è valorizzato solo quando `rrSource === "ppi"`, altrimenti `null`.
 - `skinTemperatureC` è valorizzato **solo su Loop Gen 2** (stream SDK); su Polar 360 è sempre `null`.

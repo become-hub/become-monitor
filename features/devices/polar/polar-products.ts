@@ -6,8 +6,6 @@ import { isDeviceAvailable } from '@/constants/device-availability';
 
 export type PolarProductId = 'polar_360' | 'polar_loop' | 'polar_h10';
 
-export type PolarProductImageKey = 'polar360' | 'polarLoop' | 'polarH10';
-
 export interface PolarProductCapabilities {
   opticalPpg: boolean;
   ecg: boolean;
@@ -27,19 +25,22 @@ export interface PolarProduct {
   id: PolarProductId;
   displayName: string;
   /** BLE local name substrings (case-insensitive); first match wins per product. */
-  bleNameMatchers: string[];
-  imageKey: PolarProductImageKey;
+  bleNameMatchers: readonly string[];
   shortDescriptionIt: string;
   shortDescriptionEn: string;
   capabilities: PolarProductCapabilities;
 }
 
-export const POLAR_PRODUCTS: Record<PolarProductId, PolarProduct> = {
+/** Each map key must equal that entry's `id` (no free-string drift). */
+type PolarProductEntry<Id extends PolarProductId> = Omit<PolarProduct, 'id'> & {
+  id: Id;
+};
+
+export const POLAR_PRODUCTS = {
   polar_360: {
     id: 'polar_360',
     displayName: 'Polar 360',
     bleNameMatchers: ['360'],
-    imageKey: 'polar360',
     shortDescriptionIt:
       'Collega il Polar 360 per monitorare HR e HRV nelle app Become Hub',
     shortDescriptionEn:
@@ -61,7 +62,6 @@ export const POLAR_PRODUCTS: Record<PolarProductId, PolarProduct> = {
     id: 'polar_loop',
     displayName: 'Polar Loop Gen 2',
     bleNameMatchers: ['loop'],
-    imageKey: 'polarLoop',
     shortDescriptionIt:
       'Collega il Polar Loop Gen 2 per monitorare HR e HRV nelle app Become Hub',
     shortDescriptionEn:
@@ -83,7 +83,6 @@ export const POLAR_PRODUCTS: Record<PolarProductId, PolarProduct> = {
     id: 'polar_h10',
     displayName: 'Polar H10',
     bleNameMatchers: ['h10'],
-    imageKey: 'polarH10',
     shortDescriptionIt:
       'Collega il Polar H10 (ECG) per HR e RR nativi nelle app Become Hub',
     shortDescriptionEn:
@@ -101,7 +100,7 @@ export const POLAR_PRODUCTS: Record<PolarProductId, PolarProduct> = {
       ftuRequired: false,
     },
   },
-};
+} as const satisfies { [K in PolarProductId]: PolarProductEntry<K> };
 
 /** Ordine overview / catalogo — solo prodotti con availability on. */
 export const POLAR_PRODUCT_LIST: PolarProduct[] = (
@@ -145,4 +144,11 @@ export function getPolarProductBadge(
   deviceName: string | null | undefined
 ): string {
   return resolvePolarProduct(deviceName)?.displayName ?? 'Polar';
+}
+
+/** Catalog id for Ably / machine consumers; null if BLE name does not resolve. */
+export function resolvePolarProductId(
+  deviceName: string | null | undefined
+): PolarProductId | null {
+  return resolvePolarProduct(deviceName)?.id ?? null;
 }

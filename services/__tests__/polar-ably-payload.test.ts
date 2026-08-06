@@ -5,16 +5,15 @@
 import { resolveRrInterval } from "../rr-interval";
 import { buildPolarAblyHeartRatePayload } from "../polar-ably-payload";
 
-const baseDate = "2024-06-01T12:00:00.000Z";
-
 describe("buildPolarAblyHeartRatePayload", () => {
   describe("PPI path (Polar 360 / Loop)", () => {
-    it("include rrMs, rrSource=ppi e ppiMs grezzo", () => {
+    it("include rrMs, rrSource=ppi, ppiMs e deviceModel (PolarProductId)", () => {
       const resolved = resolveRrInterval({ ppiMs: 812, hrBpm: 74 });
       expect(resolved).not.toBeNull();
 
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "AA:BB",
+        deviceModel: "polar_360",
         hr: 74,
         hrv: 42,
         lfPower: 1200,
@@ -23,13 +22,12 @@ describe("buildPolarAblyHeartRatePayload", () => {
         rrSource: resolved!.rrSource,
         ppiMs: 812,
         skinTemperatureC: null,
-        date: baseDate,
-        hrField: "heartRate",
       });
 
       expect(payload).toEqual({
         deviceId: "AA:BB",
-        heartRate: 74,
+        deviceModel: "polar_360",
+        hr: 74,
         hrv: 42,
         lfPower: 1200,
         hfPower: 800,
@@ -37,18 +35,18 @@ describe("buildPolarAblyHeartRatePayload", () => {
         rrSource: "ppi",
         ppiMs: 812,
         skinTemperatureC: null,
-        date: baseDate,
       });
-      expect(payload).not.toHaveProperty("hr");
+      expect(payload).not.toHaveProperty("heartRate");
+      expect(payload).not.toHaveProperty("date");
     });
 
     it("usa rrMs come fallback ppiMs se ppiMs non passato e source=ppi", () => {
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "dev",
+        deviceModel: "polar_360",
         hr: 70,
         rrMs: 857,
         rrSource: "ppi",
-        date: baseDate,
       });
 
       expect(payload.ppiMs).toBe(857);
@@ -57,16 +55,52 @@ describe("buildPolarAblyHeartRatePayload", () => {
     });
   });
 
+  describe("deviceModel", () => {
+    it("propaga PolarProductId o null", () => {
+      expect(
+        buildPolarAblyHeartRatePayload({
+          deviceId: "a",
+          deviceModel: "polar_360",
+          hr: 70,
+        }).deviceModel
+      ).toBe("polar_360");
+
+      expect(
+        buildPolarAblyHeartRatePayload({
+          deviceId: "b",
+          deviceModel: "polar_loop",
+          hr: 70,
+        }).deviceModel
+      ).toBe("polar_loop");
+
+      expect(
+        buildPolarAblyHeartRatePayload({
+          deviceId: "c",
+          deviceModel: "polar_h10",
+          hr: 70,
+        }).deviceModel
+      ).toBe("polar_h10");
+
+      expect(
+        buildPolarAblyHeartRatePayload({
+          deviceId: "d",
+          deviceModel: null,
+          hr: 70,
+        }).deviceModel
+      ).toBeNull();
+    });
+  });
+
   describe("skin temperature (Loop Gen 2)", () => {
     it("include skinTemperatureC quando > 0", () => {
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "loop",
+        deviceModel: "polar_loop",
         hr: 72,
         rrMs: 800,
         rrSource: "ppi",
         ppiMs: 800,
         skinTemperatureC: 33.4,
-        date: baseDate,
       });
 
       expect(payload.skinTemperatureC).toBe(33.4);
@@ -76,12 +110,12 @@ describe("buildPolarAblyHeartRatePayload", () => {
       for (const skinTemperatureC of [0, null, undefined, NaN, -1] as const) {
         const payload = buildPolarAblyHeartRatePayload({
           deviceId: "360",
+          deviceModel: "polar_360",
           hr: 72,
           rrMs: 800,
           rrSource: "ppi",
           ppiMs: 800,
           skinTemperatureC,
-          date: baseDate,
         });
         expect(payload.skinTemperatureC).toBeNull();
       }
@@ -93,11 +127,11 @@ describe("buildPolarAblyHeartRatePayload", () => {
       const resolved = resolveRrInterval({ hrBpm: 75 });
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "dev",
+        deviceModel: "polar_360",
         hr: 75,
         rrMs: resolved!.rrMs,
         rrSource: resolved!.rrSource,
         ppiMs: 999,
-        date: baseDate,
       });
 
       expect(payload.rrSource).toBe("hr_derived");
@@ -108,12 +142,11 @@ describe("buildPolarAblyHeartRatePayload", () => {
     it("non espone ppiMs quando rrSource è ecg_rr anche se ppiMs è passato", () => {
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "h10",
+        deviceModel: "polar_h10",
         hr: 80,
         rrMs: 750,
         rrSource: "ecg_rr",
         ppiMs: 750,
-        date: baseDate,
-        hrField: "heartRate",
       });
 
       expect(payload.rrSource).toBe("ecg_rr");
@@ -124,10 +157,10 @@ describe("buildPolarAblyHeartRatePayload", () => {
     it("rrMs/rrSource null se intervallo assente", () => {
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "dev",
+        deviceModel: "polar_360",
         hr: 70,
         rrMs: null,
         rrSource: null,
-        date: baseDate,
       });
 
       expect(payload.rrMs).toBeNull();
@@ -139,20 +172,20 @@ describe("buildPolarAblyHeartRatePayload", () => {
       expect(
         buildPolarAblyHeartRatePayload({
           deviceId: "dev",
+          deviceModel: "polar_360",
           hr: 70,
           rrMs: 0,
           rrSource: "ppi",
-          date: baseDate,
         }).rrMs
       ).toBeNull();
 
       expect(
         buildPolarAblyHeartRatePayload({
           deviceId: "dev",
+          deviceModel: "polar_360",
           hr: 70,
           rrMs: -5,
           rrSource: "ppi",
-          date: baseDate,
         }).rrMs
       ).toBeNull();
     });
@@ -162,6 +195,7 @@ describe("buildPolarAblyHeartRatePayload", () => {
     it("mantiene null finché non ci sono valori positivi (prima dei 30 campioni)", () => {
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "dev",
+        deviceModel: "polar_360",
         hr: 74,
         hrv: null,
         lfPower: null,
@@ -169,8 +203,6 @@ describe("buildPolarAblyHeartRatePayload", () => {
         rrMs: 812,
         rrSource: "ppi",
         ppiMs: 812,
-        date: baseDate,
-        hrField: "heartRate",
       });
 
       expect(payload.hrv).toBeNull();
@@ -181,11 +213,11 @@ describe("buildPolarAblyHeartRatePayload", () => {
     it("azzera 0 come non ancora calcolati", () => {
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "dev",
+        deviceModel: "polar_360",
         hr: 74,
         hrv: 0,
         lfPower: 0,
         hfPower: 0,
-        date: baseDate,
       });
 
       expect(payload.hrv).toBeNull();
@@ -196,11 +228,11 @@ describe("buildPolarAblyHeartRatePayload", () => {
     it("propaga HRV/LF/HF dopo la finestra piena", () => {
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "dev",
+        deviceModel: "polar_360",
         hr: 74,
         hrv: 45,
         lfPower: 1500,
         hfPower: 900,
-        date: baseDate,
       });
 
       expect(payload.hrv).toBe(45);
@@ -210,32 +242,22 @@ describe("buildPolarAblyHeartRatePayload", () => {
   });
 
   describe("campo HR", () => {
-    it("usa `hr` di default (sender periodico)", () => {
+    it("espone sempre `hr` (mai `heartRate`)", () => {
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "dev",
+        deviceModel: "polar_360",
         hr: 68,
-        date: baseDate,
       });
       expect(payload.hr).toBe(68);
       expect(payload).not.toHaveProperty("heartRate");
     });
-
-    it("usa `heartRate` quando richiesto dagli stream callback", () => {
-      const payload = buildPolarAblyHeartRatePayload({
-        deviceId: "dev",
-        hr: 68,
-        date: baseDate,
-        hrField: "heartRate",
-      });
-      expect(payload.heartRate).toBe(68);
-      expect(payload).not.toHaveProperty("hr");
-    });
   });
 
   describe("contratto live completo Loop", () => {
-    it("produce il shape documentato per Hub (Loop + PPI + skin)", () => {
+    it("produce il shape documentato per Hub (Loop + PPI + skin, senza date)", () => {
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "loop-1",
+        deviceModel: "polar_loop",
         hr: 74,
         hrv: 42,
         lfPower: 1200,
@@ -244,13 +266,12 @@ describe("buildPolarAblyHeartRatePayload", () => {
         rrSource: "ppi",
         ppiMs: 812,
         skinTemperatureC: 33.4,
-        date: baseDate,
       });
 
       expect(Object.keys(payload).sort()).toEqual(
         [
-          "date",
           "deviceId",
+          "deviceModel",
           "hfPower",
           "hr",
           "hrv",
@@ -264,6 +285,7 @@ describe("buildPolarAblyHeartRatePayload", () => {
 
       expect(payload).toMatchObject({
         deviceId: "loop-1",
+        deviceModel: "polar_loop",
         hr: 74,
         hrv: 42,
         lfPower: 1200,
@@ -272,8 +294,8 @@ describe("buildPolarAblyHeartRatePayload", () => {
         rrSource: "ppi",
         ppiMs: 812,
         skinTemperatureC: 33.4,
-        date: baseDate,
       });
+      expect(payload).not.toHaveProperty("date");
     });
   });
 });

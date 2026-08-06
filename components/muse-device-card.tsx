@@ -7,11 +7,11 @@ import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
   MuseProduct,
-  MuseProductImageKey,
+  MuseProductId,
 } from "@/features/devices/muse/muse-products";
 
-const PRODUCT_IMAGES: Record<MuseProductImageKey, number> = {
-  muse2: require("@/assets/images/muse-2.png"),
+const PRODUCT_IMAGES: Record<MuseProductId, number> = {
+  muse_2: require("@/assets/images/muse-2.png"),
 };
 
 type MuseDeviceCardProps = {
@@ -34,7 +34,7 @@ export function MuseDeviceCard({
       style={[styles.card, { borderColor: Colors[theme].border }]}
     >
       <Image
-        source={PRODUCT_IMAGES[product.imageKey]}
+        source={PRODUCT_IMAGES[product.id]}
         style={styles.image}
         contentFit="contain"
       />

@@ -8,6 +8,7 @@ import {
   POLAR_PRODUCT_LIST,
   POLAR_PRODUCTS,
   resolvePolarProduct,
+  resolvePolarProductId,
 } from '../polar-products';
 
 describe('polar-products', () => {
@@ -53,6 +54,15 @@ describe('polar-products', () => {
       expect(getPolarProductBadge('Polar Loop')).toBe('Polar Loop Gen 2');
       expect(getPolarProductBadge('Polar H10')).toBe('Polar');
       expect(getPolarProductBadge('Something')).toBe('Polar');
+    });
+  });
+
+  describe('resolvePolarProductId', () => {
+    it('restituisce PolarProductId o null', () => {
+      expect(resolvePolarProductId('Polar 360 ABC')).toBe('polar_360');
+      expect(resolvePolarProductId('Polar Loop')).toBe('polar_loop');
+      expect(resolvePolarProductId('Polar H10')).toBeNull();
+      expect(resolvePolarProductId('Something')).toBeNull();
     });
   });
 

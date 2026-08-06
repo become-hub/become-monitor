@@ -147,93 +147,9 @@ describe('AblyService', () => {
         });
     });
 
-    describe('sendHeartRate', () => {
-        it('non invia se non connesso', () => {
-            ablyService.sendHeartRate('dev-123', 456, 75, 45, 1200, 800);
-
-            expect(mockChannel.publish).not.toHaveBeenCalled();
-        });
-
-        it('non invia se ably è null', () => {
-            // Non connetto mai, quindi ably è null
-            ablyService.sendHeartRate('dev-123', 456, 75, 45, 1200, 800);
-
-            expect(mockChannel.publish).not.toHaveBeenCalled();
-        });
-
-        it('non invia se connesso ma poi ably diventa null', () => {
-            ablyService.connectWithToken('test-token', 456, 'dev-123');
-
-            const onCallback = mockAbly.connection.on.mock.calls[0][0];
-            onCallback({ current: 'connected' });
-
-            // Simula close
-            (ablyService as any).ably = null;
-
-            ablyService.sendHeartRate('dev-123', 456, 75, 45, 1200, 800);
-
-            expect(mockChannel.publish).not.toHaveBeenCalled();
-        });
-
-        it('invia messaggio corretto quando connesso', () => {
-            ablyService.connectWithToken('test-token', 456, 'dev-123');
-
-            const onCallback = mockAbly.connection.on.mock.calls[0][0];
-            onCallback({ current: 'connected' });
-
-            ablyService.sendHeartRate('dev-123', 456, 75, 45, 1200, 800);
-
-            expect(mockChannel.publish).toHaveBeenCalledWith(
-                'heartRate',
-                expect.stringContaining('"heartRate":75')
-            );
-            expect(mockChannel.publish).toHaveBeenCalledWith(
-                'heartRate',
-                expect.stringContaining('"hrv":45')
-            );
-        });
-
-        it('include tutti i parametri nel messaggio', () => {
-            ablyService.connectWithToken('test-token', 456, 'dev-123');
-
-            const onCallback = mockAbly.connection.on.mock.calls[0][0];
-            onCallback({ current: 'connected' });
-
-            ablyService.sendHeartRate('dev-123', 456, 80, 50, 1500, 900);
-
-            const publishCall = mockChannel.publish.mock.calls[0];
-            const message = JSON.parse(publishCall[1]);
-
-            expect(message).toEqual({
-                heartRate: 80,
-                hrv: 50,
-                lf: 1500,
-                hf: 900,
-                code: 'dev-123',
-                type: 'private_msg',
-            });
-        });
-
-        it('gestisce errore durante publish', () => {
-            mockChannel.publish.mockImplementation(() => {
-                throw new Error('Publish failed');
-            });
-
-            ablyService.connectWithToken('test-token', 456, 'dev-123');
-
-            const onCallback = mockAbly.connection.on.mock.calls[0][0];
-            onCallback({ current: 'connected' });
-
-            // Non dovrebbe crashare quando publish fallisce
-            expect(() => {
-                ablyService.sendHeartRate('dev-123', 456, 75, 45, 1200, 800);
-            }).not.toThrow();
-        });
-    });
-
     describe('sendMessage', () => {
         it('non invia se non connesso', () => {
-            ablyService.sendMessage(123, 'heartRate', { deviceId: 'dev-123', hr: 75, hrv: 45, lfPower: 1200, hfPower: 800, date: '2024-01-01T00:00:00Z' }, 'dev-123');
+            ablyService.sendMessage(123, 'heartRate', { deviceId: 'dev-123', hr: 75, hrv: 45, lfPower: 1200, hfPower: 800 }, 'dev-123');
 
             expect(mockChannel.publish).not.toHaveBeenCalled();
         });
@@ -279,12 +195,12 @@ describe('AblyService', () => {
             const onCallback = mockAbly.connection.on.mock.calls[0][0];
             onCallback({ current: 'connected' });
 
-            const timestamp = '2024-01-01T00:00:00Z';
             ablyService.sendMessage(
                 456,
                 'heartRate',
                 {
                     deviceId: 'dev-123',
+                    deviceModel: 'polar_loop',
                     hr: 80,
                     hrv: 50,
                     lfPower: 1500,
@@ -293,7 +209,6 @@ describe('AblyService', () => {
                     rrSource: 'ppi',
                     ppiMs: 812,
                     skinTemperatureC: 33.4,
-                    date: timestamp,
                 },
                 'dev-123'
             );
@@ -302,6 +217,7 @@ describe('AblyService', () => {
             const message = JSON.parse(publishCall[1]);
 
             expect(message.deviceId).toBe('dev-123');
+            expect(message.deviceModel).toBe('polar_loop');
             expect(message.hr).toBe(80);
             expect(message.hrv).toBe(50);
             expect(message.lfPower).toBe(1500);
@@ -310,7 +226,7 @@ describe('AblyService', () => {
             expect(message.rrSource).toBe('ppi');
             expect(message.ppiMs).toBe(812);
             expect(message.skinTemperatureC).toBe(33.4);
-            expect(message.date).toBe(timestamp);
+            expect(message).not.toHaveProperty('date');
             expect(message.type).toBe('heartRate');
             expect(message.code).toBe('dev-123');
             expect(message).toHaveProperty('timestamp');
@@ -323,6 +239,7 @@ describe('AblyService', () => {
 
             const polarPayload = buildPolarAblyHeartRatePayload({
                 deviceId: 'loop-1',
+                deviceModel: 'polar_loop',
                 hr: 74,
                 hrv: 42,
                 lfPower: 1200,
@@ -331,7 +248,6 @@ describe('AblyService', () => {
                 rrSource: 'ppi',
                 ppiMs: 812,
                 skinTemperatureC: 33.4,
-                date: '2024-06-01T12:00:00.000Z',
             });
 
             ablyService.sendMessage(456, 'heartRate', polarPayload, 'code-1');
@@ -342,9 +258,12 @@ describe('AblyService', () => {
                 type: 'heartRate',
                 code: 'code-1',
             });
+            expect(message.deviceModel).toBe('polar_loop');
             expect(message.ppiMs).toBe(812);
             expect(message.skinTemperatureC).toBe(33.4);
             expect(message.rrSource).toBe('ppi');
+            expect(message).not.toHaveProperty('date');
+            expect(message).toHaveProperty('timestamp');
         });
 
         it('non inventa ppiMs su publish quando il builder lo azzera (hr_derived)', () => {
@@ -354,22 +273,23 @@ describe('AblyService', () => {
 
             const polarPayload = buildPolarAblyHeartRatePayload({
                 deviceId: '360',
+                deviceModel: 'polar_360',
                 hr: 75,
                 rrMs: 800,
                 rrSource: 'hr_derived',
                 ppiMs: 999,
                 skinTemperatureC: 0,
-                date: '2024-06-01T12:00:00.000Z',
-                hrField: 'heartRate',
             });
 
             ablyService.sendMessage(456, 'heartRate', polarPayload, 'code-1');
 
             const message = JSON.parse(mockChannel.publish.mock.calls[0][1]);
-            expect(message.heartRate).toBe(75);
+            expect(message.hr).toBe(75);
+            expect(message.deviceModel).toBe('polar_360');
             expect(message.rrSource).toBe('hr_derived');
             expect(message.ppiMs).toBeNull();
             expect(message.skinTemperatureC).toBeNull();
+            expect(message).not.toHaveProperty('date');
         });
 
         it('gestisce errore durante publish', () => {
@@ -433,7 +353,7 @@ describe('AblyService', () => {
             ablyService.close();
 
             // Dopo close, non dovrebbe più inviare
-            ablyService.sendHeartRate('dev-123', 456, 75, 45, 1200, 800);
+            ablyService.sendMessage(456, 'heartRate', { hr: 75 }, 'dev-123');
             expect(mockChannel.publish).not.toHaveBeenCalled();
         });
 
@@ -599,30 +519,6 @@ describe('AblyService', () => {
 
             expect(() => {
                 onCallback({ current: 'connected' });
-            }).not.toThrow();
-        });
-    });
-
-    describe('SendHeartRate edge cases', () => {
-        it('gestisce userId = 0', () => {
-            ablyService.connectWithToken('test-token', 0, 'dev-123');
-
-            const onCallback = mockAbly.connection.on.mock.calls[0][0];
-            onCallback({ current: 'connected' });
-
-            ablyService.sendHeartRate('dev-123', 0, 75, 45, 1200, 800);
-
-            expect(mockAbly.channels.get).toHaveBeenCalledWith('private:0');
-        });
-
-        it('gestisce valori HRV negativi (edge case)', () => {
-            ablyService.connectWithToken('test-token', 123, 'dev-123');
-
-            const onCallback = mockAbly.connection.on.mock.calls[0][0];
-            onCallback({ current: 'connected' });
-
-            expect(() => {
-                ablyService.sendHeartRate('dev-123', 123, 75, -1, -100, -50);
             }).not.toThrow();
         });
     });

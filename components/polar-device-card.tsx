@@ -7,13 +7,13 @@ import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
   PolarProduct,
-  PolarProductImageKey,
+  PolarProductId,
 } from "@/features/devices/polar/polar-products";
 
-const PRODUCT_IMAGES: Record<PolarProductImageKey, number> = {
-  polar360: require("@/assets/images/polar360.webp"),
-  polarLoop: require("@/assets/images/polar-loop.png"),
-  polarH10: require("@/assets/images/polar-h10.png"),
+const PRODUCT_IMAGES: Record<PolarProductId, number> = {
+  polar_360: require("@/assets/images/polar360.webp"),
+  polar_loop: require("@/assets/images/polar-loop.png"),
+  polar_h10: require("@/assets/images/polar-h10.png"),
 };
 
 type PolarDeviceCardProps = {
@@ -36,7 +36,7 @@ export function PolarDeviceCard({
       style={[styles.card, { borderColor: Colors[theme].border }]}
     >
       <Image
-        source={PRODUCT_IMAGES[product.imageKey]}
+        source={PRODUCT_IMAGES[product.id]}
         style={styles.image}
         contentFit="contain"
       />

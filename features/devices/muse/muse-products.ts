@@ -7,8 +7,6 @@ import { isDeviceAvailable } from "@/constants/device-availability";
 
 export type MuseProductId = "muse_2";
 
-export type MuseProductImageKey = "muse2";
-
 export interface MuseProductCapabilities {
   eeg: boolean;
   bandPowers: boolean;
@@ -20,19 +18,22 @@ export interface MuseProductCapabilities {
 export interface MuseProduct {
   id: MuseProductId;
   displayName: string;
-  bleNameMatchers: string[];
-  imageKey: MuseProductImageKey;
+  bleNameMatchers: readonly string[];
   shortDescriptionIt: string;
   shortDescriptionEn: string;
   capabilities: MuseProductCapabilities;
 }
 
-export const MUSE_PRODUCTS: Record<MuseProductId, MuseProduct> = {
+/** Each map key must equal that entry's `id` (no free-string drift). */
+type MuseProductEntry<Id extends MuseProductId> = Omit<MuseProduct, "id"> & {
+  id: Id;
+};
+
+export const MUSE_PRODUCTS = {
   muse_2: {
     id: "muse_2",
     displayName: "Muse 2",
     bleNameMatchers: ["muse-2", "muse 2", "muse2", "muse"],
-    imageKey: "muse2",
     shortDescriptionIt:
       "Collega il Muse 2 per EEG (TP9/AF7/AF8/TP10), bande e HR da PPG nelle app Become Hub",
     shortDescriptionEn:
@@ -45,7 +46,7 @@ export const MUSE_PRODUCTS: Record<MuseProductId, MuseProduct> = {
       ftuRequired: false,
     },
   },
-};
+} as const satisfies { [K in MuseProductId]: MuseProductEntry<K> };
 
 /** Solo prodotti con availability on. */
 export const MUSE_PRODUCT_LIST: MuseProduct[] = (

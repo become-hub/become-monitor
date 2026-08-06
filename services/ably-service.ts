@@ -155,43 +155,6 @@ export class AblyService {
         });
     }
 
-    sendHeartRate(
-        deviceCode: string,
-        userId: number,
-        bpm: number,
-        hrv: number,
-        lf: number,
-        hf: number
-    ) {
-        console.log(`AblyService: 🔍 Connection check - ably: ${!!this.ably}, isConnected: ${this.isConnected}`);
-        if (!this.ably || !this.isConnected) {
-            console.warn("AblyService: ⚠️ Cannot send, not connected");
-            console.warn(`AblyService: 🔍 Details - ably exists: ${!!this.ably}, isConnected: ${this.isConnected}`);
-            return;
-        }
-
-        try {
-            console.log(`AblyService: 🔍 Debug - Received userId: ${userId} (type: ${typeof userId}), deviceCode: ${deviceCode}`);
-            const channelName = `private:${userId}`;
-            console.log(`AblyService: 🔍 Channel name: ${channelName}`);
-            const channel = this.ably.channels.get(channelName);
-
-            const message = {
-                heartRate: bpm,
-                hrv: hrv,
-                lf: lf,
-                hf: hf,
-                code: deviceCode,
-                type: "private_msg",
-            };
-
-            channel.publish("heartRate", JSON.stringify(message));
-            console.log(`AblyService: 📨 Sent heartRate=${bpm} to private:${userId}`);
-        } catch (error: any) {
-            console.error("AblyService: ❌ Failed to send heart rate:", error.message);
-        }
-    }
-
     /**
      * Metodo generico per inviare messaggi ad Ably
      */

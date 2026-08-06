@@ -1,0 +1,15 @@
+---
+description: Run the full Jest suite successfully before any git push
+alwaysApply: true
+---
+
+# Full tests before push
+
+Before **any** `git push` (including after commit when the user asked to push):
+
+1. Run the **full** test suite: `npm test -- --no-coverage` (not only path-filtered suites).
+2. Push **only if** all suites pass.
+3. If tests fail, fix failures (or report them) and do **not** push until green.
+4. In the reply after a push, briefly confirm that the full suite was run and passed (counts if available).
+
+Do not treat “related tests only” as sufficient before push unless the user explicitly waives the full suite for that push.
