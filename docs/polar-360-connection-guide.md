@@ -69,7 +69,7 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Augm
 
 ### Live vs flush a fine sessione (spike)
 
-- **Live**: HR / PPI / HRV restano in streaming verso Ably (`heartRate`) per la visibilità in Hub.
+- **Live**: HR / PPI / RR / HRV (e skin temp su Loop) restano in streaming verso Ably (`heartRate`) per la visibilità in Hub.
 - **Tracciato intero**: a fine sessione Hub pubblica su `private:{userId}` l’evento Ably **`endSession`** (payload opzionale `{ "sessionId": "..." }`). L’app:
   1. ferma l’offline recording PPI, scarica il record dal Polar (o usa il buffer live)
   2. costruisce un payload grezzo `ppiTrack` (sample con `ppiMs`/`hr`, `rrMs`, `rrSource`)
@@ -77,6 +77,33 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Augm
   4. rimuove il record offline dal device dopo upload ok
 - Se `EXPO_PUBLIC_TRACK_UPLOAD_URL` è vuoto, lo spike fa **dry-run** (solo log).
 - In Monitor, con **debug mode** attivo, è disponibile il bottone **“Simula endSession / Flush track”** per test senza Hub.
+
+Esempio payload Ably live `heartRate` (360 / Loop):
+
+```json
+{
+  "deviceId": "...",
+  "hr": 74,
+  "hrv": 42,
+  "lfPower": 1200,
+  "hfPower": 800,
+  "rrMs": 812,
+  "rrSource": "ppi",
+  "ppiMs": 812,
+  "skinTemperatureC": 33.4,
+  "date": "ISO",
+  "type": "heartRate",
+  "code": "deviceCode",
+  "timestamp": "ISO"
+}
+```
+
+Note:
+
+- `rrSource` è `"ppi"` (preferito), `"hr_derived"` in fallback, o `"ecg_rr"` su dispositivi ECG.
+- `ppiMs` è valorizzato solo quando `rrSource === "ppi"`, altrimenti `null`.
+- `skinTemperatureC` è valorizzato **solo su Loop Gen 2** (stream SDK); su Polar 360 è sempre `null`.
+- `hrv` / `lfPower` / `hfPower` restano `null` finché non ci sono 30 campioni RR/PPI.
 
 Esempio payload POST:
 

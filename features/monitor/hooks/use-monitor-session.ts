@@ -8,6 +8,7 @@ import { Alert, PermissionsAndroid, Platform } from "react-native";
 import { AblyService, ConnectionStatus } from "@/services/ably-service";
 import { AuthService } from "@/services/auth-service";
 import { calculateRMSSD, computeLfHf } from "@/services/hrv-calculator";
+import { buildPolarAblyHeartRatePayload } from "@/services/polar-ably-payload";
 import {
   PolarDeviceInfo,
   PolarEcgData,
@@ -156,6 +157,7 @@ export function useMonitorSession() {
   const connectedDeviceNameRef = useRef("");
   const connectedDeviceIdRef = useRef<string | null>(null);
   const flushInFlightRef = useRef(false);
+  const rrMsRef = useRef(0);
   const rrSourceRef = useRef<RrSource | null>(null);
 
   // Notification state
@@ -205,6 +207,7 @@ export function useMonitorSession() {
   useEffect(() => { skinTemperatureCRef.current = skinTemperatureC; }, [skinTemperatureC]);
   useEffect(() => { connectedDeviceNameRef.current = connectedDeviceName; }, [connectedDeviceName]);
   useEffect(() => { connectedDeviceIdRef.current = connectedDeviceId; }, [connectedDeviceId]);
+  useEffect(() => { rrMsRef.current = rrMs; }, [rrMs]);
   useEffect(() => { rrSourceRef.current = rrSource; }, [rrSource]);
 
   // userId logging
@@ -317,6 +320,7 @@ export function useMonitorSession() {
       if (resolved) {
         setRrMs(resolved.rrMs);
         setRrSource(resolved.rrSource);
+        rrMsRef.current = resolved.rrMs;
         rrSourceRef.current = resolved.rrSource;
       }
       sessionTrackBuffer.pushPpi({
@@ -375,14 +379,19 @@ export function useMonitorSession() {
           ablyService.current.sendMessage(
             userStateHRV.userId,
             "heartRate",
-            {
+            buildPolarAblyHeartRatePayload({
               deviceId: connectedDeviceId,
-              heartRate: heartRate,
+              hr: heartRate,
               hrv: hrvValue,
               lfPower: lfPowerValue,
               hfPower: hfPowerValue,
+              rrMs: resolved?.rrMs ?? null,
+              rrSource: resolved?.rrSource ?? null,
+              ppiMs: resolved?.rrSource === "ppi" ? ppiMs : null,
+              skinTemperatureC: skinTemperatureCRef.current,
               date: timestamp,
-            },
+              hrField: "heartRate",
+            }),
             userStateHRV.deviceCode
           );
           bumpAblyPulse();
@@ -689,6 +698,8 @@ export function useMonitorSession() {
         console.log("✅ BIOMETRIC SENDING - Invio dati ad Ably");
         const timestamp = new Date().toISOString();
         const isMuse = connectedFamilyRef.current === "muse";
+        const currentRrMs = rrMsRef.current;
+        const currentRrSource = rrSourceRef.current;
         ablyService.current.sendMessage(
           userStateBiometric.userId,
           "heartRate",
@@ -704,14 +715,18 @@ export function useMonitorSession() {
                 gamma: bandGammaRef.current || null,
                 date: timestamp,
               }
-            : {
+            : buildPolarAblyHeartRatePayload({
                 deviceId: connectedDeviceIdRef.current,
                 hr,
-                hrv: currentHrv > 0 ? currentHrv : null,
-                lfPower: lf > 0 ? lf : null,
-                hfPower: hf > 0 ? hf : null,
+                hrv: currentHrv,
+                lfPower: lf,
+                hfPower: hf,
+                rrMs: currentRrMs,
+                rrSource: currentRrSource,
+                ppiMs: currentRrSource === "ppi" ? currentRrMs : null,
+                skinTemperatureC: skinTemperatureCRef.current,
                 date: timestamp,
-              },
+              }),
           userStateBiometric.deviceCode
         );
         bumpAblyPulse();
@@ -769,6 +784,7 @@ export function useMonitorSession() {
     setHfPower(0);
     hfPowerRef.current = 0;
     setRrMs(0);
+    rrMsRef.current = 0;
     setRrSource(null);
     rrSourceRef.current = null;
     setEcgMicroVolts(0);
@@ -820,9 +836,11 @@ export function useMonitorSession() {
     setLfPower(0);
     setHfPower(0);
     setRrMs(0);
+    rrMsRef.current = 0;
     setRrSource(null);
     setEcgMicroVolts(0);
     setSkinTemperatureC(0);
+    skinTemperatureCRef.current = 0;
     setIsSignalLost(false);
     setConnectedFamily(null);
     setEegTp9(0);
@@ -1359,6 +1377,7 @@ export function useMonitorSession() {
           if (resolved) {
             setRrMs(resolved.rrMs);
             setRrSource(resolved.rrSource);
+            rrMsRef.current = resolved.rrMs;
             rrSourceRef.current = resolved.rrSource;
           }
           sessionTrackBuffer.pushEcgRr({
@@ -1404,14 +1423,19 @@ export function useMonitorSession() {
           ablyService.current.sendMessage(
             userStateHr.userId,
             "heartRate",
-            {
+            buildPolarAblyHeartRatePayload({
               deviceId: connectedDeviceId,
-              heartRate: hrForStream,
+              hr: hrForStream,
               hrv: hrvValue,
               lfPower: lfPowerValue,
               hfPower: hfPowerValue,
+              rrMs: rrMsRef.current,
+              rrSource: rrSourceRef.current,
+              ppiMs: null,
+              skinTemperatureC: skinTemperatureCRef.current,
               date: timestamp,
-            },
+              hrField: "heartRate",
+            }),
             userStateHr.deviceCode
           );
           bumpAblyPulse();
@@ -1433,6 +1457,8 @@ export function useMonitorSession() {
         if (resolved) {
           setRrMs(resolved.rrMs);
           setRrSource(resolved.rrSource);
+          rrMsRef.current = resolved.rrMs;
+          rrSourceRef.current = resolved.rrSource;
           sessionTrackBuffer.pushHr(data.hr);
         }
 
@@ -1481,14 +1507,19 @@ export function useMonitorSession() {
           ablyService.current.sendMessage(
             userStateHRFallback.userId,
             "heartRate",
-            {
+            buildPolarAblyHeartRatePayload({
               deviceId: connectedDeviceId,
-              heartRate: data.hr,
+              hr: data.hr,
               hrv: hrvValue,
               lfPower: lfPowerValue,
               hfPower: hfPowerValue,
+              rrMs: resolved?.rrMs ?? null,
+              rrSource: resolved?.rrSource ?? null,
+              ppiMs: null,
+              skinTemperatureC: skinTemperatureCRef.current,
               date: timestamp,
-            },
+              hrField: "heartRate",
+            }),
             userStateHRFallback.deviceCode
           );
           bumpAblyPulse();
@@ -1516,6 +1547,7 @@ export function useMonitorSession() {
     polarSdk.addEventListener("onSkinTemperatureReceived", (data: PolarSkinTemperatureData) => {
       console.log(`Monitor: 🌡️ Skin temperature=${data.temperatureC.toFixed(1)} °C`);
       setSkinTemperatureC(data.temperatureC);
+      skinTemperatureCRef.current = data.temperatureC;
     });
 
     polarSdk.addEventListener("onSkinTemperatureStreamError", (error: any) => {
