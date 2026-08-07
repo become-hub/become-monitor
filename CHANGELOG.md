@@ -4,6 +4,18 @@ Tutte le modifiche rilevanti a Augmented Monitor.
 
 Il formato si ispira a [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [1.2.1] — Play Console e versioning
+
+### Added
+- Target Make per artefatti firmati (`create-file`) e pipeline `release` (changelog + AAB/APK)
+- Workflow Changesets per note di rilascio per branch (`changeset` / `changelog`)
+- Guide `docs/android-play-release.md` e `docs/changesets-workflow.md`
+
+### Changed
+- `applicationId` Android allineato a `com.discoverbecome.augmentedmonitor` per Play Console
+- Firma release con upload keystore (niente più debug keystore in release)
+- Versione Expo derivata da `package.json` tramite `app.config.js`
+
 ## [1.2.0] — Device gates + Monitor UX + Polar setup
 
 ### Added

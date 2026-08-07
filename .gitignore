@@ -18,6 +18,12 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Android release signing (never commit secrets)
+android/keystore.properties
+android/app/upload-keystore.jks
+android/app/*-upload.keystore
+android/app/*-upload.jks
+
 # Metro
 .metro-health-check*
 

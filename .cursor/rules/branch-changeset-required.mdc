@@ -1,0 +1,52 @@
+---
+description: Every working branch must add a Changesets entry under .changeset/
+alwaysApply: true
+---
+
+# Branch changeset required
+
+Every **shippable** working branch (feature / fix / refactor with runtime or user impact) **must** include at least one Changesets file in `.changeset/`.
+
+## Required workflow (all on the ticket branch)
+
+1. As soon as scope is clear, add a changeset:
+   - Prefer: `make changeset` → `npx changeset add`
+   - Agents / non-interactive: write `.changeset/<name>.md` in the official Changesets format
+2. Choose bump by task size:
+   - **major** — breaking / store-incompatible (e.g. applicationId change)
+   - **minor** — new user-facing capability (device, screen, flow)
+   - **patch** — fix, polish, non-breaking refactor, release tooling
+3. **Before PR / merge**, on the **same** `PLAT-…` branch: `make changelog` (or `make release`) so `CHANGELOG.md` + version bump are committed **with the ticket id** — not later on `master`
+4. After merge to `master`: only `make create-file` if you still need AAB/APK and did not build on the branch
+
+The `.changeset/*.md` file is required input for Changesets; it cannot update `CHANGELOG.md` “directly” without it. Consuming it on the feature branch avoids an orphan version commit on `master`.
+
+Version source of truth is `package.json` only. Expo via `app.config.js`; Android via Gradle; iOS via `agvtool`. No custom version-sync scripts.
+
+## Official changeset file shape
+
+```md
+---
+"become-monitor": patch
+---
+
+Short user-facing summary of the change (no branch or ticket ids).
+```
+
+## Changelog writing
+
+- Never put branch/ticket names (`PLAT-…`, `feat/…`) in changeset summaries or `CHANGELOG.md`
+- After `make changelog`, reshape Changesets’ default block into Keep a Changelog (`Added` / `Changed` / `Fixed`, titled `## [X.Y.Z] — …`) matching existing entries
+
+## Skip only when
+
+- Docs/chore with **no** runtime impact, **or**
+- The user explicitly says not to bump / not to add a changeset
+
+## Anti-patterns
+
+- Editing `CHANGELOG.md` or version fields by hand while pending `.changeset/*.md` exist
+- Merging a shippable branch with an unused pending `.changeset/` (forgot `make changelog` on the branch)
+- Running `make changelog` on `master` as a commit without ticket tracking id
+- Using `changeset publish` (this app is not an npm publish flow)
+- Custom scripts that copy `package.json` version into `app.json` / Info.plist

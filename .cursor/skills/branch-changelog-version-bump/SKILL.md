@@ -1,42 +1,46 @@
 ---
 name: branch-changelog-version-bump
 description: >-
-  Per ogni branch feature/fix, aggiorna CHANGELOG.md e fa bump di versione
-  dell'app (package.json, app.json, iOS Info.plist). Usare quando si chiude un
+  Per ogni branch feature/fix, gestisci versioning e changelog via Changesets
+  (make changeset / make changelog / make release). Usare quando si chiude un
   branch, si prepara un PR, o l'utente chiede changelog, bump versione, release
   notes, o sync versioni.
 ---
 
-# Branch changelog + version bump
+# Branch changelog + version bump (Changesets)
 
-Per **ogni branch** che introduce lavoro shippabile (feature, fix, refactor rilevante), prima di PR/merge:
+Per **ogni branch** shippabile:
 
-1. Bump versione semver
-2. Aggiorna `CHANGELOG.md`
-3. Allinea tutti i file versione
+1. Aggiungi un changeset locale (`.changeset/*.md`)
+2. **Sul medesimo branch ticket**, prima del merge: `make changelog` o `make release` (COMMIT con id PLAT-…)
+3. Merge → `master`. Su master niente commit “solo changelog”; al massimo `make create-file` per gli artefatti
+4. Versione unica in `package.json`; Expo/Android/iOS la seguono senza script custom
+
+Il file `.changeset/*.md` è obbligatorio per Changesets (non esiste “aggiorna CHANGELOG senza intent”). Si evita il commit orfano su master **consumando** il changeset sul branch del ticket.
 
 Non commitare salvo richiesta esplicita dell'utente.
 
 ## Quando attivare
 
 - Fine lavoro su un branch / preparazione PR
-- Richieste: "bump versione", "aggiorna changelog", "release", "versione app"
+- Richieste: "bump versione", "aggiorna changelog", "release", "changeset"
 - Dopo integrazioni device/feature strutturali (Polar, Muse, auth, BLE, …)
 
 **Skip** se il branch è solo docs/chore cosmetico senza impatto utente/runtime, oppure se l'utente dice esplicitamente di non bumpare.
+
+Vedi anche la rule always-apply `.cursor/rules/branch-changeset-required.mdc` e `docs/changesets-workflow.md`.
 
 ## Source of truth
 
 | Campo | File | Note |
 |-------|------|------|
-| Semver app | `package.json` → `"version"` | Primario |
-| Expo | `app.json` → `expo.version` | Deve = package.json |
-| Lock | `package-lock.json` root `"version"` + package `""` `"version"` | Deve = package.json |
-| Android | `android/app/build.gradle` | Legge `package.json`; `versionCode = major*10000 + minor*100 + patch` — **non editare a mano** |
-| iOS marketing | `ios/becomemonitor/Info.plist` → `CFBundleShortVersionString` | Deve = package.json |
-| iOS build | stesso plist → `CFBundleVersion` | Intero: incrementa di **+1** a ogni bump |
-
-`CHANGELOG.md` top entry `[X.Y.Z]` deve corrispondere alla nuova versione.
+| Intent di release | `.changeset/*.md` | Bump + summary per branch |
+| Semver app | `package.json` → `"version"` | Aggiornato da `npx changeset version` |
+| Expo | `app.config.js` | Legge `package.json.version` (niente duplicato in `app.json`) |
+| Lock | `package-lock.json` | `npm install --package-lock-only` dopo version |
+| Android | `android/app/build.gradle` | Deriva da `package.json` — **non editare a mano** |
+| iOS marketing | `MARKETING_VERSION` in Xcode / `$(MARKETING_VERSION)` in Info.plist | `xcrun agvtool new-marketing-version` |
+| iOS build | `CURRENT_PROJECT_VERSION` / `$(CURRENT_PROJECT_VERSION)` | `xcrun agvtool next-version -all` |
 
 ## Workflow
 
@@ -44,44 +48,44 @@ Non commitare salvo richiesta esplicita dell'utente.
 
 ```bash
 git branch --show-current
-git log --oneline main..HEAD   # o master / origin/main se diverso
-git diff main...HEAD --stat
+git log --oneline master..HEAD
 ```
-
-Leggi la versione attuale da `package.json` e l'ultima sezione in `CHANGELOG.md`. Se divergono, allinea al **max** semver tra i due, poi applica il bump.
 
 ### 2. Tipo di bump
 
-Default da Conventional Commits / natura del diff:
-
 | Tipo | Bump | Esempi |
 |------|------|--------|
-| Breaking / API o store incompatibile | **major** `X.0.0` | Cambio package Android, auth breaking |
-| Nuova capability utente (device, flusso, schermata) | **minor** `x.Y.0` | Nuovo device Polar/Muse, nuova tab |
-| Fix, polish, refactor non breaking | **patch** `x.y.Z` | Bug BLE, UI fix, docs strutturali con fix |
+| Breaking / API o store incompatibile | **major** | Cambio `applicationId`, auth breaking |
+| Nuova capability utente | **minor** | Nuovo device, nuova schermata |
+| Fix, polish, tooling release | **patch** | Bug BLE, UI fix, Changesets/Make release |
 
-Se il repo storicamente usa solo patch per integrazioni (es. 1.0.1 H10, 1.0.2…), rispetta la convenzione del branch/team quando l'utente non specifica altrimenti — **default patch** se incerto; chiedi solo se major vs minor è ambiguo.
+Default **patch** se incerto. Utente può forzare major/minor/patch.
 
-Utente può forzare: `bump major|minor|patch`.
+### 3. Aggiungi changeset
 
-### 3. Aggiorna versioni
+```bash
+make changeset
+# oppure: npx changeset add
+```
 
-Scrivi la nuova `X.Y.Z` in:
+Agent non interattivi: scrivi `.changeset/<slug>.md`:
 
-1. `package.json` → `"version"`
-2. `app.json` → `expo.version`
-3. `package-lock.json` → due campi root version (come sopra)
-4. `ios/becomemonitor/Info.plist` → `CFBundleShortVersionString` = `X.Y.Z`
-5. `ios/becomemonitor/Info.plist` → `CFBundleVersion` = precedente + 1
+```md
+---
+"become-monitor": patch
+---
 
-Non toccare `android/app/build.gradle` (deriva da package.json).
+Firma release Android per Play Console e versioning tramite Changesets.
+```
 
-### 4. Aggiorna CHANGELOG.md
+### Scrittura summary / CHANGELOG (obbligatoria)
 
-Formato Keep a Changelog (IT), come le entry esistenti:
+- **Niente** nomi branch, ticket o id tracking (`PLAT-129`, `feat/…`) nel body del changeset né in `CHANGELOG.md`
+- Prosa orientata a utente/dev: cosa cambia e perché
+- Dopo `make changelog`, **riscrivi** il blocco generato da Changesets (`## 1.x.y` / `### Patch Changes`) nel formato Keep a Changelog del repo:
 
 ```markdown
-## [X.Y.Z] — Titolo breve (branch/feature)
+## [X.Y.Z] — Titolo breve leggibile
 
 ### Added
 - …
@@ -91,46 +95,36 @@ Formato Keep a Changelog (IT), come le entry esistenti:
 
 ### Fixed
 - …
-
-### Removed
-- …
 ```
 
-Regole:
+Solo sezioni non vuote. Titolo = prodotto/feature, non id ticket. Italiano, stesso tono delle entry precedenti.
 
-- Inserisci la nuova sezione **subito sotto** l'intestazione (dopo le righe introduttive), sopra le versioni precedenti
-- Titolo: nome prodotto/feature o branch human-readable (es. `Muse 2`, `Polar H10`)
-- Solo sezioni non vuote (`Added` / `Changed` / `Fixed` / `Removed`)
-- Bullet orientati all'utente/dev: cosa e perché, non dump di file
-- Italiano, tono delle entry esistenti
-- Deduci i punti da `git log` + diff del branch (non inventare feature non presenti)
+### 4. Changelog finale / release
+
+```bash
+make changelog   # changeset version + npm lock + agvtool
+make create-file # solo AAB + APK (versione già bumpata)
+make release     # changelog + create-file
+```
+
+Dopo `make changelog`, riscrivi subito l’entry Keep a Changelog (vedi sopra).  
+Non lasciare pendenti `.changeset/*.md` al merge.  
+Non aggiungere script di sync versioni custom.
 
 ### 5. Verifica
 
-- [ ] `package.json` version = `app.json` expo.version = Info.plist short version = CHANGELOG top `[X.Y.Z]`
-- [ ] `CFBundleVersion` incrementato
-- [ ] Nessuna modifica accidentale ad Android versionCode hardcoded
-- [ ] Riassumi all'utente: vecchia → nuova versione + elenco bullet changelog
-
-## Esempio
-
-Branch `feat/muse-2`, versione `1.0.2` → bump patch → `1.0.3`:
-
-- `package.json` / `app.json` / lock / iOS short → `1.0.3`
-- `CFBundleVersion` `3` → `4`
-- CHANGELOG:
-
-```markdown
-## [1.0.3] — Muse 2
-
-### Added
-- Integrazione Muse 2 (BLE GATT, EEG/HR in Monitor)
-```
+- [ ] Esiste ≥1 file in `.changeset/` sul branch (prima di changelog/release)
+- [ ] Dopo `make changelog`: entry Keep a Changelog senza ticket/branch; `package.json` aggiornato
+- [ ] iOS `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` aggiornati da agvtool
+- [ ] Nessuna modifica accidentale ad Android `versionCode` hardcoded
+- [ ] Riassumi all'utente: vecchia → nuova versione + bullet changelog
 
 ## Anti-pattern
 
-- Bump senza entry CHANGELOG (o viceversa)
-- Versioni diverse tra package.json e app.json / iOS
+- Bump/CHANGELOG a mano ignorando `.changeset/`
+- Nomi branch/ticket nel CHANGELOG o nel summary del changeset
+- Lasciare il blocco grezzo `### Patch Changes` di Changesets
+- Script custom tipo `sync-app-version.js`
 - Editare `versionCode` / `versionName` in Gradle a mano
-- Bump su `main` senza branch di lavoro (salvo hotfix esplicito)
-- Commit automatico del bump senza richiesta utente
+- `changeset publish` (non è il flusso di questa app)
+- Commit automatico senza richiesta utente

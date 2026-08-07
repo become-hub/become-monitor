@@ -6,6 +6,12 @@ local.properties
 .cxx/
 *.hprof
 
+# Release signing secrets
+keystore.properties
+app/upload-keystore.jks
+app/*-upload.keystore
+app/*-upload.jks
+
 # NDK
 obj/
 

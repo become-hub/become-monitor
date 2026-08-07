@@ -97,7 +97,8 @@ android {
 
     namespace 'com.gabriele.muscogiuri.becomemonitor'
     defaultConfig {
-        applicationId 'com.gabriele.muscogiuri.becomemonitor'
+        // Keep in sync with app.json → expo.android.package (Play Console application id).
+        applicationId 'com.discoverbecome.augmentedmonitor'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode appVersionCode
@@ -115,15 +116,34 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            def keystorePropertiesFile = rootProject.file('keystore.properties')
+            if (keystorePropertiesFile.exists()) {
+                def keystoreProperties = new Properties()
+                keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Play Console requires a real upload key (not the debug keystore).
+            // Configure android/keystore.properties — see docs/android-play-release.md
+            if (signingConfigs.release.storeFile != null) {
+                signingConfig signingConfigs.release
+            } else {
+                throw new GradleException(
+                    "Missing android/keystore.properties for release signing. " +
+                    "Copy android/keystore.properties.example and fill in storeFile / passwords. " +
+                    "See docs/android-play-release.md"
+                )
+            }
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

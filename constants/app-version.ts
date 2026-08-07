@@ -1,6 +1,6 @@
 /**
  * App marketing version shown in UI (footer, settings).
- * Prefer Expo config so it matches the built binary / app.json.
+ * Prefer Expo config (`app.config.js` → package.json) so it matches the built binary.
  */
 
 import Constants from "expo-constants";
