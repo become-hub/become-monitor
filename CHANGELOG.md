@@ -4,6 +4,13 @@ Tutte le modifiche rilevanti a Augmented Monitor.
 
 Il formato si ispira a [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [1.2.2] — Polar live PPI/HRV
+
+### Fixed
+- Stream Polar live: PPI in range (300–2000 ms) usati per RR/HRV anche se Polar li marca `blocker`
+- `HR=0` ottico non azzera più le metriche (grace 10 s); niente RR derivato da HR (`60000/HR`) mentre lo stream PPI è vivo
+- Launch stream Polar abortito sulla disconnect, così un reconnect non resta appeso a un auth in-flight
+
 ## [1.2.0] — Device gates + Monitor UX + Polar setup
 
 ### Added

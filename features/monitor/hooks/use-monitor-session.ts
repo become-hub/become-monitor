@@ -50,6 +50,14 @@ import {
 } from "./use-session-track-flush";
 import { createMonitorAblyService } from "./use-ably-live-session";
 import {
+  HR_ZERO_GRACE_MS,
+  isFresh,
+  isSustainedHrZero,
+  isUsablePpiMs,
+  PPI_STALE_MS,
+  PPI_STREAM_ALIVE_MS,
+} from "./polar-live-signal";
+import {
   useScanStore,
   type DiscoveredDevice,
 } from "@/stores/scan-store";
@@ -179,6 +187,11 @@ export function useMonitorSession() {
   const signalLossTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPositiveSignalAtRef = useRef(0);
   const SIGNAL_LOSS_MS = 2500;
+  const hrZeroSinceRef = useRef(0);
+  const hrZeroTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const launchGenRef = useRef(0);
+  const lastValidPpiAtRef = useRef(0);
+  const lastPpiEventAtRef = useRef(0);
 
   // Derived state
   const connectedProduct: PolarProduct | null = resolvePolarProduct(connectedDeviceName);
@@ -295,23 +308,28 @@ export function useMonitorSession() {
 
   const handlePpiData = (data: PolarPpiData) => {
     console.log(`Monitor: 🔬 Elaborazione ${data.samples.length} campioni PPI`);
+    lastPpiEventAtRef.current = Date.now();
 
     data.samples.forEach((sample) => {
       const ppiMs = sample.ppi;
 
-      if (sample.blocker || ppiMs < 300 || ppiMs > 2000) {
+      if (!isUsablePpiMs(ppiMs)) {
         console.log(
-          `Monitor: ⚠️ Filtrato PPI` +
-            (sample.blocker ? " (blocker)" : ` fuori range: ${ppiMs}ms`)
+          `Monitor: ⚠️ Filtrato PPI fuori range: ${ppiMs}ms` +
+            (sample.hr > 0 ? ` hr=${sample.hr}` : "")
         );
-        noteMissingSignal();
+        if (sample.hr > 0) {
+          applyLiveHeartRate(sample.hr);
+        } else if (heartRateRef.current <= 0) {
+          noteMissingSignal();
+        }
         return;
       }
 
       notePositiveSignal();
+      lastValidPpiAtRef.current = lastPpiEventAtRef.current;
       if (sample.hr > 0) {
-        setHeartRate(sample.hr);
-        heartRateRef.current = sample.hr;
+        applyLiveHeartRate(sample.hr);
       }
 
       const resolved = resolveRrInterval({
@@ -359,14 +377,15 @@ export function useMonitorSession() {
         console.log(`Monitor: 📊 HRV=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`);
       }
 
-      if (heartRate > 0) {
+      const liveHr = sample.hr > 0 ? sample.hr : heartRateRef.current;
+      if (liveHr > 0) {
         const userStateHRV = useUserStore.getState();
         console.log("🔍 DEBUG STREAMING - Controllo condizioni:");
         console.log("🔍 authToken:", !!userStateHRV.authToken);
         console.log("🔍 ablyStatus:", ablyStatus);
         console.log("🔍 userId:", userStateHRV.userId);
         console.log("🔍 deviceCode:", userStateHRV.deviceCode);
-        console.log("🔍 heartRate:", heartRate);
+        console.log("🔍 heartRate:", liveHr);
         console.log("🔍 ablyService.current:", !!ablyService.current);
 
         if (
@@ -380,9 +399,9 @@ export function useMonitorSession() {
             userStateHRV.userId,
             "heartRate",
             buildPolarAblyHeartRatePayload({
-              deviceId: connectedDeviceId,
+              deviceId: connectedDeviceIdRef.current,
               deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
-              hr: heartRate,
+              hr: liveHr,
               hrv: hrvValue,
               lfPower: lfPowerValue,
               hfPower: hfPowerValue,
@@ -439,6 +458,8 @@ export function useMonitorSession() {
     ) {
       return;
     }
+    const launchGen = launchGenRef.current;
+    const isStaleLaunch = () => launchGenRef.current !== launchGen;
     authStreamInFlightRef.current = true;
     authSessionDeviceRef.current = deviceId;
     try {
@@ -451,6 +472,9 @@ export function useMonitorSession() {
         console.log("🩺 Verifica First Time Use...");
         const requireFtu = polarProduct?.capabilities.ftuRequired !== false;
         const polarReady = await ensurePolarReady(deviceId, polarSdk, { requireFtu });
+        if (isStaleLaunch()) {
+          return;
+        }
         if (polarReady.status === "deferred") {
           console.log("✅ First Time Use ok (restart pending)");
           pendingPostFtuReconnectRef.current = deviceId;
@@ -492,8 +516,17 @@ export function useMonitorSession() {
             deviceName: name ?? "",
           });
         } else if (polarProduct) {
-          await startPolarStreamingForProduct(polarProduct, deviceId, polarSdk);
-          localStreamingDeviceRef.current = deviceId;
+          const streaming = await startPolarStreamingForProduct(
+            polarProduct,
+            deviceId,
+            polarSdk
+          );
+          if (isStaleLaunch()) {
+            return;
+          }
+          if (streaming.ppi || streaming.hr || streaming.ecg) {
+            localStreamingDeviceRef.current = deviceId;
+          }
         }
       };
 
@@ -501,6 +534,9 @@ export function useMonitorSession() {
       // arrives via BLE notifications; streams need an explicit SDK start.
       console.log("💓 Avvio streaming device (locale, indipendente da auth)...");
       await startDeviceStreaming();
+      if (isStaleLaunch()) {
+        return;
+      }
 
       const storedAuthData = await StorageService.getAuthDataForDevice(deviceId);
 
@@ -532,6 +568,9 @@ export function useMonitorSession() {
 
           // Streaming locale già avviato post-FTU; qui solo Ably / track.
           await startDeviceStreaming();
+          if (isStaleLaunch()) {
+            return;
+          }
 
           startBiometricSending();
           streamReadyDeviceRef.current = deviceId;
@@ -629,6 +668,9 @@ export function useMonitorSession() {
               );
 
               await startDeviceStreaming();
+              if (isStaleLaunch()) {
+                return;
+              }
 
               startBiometricSending();
               streamReadyDeviceRef.current = deviceId;
@@ -649,7 +691,9 @@ export function useMonitorSession() {
     } catch (error) {
       console.error("Monitor: Errore autenticazione:", error);
     } finally {
-      authStreamInFlightRef.current = false;
+      if (launchGenRef.current === launchGen) {
+        authStreamInFlightRef.current = false;
+      }
     }
   };
 
@@ -769,6 +813,14 @@ export function useMonitorSession() {
     }
   };
 
+  const cancelHrZeroClear = () => {
+    if (hrZeroTimeoutRef.current) {
+      clearTimeout(hrZeroTimeoutRef.current);
+      hrZeroTimeoutRef.current = null;
+    }
+    hrZeroSinceRef.current = 0;
+  };
+
   /** Clear live metrics while keeping the BLE connection (off-wrist / no contact). */
   const clearLiveBiometricMetrics = () => {
     cancelSignalLossClear();
@@ -789,6 +841,9 @@ export function useMonitorSession() {
     skinTemperatureCRef.current = 0;
     setMuseHr(0);
     ppiWindow.current = [];
+    lastValidPpiAtRef.current = 0;
+    lastPpiEventAtRef.current = 0;
+    cancelHrZeroClear();
     setIsSignalLost(true);
     console.log("Monitor: 📭 Nessun segnale dal sensore — metriche resettate");
   };
@@ -820,6 +875,16 @@ export function useMonitorSession() {
         clearLiveBiometricMetrics();
       }
     }, SIGNAL_LOSS_MS);
+  };
+
+  const applyLiveHeartRate = (hr: number) => {
+    if (hr <= 0) {
+      return;
+    }
+    cancelHrZeroClear();
+    notePositiveSignal();
+    setHeartRate(hr);
+    heartRateRef.current = hr;
   };
 
   const resetDeviceState = () => {
@@ -855,6 +920,9 @@ export function useMonitorSession() {
     setOfflineRecordingStarted(false);
     sessionTrackBuffer.clear();
     ppiWindow.current = [];
+    lastValidPpiAtRef.current = 0;
+    lastPpiEventAtRef.current = 0;
+    cancelHrZeroClear();
     console.log("Monitor: 🔄 Stato del dispositivo resettato");
   };
 
@@ -1313,6 +1381,7 @@ export function useMonitorSession() {
       setFoundDeviceName("");
       setIsConnectingSelected(false);
       setDeviceMenuOpen(false);
+      launchGenRef.current += 1;
       authStreamInFlightRef.current = false;
       streamReadyDeviceRef.current = null;
       authSessionDeviceRef.current = null;
@@ -1352,18 +1421,42 @@ export function useMonitorSession() {
 
       const noContact =
         data.contactSupported === true && data.contactDetected === false;
-      if (noContact || data.hr <= 0) {
-        // Keep last values briefly (anti-flicker), then clear so UI shows no signal.
+      if (noContact) {
         noteMissingSignal();
+      } else if (data.hr > 0) {
+        applyLiveHeartRate(data.hr);
       } else {
-        notePositiveSignal();
-        setHeartRate(data.hr);
-        heartRateRef.current = data.hr;
+        // Packets still arrive with hr=0 (Polar optical dropout). Do not wipe at 2.5s.
+        cancelSignalLossClear();
+        lastPositiveSignalAtRef.current = Date.now();
+        if (hrZeroSinceRef.current <= 0) {
+          hrZeroSinceRef.current = Date.now();
+        }
+        if (!hrZeroTimeoutRef.current) {
+          hrZeroTimeoutRef.current = setTimeout(() => {
+            hrZeroTimeoutRef.current = null;
+            if (
+              heartRateRef.current > 0 &&
+              isSustainedHrZero(hrZeroSinceRef.current, Date.now())
+            ) {
+              console.log(
+                `Monitor: 📭 HR=0 sostenuto per ${HR_ZERO_GRACE_MS}ms — reset metriche`
+              );
+              clearLiveBiometricMetrics();
+            }
+          }, HR_ZERO_GRACE_MS);
+        }
       }
       const hrForStream = data.hr > 0 ? data.hr : heartRateRef.current;
 
       const product = resolvePolarProduct(connectedDeviceNameRef.current);
-      const nativeRrs = data.rrsMs?.filter((rr) => Number.isFinite(rr) && rr >= 300 && rr <= 2000);
+      const nativeRrs = data.rrsMs?.filter((rr) => isUsablePpiMs(rr));
+      const now = Date.now();
+      const ppiRrIsFresh = isFresh(
+        lastValidPpiAtRef.current,
+        now,
+        PPI_STALE_MS
+      );
 
       if (nativeRrs && nativeRrs.length > 0 && product?.capabilities.rawEcg) {
         nativeRrs.forEach((rr) => {
@@ -1420,7 +1513,7 @@ export function useMonitorSession() {
             userStateHr.userId,
             "heartRate",
             buildPolarAblyHeartRatePayload({
-              deviceId: connectedDeviceId,
+              deviceId: connectedDeviceIdRef.current,
               deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
               hr: hrForStream,
               hrv: hrvValue,
@@ -1439,14 +1532,18 @@ export function useMonitorSession() {
       }
 
       if (data.hr > 0) {
-        if (
-          product?.capabilities.rawEcg ||
-          rrSourceRef.current === "ppi" ||
-          rrSourceRef.current === "ecg_rr"
-        ) {
+        if (product?.capabilities.rawEcg || rrSourceRef.current === "ecg_rr") {
+          return;
+        }
+        if (rrSourceRef.current === "ppi" && ppiRrIsFresh) {
           return;
         }
 
+        const ppiStreamAlive = isFresh(
+          lastPpiEventAtRef.current,
+          Date.now(),
+          PPI_STREAM_ALIVE_MS
+        );
         const approximateRR = Math.round(60000 / data.hr);
         const resolved = resolveRrInterval({ hrBpm: data.hr });
         if (resolved) {
@@ -1454,7 +1551,14 @@ export function useMonitorSession() {
           setRrSource(resolved.rrSource);
           rrMsRef.current = resolved.rrMs;
           rrSourceRef.current = resolved.rrSource;
-          sessionTrackBuffer.pushHr(data.hr);
+          if (lastValidPpiAtRef.current <= 0) {
+            sessionTrackBuffer.pushHr(data.hr);
+          }
+        }
+
+        // 60000/HR is nearly constant when HR is stable — do not pollute RMSSD/LF/HF.
+        if (ppiStreamAlive) {
+          return;
         }
 
         ppiWindow.current.push(approximateRR);
@@ -1502,7 +1606,7 @@ export function useMonitorSession() {
             userStateHRFallback.userId,
             "heartRate",
             buildPolarAblyHeartRatePayload({
-              deviceId: connectedDeviceId,
+              deviceId: connectedDeviceIdRef.current,
               deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
               hr: data.hr,
               hrv: hrvValue,
@@ -1610,6 +1714,7 @@ export function useMonitorSession() {
           setConnectedFamily(null);
           setFoundDeviceName("");
           setIsConnectingSelected(false);
+          launchGenRef.current += 1;
           authStreamInFlightRef.current = false;
           streamReadyDeviceRef.current = null;
           authSessionDeviceRef.current = null;
