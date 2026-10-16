@@ -4,6 +4,16 @@ Tutte le modifiche rilevanti a Augmented Monitor.
 
 Il formato si ispira a [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [1.2.3] — Qualità segnale Polar e HRV
+
+### Added
+- Qualità segnale Polar in Monitor: contatto pelle, stima errore e qualità PPG
+- Versione app nel payload Ably
+
+### Changed
+- Calcolo HRV: i salti anomali tra PPI consecutivi vengono sostituiti prima di RMSSD e LF/HF
+- Griglia metriche Polar con note sugli intervalli PPI
+
 ## [1.2.2] — Polar live PPI/HRV
 
 ### Fixed
