@@ -160,13 +160,15 @@ export interface LocaleStrings {
         light: string;
         dark: string;
         system: string;
-        liveRate: string;
-        liveRateDescription: string;
-        liveRate1HzLabel: string;
-        liveRate1HzHint: string;
-        liveRate4HzLabel: string;
-        liveRate4HzHint: string;
-        liveRateComingSoon: string;
+        hrvMode: string;
+        hrvModeDescription: string;
+        hrvModeLive: string;
+        hrvModeLiveHint: string;
+        hrvModeExtended: string;
+        hrvModeExtendedHint: string;
+        hrvModeExtendedUnavailable: string;
+        hrvModeFootnote: string;
+        hrvModeLockedHint: string;
         notifications: string;
         notificationsDescription: string;
         enableNotifications: string;
@@ -341,14 +343,18 @@ export const translations: Record<Language, LocaleStrings> = {
             light: 'Chiaro',
             dark: 'Scuro',
             system: 'Sistema',
-            liveRate: 'Aggiornamento live',
-            liveRateDescription:
-                'Quanto spesso aggiornare HR, HRV, LF e HF in Monitor (e su Ably dopo il login).',
-            liveRate1HzLabel: '1 Hz',
-            liveRate1HzHint: '1 volta al secondo',
-            liveRate4HzLabel: '4 Hz',
-            liveRate4HzHint: '4 volte al secondo',
-            liveRateComingSoon: 'In arrivo',
+            hrvMode: 'Analisi HRV',
+            hrvModeDescription:
+                'Scegli quanto velocemente vedere le metriche di variabilità cardiaca.',
+            hrvModeLive: 'Live',
+            hrvModeLiveHint: 'Risultati subito',
+            hrvModeExtended: 'Estesa',
+            hrvModeExtendedHint: 'Più stabile, ~5 min',
+            hrvModeExtendedUnavailable: 'Compatibile solo con H10',
+            hrvModeFootnote:
+                'Oggi è disponibile solo Live. Estesa arriverà con Polar H10.',
+            hrvModeLockedHint:
+                'Sensore collegato: per cambiare modalità, scollegalo prima.',
             notifications: 'Notifiche',
             notificationsDescription: 'Gestisci le notifiche dell\'app',
             enableNotifications: 'Abilita Notifiche',
@@ -521,14 +527,18 @@ export const translations: Record<Language, LocaleStrings> = {
             light: 'Light',
             dark: 'Dark',
             system: 'System',
-            liveRate: 'Live updates',
-            liveRateDescription:
-                'How often to refresh HR, HRV, LF and HF in Monitor (and on Ably after sign-in).',
-            liveRate1HzLabel: '1 Hz',
-            liveRate1HzHint: 'Once per second',
-            liveRate4HzLabel: '4 Hz',
-            liveRate4HzHint: 'Four times per second',
-            liveRateComingSoon: 'Coming soon',
+            hrvMode: 'HRV analysis',
+            hrvModeDescription:
+                'Choose how quickly heart-rate variability metrics appear.',
+            hrvModeLive: 'Live',
+            hrvModeLiveHint: 'Results right away',
+            hrvModeExtended: 'Extended',
+            hrvModeExtendedHint: 'More stable, ~5 min',
+            hrvModeExtendedUnavailable: 'H10 only',
+            hrvModeFootnote:
+                'Only Live is available today. Extended will come with Polar H10.',
+            hrvModeLockedHint:
+                'Sensor connected: disconnect first to change mode.',
             notifications: 'Notifications',
             notificationsDescription: 'Manage app notifications',
             enableNotifications: 'Enable Notifications',

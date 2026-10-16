@@ -19,10 +19,10 @@ export const PPI_ERROR_ESTIMATE_POOR_MS = 30;
 /** Max errorEstimate (ms) allowed into the HRV / LF / HF window (sane samples only). */
 export const PPI_ERROR_ESTIMATE_SANE_MS = 10;
 
-/** Live Monitor + Ably publish rates (Hz). */
+/** Live Monitor + Ably publish rates (Hz). Fixed at 1 Hz in product; 4 kept for tests/helpers. */
 export type PolarLiveRateHz = 1 | 4;
 
-/** Tick interval used to poll the publish cadence (supports 4 Hz later). */
+/** Tick interval used to poll the 1 Hz publish cadence. */
 export const POLAR_LIVE_TICK_MS = 250;
 
 export function polarLiveIntervalMs(rateHz: PolarLiveRateHz): number {

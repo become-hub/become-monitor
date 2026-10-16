@@ -69,7 +69,17 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Augm
 
 ### Live vs flush a fine sessione (spike)
 
-- **Live**: le card Monitor (HR / RR / HRV / LF / HF, skin temp su Loop) si aggiornano a **1 Hz** appena parte lo streaming locale, anche **prima** del login Become. Ably (`heartRate`) parte solo dopo auth. Nei Settings compare anche 4 Hz (disabilitato per ora). I campioni PPI grezzi restano sul device/track; Contatto / Errore PPI / Movimento restano live.
+- **Live**: le card Monitor (HR / RR / HRV / LF / HF, skin temp su Loop) si aggiornano a **1 Hz** appena parte lo streaming locale, anche **prima** del login Become. Ably (`heartRate`) parte solo dopo auth **e** quando HRV è pronta (Live: finestra da 30 campioni; finché è in caricamento non si pubblica). I campioni PPI grezzi restano sul device/track; Contatto / Errore PPI / Movimento restano live.
+- **Analisi HRV (Settings)**: **Live** (unica modalità selezionabile oggi) e **Estesa** (disabilitata: compatibile solo con Polar H10, non selezionabile). Estesa resta nel codice per epoch da 5 min / H10; non è certificazione medicale.
+
+| | Live | Estesa |
+|---|---|---|
+| Finestra | 30 intervalli RR/PPI (rolling) | epoch **5 minuti** di intervalli accettati |
+| Pubblicazione HRV/LF/HF | a finestra piena, continua | solo a epoch valida; poi riparte una nuova epoch |
+| 360 / Loop (PPI) | `errorEstimate` ≤ 10 ms | come Live **e** senza `blocker` (movimento) |
+| H10 (RR ECG) | tutti gli RR in 300–2000 ms | stessa accettazione, epoch 5 min |
+| Fallback `hr_derived` (60000/HR) | solo se lo stream PPI è morto | **mai** |
+| Timeout | — | se in **8 min** wall-clock non si completa l’epoch pulita → epoch non valida e ripartenza |
 - **Tracciato intero**: a fine sessione Hub pubblica su `private:{userId}` l’evento Ably **`endSession`** (payload opzionale `{ "sessionId": "..." }`). L’app:
   1. ferma l’offline recording PPI, scarica il record dal Polar (o usa il buffer live)
   2. costruisce un payload grezzo `ppiTrack` (sample con `ppiMs`/`hr`, `rrMs`, `rrSource`)
@@ -114,9 +124,10 @@ Note:
 - `rrSource` è `"ppi"` (preferito), `"hr_derived"` in fallback, o `"ecg_rr"` su dispositivi ECG.
 - `ppiMs` è valorizzato solo quando `rrSource === "ppi"`, altrimenti `null`.
 - `skinTemperatureC` è valorizzato **solo su Loop Gen 2** (stream SDK); su Polar 360 è sempre `null`.
-- `hrv` / `lfPower` / `hfPower` restano `null` finché non ci sono 30 campioni RR/PPI.
+- Finché HRV non è pronta non parte alcun `heartRate` su Ably. Quando pubbica, `hrv` / `lfPower` / `hfPower` sono valorizzati (Live: dopo 30 campioni; Estesa: dopo epoch da 5 min).
 - Salti successivi ≥ 200 ms tra intervalli RR/PPI non entrano in LF/HF (stesso limite dell’RMSSD): il posto in finestra viene interpolato, altrimenti lo spettro salirebbe a migliaia di ms² con un HRV ancora normale.
-- HRV / `lfPower` / `hfPower` si aggiornano solo su campioni PPI con `errorEstimate` ≤ 10 ms (rilevazioni sane). Sopra 10 ms il campione non entra nella finestra e restano all’ultimo valore sano. La card **Errore PPI** diventa rossa solo con `errorEstimate` > 30 ms.
+- Su **360 / Loop**, HRV / `lfPower` / `hfPower` usano solo PPI con `errorEstimate` ≤ 10 ms (in Estesa anche senza `blocker`). Sopra 10 ms il campione non entra e restano all’ultimo valore sano (Live) o l’epoch non avanza (Estesa). La card **Errore PPI** diventa rossa solo con `errorEstimate` > 30 ms.
+- Su **H10**, la sorgente è RR ECG (`rrSource: "ecg_rr"`); non c’è gate `errorEstimate` / `blocker`.
 - `contactStatus` / `contactStatusSupported` preferiscono il skin contact dello stream **PPI**; se il PPI non lo supporta, usano la notifica BLE Heart Rate.
 - `errorEstimate` (ms) e `blocker` arrivano dal campione PPI (qualità ottica utile su 360/Loop).
 - `ppgQuality`, `correctedHr`, `rrAvailable`, `rrsMs` arrivano dalla notifica BLE Heart Rate. Su 360/Loop con PPI attivo sono spesso `null` / `false` / vuoti: il servizio HR standard non porta qualità PPG né HR corretto, e gli RR nativi restano sul canale PPI. L’app **non** avvia `startHrStreaming` in parallelo al PPI.

@@ -7,9 +7,9 @@ import { useLocale } from "@/hooks/use-locale";
 import { polarSdk } from "@/features/devices/polar/polar-ble-sdk";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
+  Activity,
   Bluetooth,
   CheckCircle,
-  Gauge,
   Globe,
   Info,
   Lock,
@@ -38,8 +38,6 @@ export default function SettingsScreen() {
     setDebugMode,
     developerMode,
     setDeveloperMode,
-    polarLiveRateHz,
-    setPolarLiveRateHz,
   } = useSettingsStore();
   const [autoConnect, setAutoConnect] = useState(true);
   const [dataSync, setDataSync] = useState(true);
@@ -382,10 +380,10 @@ export default function SettingsScreen() {
           </ThemedView>
         </ThemedView>
 
-        {/* Live rate (Monitor + Ably) */}
+        {/* HRV analysis mode */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
-            {strings.settings.liveRate}
+            {strings.settings.hrvMode}
           </ThemedText>
 
           <ThemedView
@@ -406,10 +404,10 @@ export default function SettingsScreen() {
                   },
                 ]}
               >
-                <Gauge size={18} color={Colors[theme].tint} />
+                <Activity size={18} color={Colors[theme].tint} />
               </View>
               <ThemedText style={[styles.settingDescription, { flex: 1 }]}>
-                {strings.settings.liveRateDescription}
+                {strings.settings.hrvModeDescription}
               </ThemedText>
             </View>
 
@@ -424,70 +422,58 @@ export default function SettingsScreen() {
                 },
               ]}
             >
-              <TouchableOpacity
+              <View
                 style={[
                   styles.liveRateSegment,
-                  polarLiveRateHz === 1 && [
-                    styles.liveRateSegmentSelected,
-                    {
-                      backgroundColor:
-                        theme === "dark" ? "#1f2933" : "#ffffff",
-                      borderColor: Colors[theme].tint,
-                    },
-                  ],
+                  styles.liveRateSegmentSelected,
+                  {
+                    backgroundColor:
+                      theme === "dark" ? "#1f2933" : "#ffffff",
+                    borderColor: Colors[theme].tint,
+                  },
                 ]}
-                onPress={() => setPolarLiveRateHz(1)}
                 accessibilityRole="button"
-                accessibilityState={{ selected: polarLiveRateHz === 1 }}
-                accessibilityLabel={strings.settings.liveRate1HzLabel}
+                accessibilityState={{ selected: true }}
+                accessibilityLabel={strings.settings.hrvModeLive}
               >
                 <ThemedText
                   style={[
-                    styles.liveRateValue,
-                    polarLiveRateHz === 1 && {
-                      color: Colors[theme].tint,
-                    },
+                    styles.hrvModeTitle,
+                    { color: Colors[theme].tint },
                   ]}
                 >
-                  1
-                </ThemedText>
-                <ThemedText
-                  style={[
-                    styles.liveRateUnit,
-                    polarLiveRateHz === 1 && {
-                      color: Colors[theme].tint,
-                    },
-                  ]}
-                >
-                  Hz
+                  {strings.settings.hrvModeLive}
                 </ThemedText>
                 <ThemedText style={styles.liveRateHint}>
-                  {strings.settings.liveRate1HzHint}
+                  {strings.settings.hrvModeLiveHint}
                 </ThemedText>
-              </TouchableOpacity>
+              </View>
 
               <View
-                style={[styles.liveRateSegment, styles.liveRateSegmentLocked]}
+                style={[styles.liveRateSegment, styles.hrvModeSegmentDisabled]}
                 accessibilityState={{ disabled: true }}
-                accessibilityLabel={`${strings.settings.liveRate4HzLabel}, ${strings.settings.liveRateComingSoon}`}
+                accessibilityLabel={`${strings.settings.hrvModeExtended}, ${strings.settings.hrvModeExtendedUnavailable}`}
               >
-                <View style={styles.liveRateComingSoonBadge}>
+                <View style={styles.hrvModeUnavailableBadge}>
                   <Lock size={11} color={Colors[theme].icon} />
-                  <ThemedText style={styles.liveRateComingSoonText}>
-                    {strings.settings.liveRateComingSoon}
+                  <ThemedText style={styles.hrvModeUnavailableText}>
+                    {strings.settings.hrvModeExtendedUnavailable}
                   </ThemedText>
                 </View>
-                <ThemedText style={[styles.liveRateValue, styles.liveRateMuted]}>
-                  4
+                <ThemedText
+                  style={[styles.hrvModeTitle, styles.hrvModeTitleMuted]}
+                >
+                  {strings.settings.hrvModeExtended}
                 </ThemedText>
-                <ThemedText style={[styles.liveRateUnit, styles.liveRateMuted]}>
-                  Hz
-                </ThemedText>
-                <ThemedText style={[styles.liveRateHint, styles.liveRateMuted]}>
-                  {strings.settings.liveRate4HzHint}
+                <ThemedText style={[styles.liveRateHint, styles.hrvModeTitleMuted]}>
+                  {strings.settings.hrvModeExtendedHint}
                 </ThemedText>
               </View>
             </View>
+
+            <ThemedText style={styles.hrvModeFootnote}>
+              {strings.settings.hrvModeFootnote}
+            </ThemedText>
           </ThemedView>
         </ThemedView>
 
@@ -865,31 +851,29 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
-  liveRateSegmentLocked: {
-    opacity: 0.55,
-  },
-  liveRateValue: {
-    fontSize: 28,
-    fontWeight: "700",
-    lineHeight: 32,
-    letterSpacing: -0.5,
-  },
-  liveRateUnit: {
-    fontSize: 13,
-    fontWeight: "600",
-    marginTop: 2,
-    opacity: 0.85,
-  },
   liveRateHint: {
     fontSize: 12,
     opacity: 0.65,
     marginTop: 8,
     textAlign: "center",
   },
-  liveRateMuted: {
-    opacity: 0.7,
+  hrvModeTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    textAlign: "center",
   },
-  liveRateComingSoonBadge: {
+  hrvModeFootnote: {
+    fontSize: 12,
+    opacity: 0.65,
+    lineHeight: 17,
+  },
+  hrvModeSegmentDisabled: {
+    opacity: 0.55,
+  },
+  hrvModeTitleMuted: {
+    opacity: 0.75,
+  },
+  hrvModeUnavailableBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
@@ -899,10 +883,11 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(127,127,127,0.16)",
     marginBottom: 6,
   },
-  liveRateComingSoonText: {
+  hrvModeUnavailableText: {
     fontSize: 11,
     fontWeight: "600",
-    opacity: 0.8,
+    opacity: 0.85,
+    textAlign: "center",
   },
   currentThemeText: {
     fontSize: 14,

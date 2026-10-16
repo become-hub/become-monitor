@@ -138,6 +138,47 @@ export const monitorStyles = StyleSheet.create({
     fontWeight: "500",
     textAlign: "right",
   },
+  hrvLoadingBanner: {
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(0,0,0,0.12)",
+    gap: 8,
+  },
+  hrvLoadingHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  hrvLoadingTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  hrvLoadingPercent: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  hrvLoadingBody: {
+    fontSize: 12,
+    opacity: 0.7,
+    lineHeight: 17,
+  },
+  hrvLoadingMeta: {
+    fontSize: 12,
+    fontWeight: "500",
+    opacity: 0.85,
+  },
+  hrvProgressTrack: {
+    height: 6,
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  hrvProgressFill: {
+    height: "100%",
+    borderRadius: 3,
+  },
   authCodeContainer: {
     marginTop: 12,
     padding: 14,

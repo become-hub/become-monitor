@@ -73,8 +73,22 @@ import {
   polarLiveIntervalMs,
   PPI_STALE_MS,
   PPI_STREAM_ALIVE_MS,
-  shouldUpdateLfHfFromPpiSample,
 } from "./polar-live-signal";
+import {
+  acceptHrvIntervalSample,
+  beginNextClinicalEpoch,
+  CLINICAL_ACQUISITION_TIMEOUT_MS,
+  createEmptyHrvEpochAccumulator,
+  formatDurationMmSs,
+  formatHrvProgressLabel,
+  getHrvAnalysisPolicy,
+  hrvWallElapsedMs,
+  isHrvAcquisitionTimedOut,
+  markHrvAcquisitionStarted,
+  pushHrvInterval,
+  type HrvEpochAccumulator,
+  type HrvIntervalSource,
+} from "./hrv-analysis-mode";
 import {
   useScanStore,
   type DiscoveredDevice,
@@ -82,7 +96,6 @@ import {
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUserStore } from "@/stores/user-store";
 
-const WINDOW_SIZE = 30;
 const SCAN_TIMEOUT = 30000;
 
 export type NotificationType = {
@@ -141,6 +154,8 @@ export function useMonitorSession() {
     setAblyPulseTick((tick) => tick + 1);
   };
 
+  const hrvAnalysisMode = useSettingsStore((s) => s.hrvAnalysisMode);
+
   // Metrics - Polar
   const [heartRate, setHeartRate] = useState(0);
   const [hrv, setHrv] = useState(0);
@@ -155,6 +170,13 @@ export function useMonitorSession() {
   /** Live PPI/HR quality for compact Monitor cards + wear warning. */
   const [polarSignalQuality, setPolarSignalQuality] =
     useState<PolarSignalQualityUi>({ ...EMPTY_POLAR_SIGNAL_QUALITY });
+  /** HRV window / clinical epoch progress for Monitor cards. */
+  const [hrvEpochProgress, setHrvEpochProgress] = useState({
+    intervalCount: 0,
+    acceptedDurationMs: 0,
+    wallElapsedMs: 0,
+  });
+  const [hrvEpochInvalid, setHrvEpochInvalid] = useState(false);
 
   // Metrics - Muse
   const [connectedFamily, setConnectedFamily] = useState<"polar" | "muse" | null>(null);
@@ -201,8 +223,8 @@ export function useMonitorSession() {
   // Notification state
   const [notification, setNotification] = useState<NotificationType>(null);
 
-  // PPI window & intervals
-  const ppiWindow = useRef<number[]>([]);
+  // HRV interval accumulator (client rolling window / clinical 5 min epoch)
+  const hrvEpochRef = useRef<HrvEpochAccumulator>(createEmptyHrvEpochAccumulator());
   const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const biometricInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const authStreamInFlightRef = useRef(false);
@@ -348,6 +370,156 @@ export function useMonitorSession() {
     );
   };
 
+  const syncHrvEpochProgressUi = (nowMs: number = Date.now()) => {
+    setHrvEpochProgress({
+      intervalCount: hrvEpochRef.current.intervals.length,
+      acceptedDurationMs: hrvEpochRef.current.acceptedDurationMs,
+      wallElapsedMs: hrvWallElapsedMs(hrvEpochRef.current, nowMs),
+    });
+  };
+
+  const clearHrvComputedMetrics = () => {
+    setHrv(0);
+    hrvRef.current = 0;
+    setLfPower(0);
+    lfPowerRef.current = 0;
+    setHfPower(0);
+    hfPowerRef.current = 0;
+  };
+
+  const resetHrvEpochAccumulator = (clearMetrics: boolean) => {
+    hrvEpochRef.current = createEmptyHrvEpochAccumulator();
+    setHrvEpochInvalid(false);
+    if (clearMetrics) {
+      clearHrvComputedMetrics();
+    }
+    syncHrvEpochProgressUi();
+  };
+
+  const handleClinicalAcquisitionTimeout = () => {
+    console.log(
+      "Monitor: ⏱️ Epoch estesa non valida (timeout acquisizione) — riparto"
+    );
+    hrvEpochRef.current = createEmptyHrvEpochAccumulator();
+    setHrvEpochInvalid(true);
+    clearHrvComputedMetrics();
+    syncHrvEpochProgressUi();
+    setNotification({
+      type: "error",
+      message:
+        "Acquisizione estesa non riuscita: resta fermo e riprova (servono ~5 minuti di segnale stabile).",
+    });
+    setTimeout(() => setNotification(null), 6000);
+  };
+
+  /**
+   * Accept + accumulate one RR/PPI interval for HRV/LF/HF per current analysis mode.
+   */
+  const ingestHrvInterval = (
+    source: HrvIntervalSource,
+    intervalMs: number,
+    sample: {
+      errorEstimate?: number | null;
+      blocker?: boolean | null;
+    } = {},
+    logTag: string = "HRV"
+  ) => {
+    const mode = useSettingsStore.getState().hrvAnalysisMode;
+    const policy = getHrvAnalysisPolicy(mode, source);
+    const nowMs = Date.now();
+
+    // Estesa: avvia il timer di acquisizione al primo campione (anche se scartato).
+    if (mode === "clinical") {
+      hrvEpochRef.current = markHrvAcquisitionStarted(
+        hrvEpochRef.current,
+        nowMs
+      );
+      if (
+        isHrvAcquisitionTimedOut(
+          hrvEpochRef.current,
+          CLINICAL_ACQUISITION_TIMEOUT_MS,
+          nowMs
+        )
+      ) {
+        handleClinicalAcquisitionTimeout();
+        return;
+      }
+    }
+
+    if (
+      !acceptHrvIntervalSample(mode, source, {
+        intervalMs,
+        errorEstimate: sample.errorEstimate,
+        blocker: sample.blocker,
+      })
+    ) {
+      if (source === "ppi") {
+        console.log(
+          `Monitor: ⏸️ PPI non accettato per ${mode} ` +
+            `(errorEstimate=${sample.errorEstimate}, blocker=${sample.blocker}) — ` +
+            `utile ${formatDurationMmSs(hrvEpochRef.current.acceptedDurationMs)} / ` +
+            `trascorsi ${formatDurationMmSs(hrvWallElapsedMs(hrvEpochRef.current, nowMs))}`
+        );
+      }
+      // Aggiorna comunque il timer di acquisizione in UI.
+      syncHrvEpochProgressUi(nowMs);
+      return;
+    }
+
+    const result = pushHrvInterval(
+      hrvEpochRef.current,
+      policy,
+      intervalMs,
+      nowMs
+    );
+    hrvEpochRef.current = result.accumulator;
+    syncHrvEpochProgressUi(nowMs);
+
+    if (result.epochTimedOut) {
+      handleClinicalAcquisitionTimeout();
+      return;
+    }
+
+    const progress = formatHrvProgressLabel(
+      mode,
+      result.accumulator.intervals.length,
+      result.accumulator.acceptedDurationMs
+    );
+    console.log(`Monitor: 📈 Finestra ${logTag}: ${progress}`);
+
+    if (!result.shouldCompute) {
+      return;
+    }
+
+    const series = result.accumulator.intervals;
+    const rmssd = calculateRMSSD(series);
+    const roundedRmsdd = Math.round(rmssd);
+    hrvRef.current = roundedRmsdd;
+
+    const { lf, hf } = computeLfHf(series);
+    const roundedLf = Math.round(lf);
+    const roundedHf = Math.round(hf);
+    lfPowerRef.current = roundedLf;
+    hfPowerRef.current = roundedHf;
+    setHrvEpochInvalid(false);
+
+    console.log(
+      `Monitor: 📊 HRV (${logTag})=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`
+    );
+
+    if (mode === "clinical") {
+      hrvEpochRef.current = beginNextClinicalEpoch();
+      syncHrvEpochProgressUi();
+    }
+  };
+
+  // Reset HRV epoch when analysis mode changes (keep HR / RR live).
+  useEffect(() => {
+    resetHrvEpochAccumulator(true);
+    console.log(`Monitor: 🔄 Modalità HRV → ${hrvAnalysisMode}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on mode change
+  }, [hrvAnalysisMode]);
+
   const handlePpiData = (data: PolarPpiData) => {
     console.log(`Monitor: 🔬 Elaborazione ${data.samples.length} campioni PPI`);
     lastPpiEventAtRef.current = Date.now();
@@ -391,38 +563,15 @@ export function useMonitorSession() {
         blockerBit: sample.blocker,
       });
 
-      // Solo PPI con errorEstimate ≤ 10 ms aggiornano HRV/LF/HF; UI/Ably a 1 Hz.
-      if (!shouldUpdateLfHfFromPpiSample(sample)) {
-        console.log(
-          `Monitor: ⏸️ Errore PPI alto (errorEstimate=${sample.errorEstimate}) — ` +
-            `HRV/LF/HF tenuti: ${hrvRef.current}/${lfPowerRef.current}/${hfPowerRef.current}`
-        );
-      } else {
-        ppiWindow.current.push(ppiMs);
-        if (ppiWindow.current.length > WINDOW_SIZE) {
-          ppiWindow.current.shift();
-        }
-
-        console.log(
-          `Monitor: 📈 Finestra PPI: ${ppiWindow.current.length}/${WINDOW_SIZE} campioni`
-        );
-
-        if (ppiWindow.current.length === WINDOW_SIZE) {
-          const rmssd = calculateRMSSD(ppiWindow.current);
-          const roundedRmsdd = Math.round(rmssd);
-          hrvRef.current = roundedRmsdd;
-
-          const { lf, hf } = computeLfHf(ppiWindow.current);
-          const roundedLf = Math.round(lf);
-          const roundedHf = Math.round(hf);
-          lfPowerRef.current = roundedLf;
-          hfPowerRef.current = roundedHf;
-
-          console.log(
-            `Monitor: 📊 HRV=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`
-          );
-        }
-      }
+      ingestHrvInterval(
+        "ppi",
+        ppiMs,
+        {
+          errorEstimate: sample.errorEstimate,
+          blocker: sample.blocker,
+        },
+        "PPI"
+      );
     });
   };
 
@@ -543,8 +692,16 @@ export function useMonitorSession() {
       if (isStaleLaunch()) {
         return;
       }
-      // UI flush at polarLiveRateHz; Ably publish inside flush stays auth-gated.
+      // UI flush at 1 Hz; Ably publish inside flush stays auth-gated.
       startBiometricSending();
+      // Estesa: avvia subito il timer di acquisizione (non aspetta il primo PPI buono).
+      if (useSettingsStore.getState().hrvAnalysisMode === "clinical") {
+        hrvEpochRef.current = markHrvAcquisitionStarted(
+          hrvEpochRef.current,
+          Date.now()
+        );
+        syncHrvEpochProgressUi();
+      }
 
       const storedAuthData = await StorageService.getAuthDataForDevice(deviceId);
 
@@ -710,10 +867,10 @@ export function useMonitorSession() {
     hrCountBucketRef.current = 0;
   };
 
-  /** Flush Monitor UI + one Ably heartRate at polarLiveRateHz (default 1 Hz). */
+  /** Flush Monitor UI + one Ably heartRate at 1 Hz. */
   const flushPolarLiveMetrics = () => {
     const now = Date.now();
-    const rateHz = useSettingsStore.getState().polarLiveRateHz;
+    const rateHz = 1 as const;
     const intervalMs = polarLiveIntervalMs(rateHz);
     if (
       lastPolarLiveFlushAtRef.current > 0 &&
@@ -732,6 +889,24 @@ export function useMonitorSession() {
     if (avgHr != null) {
       setHeartRate(avgHr);
       heartRateRef.current = avgHr;
+    }
+
+    // Estesa: tick UI del timer di acquisizione a 1 Hz (anche senza PPI accettati).
+    if (
+      useSettingsStore.getState().hrvAnalysisMode === "clinical" &&
+      hrvEpochRef.current.wallClockStartedAt != null
+    ) {
+      if (
+        isHrvAcquisitionTimedOut(
+          hrvEpochRef.current,
+          CLINICAL_ACQUISITION_TIMEOUT_MS,
+          now
+        )
+      ) {
+        handleClinicalAcquisitionTimeout();
+      } else {
+        syncHrvEpochProgressUi(now);
+      }
     }
 
     const hr = heartRateRef.current;
@@ -773,14 +948,19 @@ export function useMonitorSession() {
       console.log("🔍 DEBUG BIOMETRIC FLUSH - rateHz:", rateHz, "hr:", hr);
     }
 
+    const isMuseFamily = connectedFamilyRef.current === "muse";
+    // Polar: wait until HRV window/epoch is ready (Live: 30 beats). Muse has no HRV gate.
+    const hrvReadyForAbly = isMuseFamily || currentHrv > 0;
+
     if (
       ablyService.current &&
       userStateBiometric.authToken &&
       userStateBiometric.userId &&
       userStateBiometric.deviceCode &&
-      hr > 0
+      hr > 0 &&
+      hrvReadyForAbly
     ) {
-      const isMuse = connectedFamilyRef.current === "muse";
+      const isMuse = isMuseFamily;
       ablyService.current.sendMessage(
         userStateBiometric.userId,
         "heartRate",
@@ -884,7 +1064,7 @@ export function useMonitorSession() {
     polarHrExtrasRef.current = { ...EMPTY_POLAR_HR_EXTRAS };
     setPolarSignalQuality({ ...EMPTY_POLAR_SIGNAL_QUALITY });
     setMuseHr(0);
-    ppiWindow.current = [];
+    resetHrvEpochAccumulator(false);
     lastValidPpiAtRef.current = 0;
     lastPpiEventAtRef.current = 0;
     hrSumBucketRef.current = 0;
@@ -977,7 +1157,7 @@ export function useMonitorSession() {
     rrSourceRef.current = null;
     setOfflineRecordingStarted(false);
     sessionTrackBuffer.clear();
-    ppiWindow.current = [];
+    resetHrvEpochAccumulator(false);
     lastValidPpiAtRef.current = 0;
     lastPpiEventAtRef.current = 0;
     cancelHrZeroClear();
@@ -1533,25 +1713,8 @@ export function useMonitorSession() {
             rrMs: rr,
             hr: hrForStream > 0 ? hrForStream : undefined,
           });
-          ppiWindow.current.push(rr);
-          if (ppiWindow.current.length > WINDOW_SIZE) {
-            ppiWindow.current.shift();
-          }
+          ingestHrvInterval("ecg_rr", rr, {}, "RR ECG");
         });
-
-        if (ppiWindow.current.length === WINDOW_SIZE) {
-          const rmssd = calculateRMSSD(ppiWindow.current);
-          const roundedRmsdd = Math.round(rmssd);
-          hrvRef.current = roundedRmsdd;
-
-          const { lf, hf } = computeLfHf(ppiWindow.current);
-          const roundedLf = Math.round(lf);
-          const roundedHf = Math.round(hf);
-          lfPowerRef.current = roundedLf;
-          hfPowerRef.current = roundedHf;
-
-          console.log(`Monitor: 📊 HRV (RR ECG)=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`);
-        }
         return;
       }
 
@@ -1578,29 +1741,13 @@ export function useMonitorSession() {
           }
         }
 
-        // 60000/HR is nearly constant when HR is stable — do not pollute RMSSD/LF/HF.
-        if (ppiStreamAlive) {
+        // Clinical never uses HR-derived RR. Client only if PPI stream is dead.
+        const mode = useSettingsStore.getState().hrvAnalysisMode;
+        if (mode === "clinical" || ppiStreamAlive) {
           return;
         }
 
-        ppiWindow.current.push(approximateRR);
-        if (ppiWindow.current.length > WINDOW_SIZE) {
-          ppiWindow.current.shift();
-        }
-
-        if (ppiWindow.current.length === WINDOW_SIZE) {
-          const rmssd = calculateRMSSD(ppiWindow.current);
-          const roundedRmsdd = Math.round(rmssd);
-          hrvRef.current = roundedRmsdd;
-
-          const { lf, hf } = computeLfHf(ppiWindow.current);
-          const roundedLf = Math.round(lf);
-          const roundedHf = Math.round(hf);
-          lfPowerRef.current = roundedLf;
-          hfPowerRef.current = roundedHf;
-
-          console.log(`Monitor: 📊 HRV (da HR)=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`);
-        }
+        ingestHrvInterval("hr_derived", approximateRR, {}, "da HR");
       }
     });
 
@@ -1819,7 +1966,17 @@ export function useMonitorSession() {
     skinTemperatureC,
     isSignalLost,
     polarSignalQuality,
-    ppiWindowLength: ppiWindow.current.length,
+    hrvAnalysisMode,
+    hrvEpochInvalid,
+    hrvProgressLabel: formatHrvProgressLabel(
+      hrvAnalysisMode,
+      hrvEpochProgress.intervalCount,
+      hrvEpochProgress.acceptedDurationMs
+    ),
+    hrvWallElapsedLabel: formatDurationMmSs(hrvEpochProgress.wallElapsedMs),
+    ppiWindowLength: hrvEpochProgress.intervalCount,
+    hrvAcceptedDurationMs: hrvEpochProgress.acceptedDurationMs,
+    hrvWallElapsedMs: hrvEpochProgress.wallElapsedMs,
 
     // Metrics - Muse
     eegTp9,
