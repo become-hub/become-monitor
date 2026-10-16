@@ -9,8 +9,10 @@ import { useSettingsStore } from "@/stores/settings-store";
 import {
   Bluetooth,
   CheckCircle,
+  Gauge,
   Globe,
   Info,
+  Lock,
   Monitor,
   Moon,
   Sun,
@@ -31,8 +33,14 @@ import { APP_VERSION } from "@/constants/app-version";
 export default function SettingsScreen() {
   const { theme, themePreference, updateThemePreference } = useTheme();
   const { strings } = useLocale();
-  const { debugMode, setDebugMode, developerMode, setDeveloperMode } =
-    useSettingsStore();
+  const {
+    debugMode,
+    setDebugMode,
+    developerMode,
+    setDeveloperMode,
+    polarLiveRateHz,
+    setPolarLiveRateHz,
+  } = useSettingsStore();
   const [autoConnect, setAutoConnect] = useState(true);
   const [dataSync, setDataSync] = useState(true);
   const [localDebugMode, setLocalDebugMode] = useState(debugMode);
@@ -374,6 +382,115 @@ export default function SettingsScreen() {
           </ThemedView>
         </ThemedView>
 
+        {/* Live rate (Monitor + Ably) */}
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle" style={styles.sectionTitle}>
+            {strings.settings.liveRate}
+          </ThemedText>
+
+          <ThemedView
+            style={[
+              styles.liveRateCard,
+              { borderColor: Colors[theme].border },
+            ]}
+          >
+            <View style={styles.liveRateHeader}>
+              <View
+                style={[
+                  styles.liveRateIconWrap,
+                  {
+                    backgroundColor:
+                      theme === "dark"
+                        ? "rgba(255,255,255,0.08)"
+                        : "rgba(10,126,164,0.1)",
+                  },
+                ]}
+              >
+                <Gauge size={18} color={Colors[theme].tint} />
+              </View>
+              <ThemedText style={[styles.settingDescription, { flex: 1 }]}>
+                {strings.settings.liveRateDescription}
+              </ThemedText>
+            </View>
+
+            <View
+              style={[
+                styles.liveRateSegmentTrack,
+                {
+                  backgroundColor:
+                    theme === "dark"
+                      ? "rgba(255,255,255,0.06)"
+                      : "rgba(0,0,0,0.04)",
+                },
+              ]}
+            >
+              <TouchableOpacity
+                style={[
+                  styles.liveRateSegment,
+                  polarLiveRateHz === 1 && [
+                    styles.liveRateSegmentSelected,
+                    {
+                      backgroundColor:
+                        theme === "dark" ? "#1f2933" : "#ffffff",
+                      borderColor: Colors[theme].tint,
+                    },
+                  ],
+                ]}
+                onPress={() => setPolarLiveRateHz(1)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: polarLiveRateHz === 1 }}
+                accessibilityLabel={strings.settings.liveRate1HzLabel}
+              >
+                <ThemedText
+                  style={[
+                    styles.liveRateValue,
+                    polarLiveRateHz === 1 && {
+                      color: Colors[theme].tint,
+                    },
+                  ]}
+                >
+                  1
+                </ThemedText>
+                <ThemedText
+                  style={[
+                    styles.liveRateUnit,
+                    polarLiveRateHz === 1 && {
+                      color: Colors[theme].tint,
+                    },
+                  ]}
+                >
+                  Hz
+                </ThemedText>
+                <ThemedText style={styles.liveRateHint}>
+                  {strings.settings.liveRate1HzHint}
+                </ThemedText>
+              </TouchableOpacity>
+
+              <View
+                style={[styles.liveRateSegment, styles.liveRateSegmentLocked]}
+                accessibilityState={{ disabled: true }}
+                accessibilityLabel={`${strings.settings.liveRate4HzLabel}, ${strings.settings.liveRateComingSoon}`}
+              >
+                <View style={styles.liveRateComingSoonBadge}>
+                  <Lock size={11} color={Colors[theme].icon} />
+                  <ThemedText style={styles.liveRateComingSoonText}>
+                    {strings.settings.liveRateComingSoon}
+                  </ThemedText>
+                </View>
+                <ThemedText style={[styles.liveRateValue, styles.liveRateMuted]}>
+                  4
+                </ThemedText>
+                <ThemedText style={[styles.liveRateUnit, styles.liveRateMuted]}>
+                  Hz
+                </ThemedText>
+                <ThemedText style={[styles.liveRateHint, styles.liveRateMuted]}>
+                  {strings.settings.liveRate4HzHint}
+                </ThemedText>
+              </View>
+            </View>
+          </ThemedView>
+        </ThemedView>
+
         {/* Theme Settings */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
@@ -705,6 +822,87 @@ const styles = StyleSheet.create({
   },
   themeOptionTextSelected: {
     fontWeight: "600",
+  },
+  liveRateCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    gap: 16,
+  },
+  liveRateHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  liveRateIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveRateSegmentTrack: {
+    flexDirection: "row",
+    borderRadius: 14,
+    padding: 4,
+    gap: 4,
+  },
+  liveRateSegment: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "transparent",
+    minHeight: 96,
+  },
+  liveRateSegmentSelected: {
+    shadowColor: "#0a7ea4",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  liveRateSegmentLocked: {
+    opacity: 0.55,
+  },
+  liveRateValue: {
+    fontSize: 28,
+    fontWeight: "700",
+    lineHeight: 32,
+    letterSpacing: -0.5,
+  },
+  liveRateUnit: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 2,
+    opacity: 0.85,
+  },
+  liveRateHint: {
+    fontSize: 12,
+    opacity: 0.65,
+    marginTop: 8,
+    textAlign: "center",
+  },
+  liveRateMuted: {
+    opacity: 0.7,
+  },
+  liveRateComingSoonBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: "rgba(127,127,127,0.16)",
+    marginBottom: 6,
+  },
+  liveRateComingSoonText: {
+    fontSize: 11,
+    fontWeight: "600",
+    opacity: 0.8,
   },
   currentThemeText: {
     fontSize: 14,

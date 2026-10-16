@@ -64,12 +64,16 @@ import {
 } from "./use-session-track-flush";
 import { createMonitorAblyService } from "./use-ably-live-session";
 import {
+  averageHrFromBucket,
   HR_ZERO_GRACE_MS,
   isFresh,
   isSustainedHrZero,
   isUsablePpiMs,
+  POLAR_LIVE_TICK_MS,
+  polarLiveIntervalMs,
   PPI_STALE_MS,
   PPI_STREAM_ALIVE_MS,
+  shouldUpdateLfHfFromPpiSample,
 } from "./polar-live-signal";
 import {
   useScanStore,
@@ -216,6 +220,10 @@ export function useMonitorSession() {
   const hrZeroTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const launchGenRef = useRef(0);
   const lastValidPpiAtRef = useRef(0);
+  /** HR samples since last Monitor/Ably flush (mean published at live rate). */
+  const hrSumBucketRef = useRef(0);
+  const hrCountBucketRef = useRef(0);
+  const lastPolarLiveFlushAtRef = useRef(0);
   const lastPpiEventAtRef = useRef(0);
 
   // Derived state
@@ -373,8 +381,6 @@ export function useMonitorSession() {
         hrBpm: sample.hr > 0 ? sample.hr : heartRateRef.current,
       });
       if (resolved) {
-        setRrMs(resolved.rrMs);
-        setRrSource(resolved.rrSource);
         rrMsRef.current = resolved.rrMs;
         rrSourceRef.current = resolved.rrSource;
       }
@@ -385,76 +391,36 @@ export function useMonitorSession() {
         blockerBit: sample.blocker,
       });
 
-      ppiWindow.current.push(ppiMs);
-      if (ppiWindow.current.length > WINDOW_SIZE) {
-        ppiWindow.current.shift();
-      }
+      // Solo PPI con errorEstimate ≤ 10 ms aggiornano HRV/LF/HF; UI/Ably a 1 Hz.
+      if (!shouldUpdateLfHfFromPpiSample(sample)) {
+        console.log(
+          `Monitor: ⏸️ Errore PPI alto (errorEstimate=${sample.errorEstimate}) — ` +
+            `HRV/LF/HF tenuti: ${hrvRef.current}/${lfPowerRef.current}/${hfPowerRef.current}`
+        );
+      } else {
+        ppiWindow.current.push(ppiMs);
+        if (ppiWindow.current.length > WINDOW_SIZE) {
+          ppiWindow.current.shift();
+        }
 
-      console.log(`Monitor: 📈 Finestra PPI: ${ppiWindow.current.length}/${WINDOW_SIZE} campioni`);
+        console.log(
+          `Monitor: 📈 Finestra PPI: ${ppiWindow.current.length}/${WINDOW_SIZE} campioni`
+        );
 
-      let hrvValue = null;
-      let lfPowerValue = null;
-      let hfPowerValue = null;
+        if (ppiWindow.current.length === WINDOW_SIZE) {
+          const rmssd = calculateRMSSD(ppiWindow.current);
+          const roundedRmsdd = Math.round(rmssd);
+          hrvRef.current = roundedRmsdd;
 
-      if (ppiWindow.current.length === WINDOW_SIZE) {
-        const rmssd = calculateRMSSD(ppiWindow.current);
-        const roundedRmsdd = Math.round(rmssd);
-        setHrv(roundedRmsdd);
-        hrvValue = roundedRmsdd;
+          const { lf, hf } = computeLfHf(ppiWindow.current);
+          const roundedLf = Math.round(lf);
+          const roundedHf = Math.round(hf);
+          lfPowerRef.current = roundedLf;
+          hfPowerRef.current = roundedHf;
 
-        const { lf, hf } = computeLfHf(ppiWindow.current);
-        const roundedLf = Math.round(lf);
-        const roundedHf = Math.round(hf);
-        setLfPower(roundedLf);
-        setHfPower(roundedHf);
-        lfPowerValue = roundedLf;
-        hfPowerValue = roundedHf;
-
-        console.log(`Monitor: 📊 HRV=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`);
-      }
-
-      const liveHr = sample.hr > 0 ? sample.hr : heartRateRef.current;
-      if (liveHr > 0) {
-        const userStateHRV = useUserStore.getState();
-        console.log("🔍 DEBUG STREAMING - Controllo condizioni:");
-        console.log("🔍 authToken:", !!userStateHRV.authToken);
-        console.log("🔍 ablyStatus:", ablyStatus);
-        console.log("🔍 userId:", userStateHRV.userId);
-        console.log("🔍 deviceCode:", userStateHRV.deviceCode);
-        console.log("🔍 heartRate:", liveHr);
-        console.log("🔍 ablyService.current:", !!ablyService.current);
-
-        if (
-          userStateHRV.authToken &&
-          ablyService.current &&
-          userStateHRV.userId &&
-          userStateHRV.deviceCode
-        ) {
-          console.log("✅ TUTTE LE CONDIZIONI SODDISFATTE - Invio dati ad Ably");
-          ablyService.current.sendMessage(
-            userStateHRV.userId,
-            "heartRate",
-            buildPolarAblyHeartRatePayload({
-              deviceId: connectedDeviceIdRef.current,
-              deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
-              hr: liveHr,
-              hrv: hrvValue,
-              lfPower: lfPowerValue,
-              hfPower: hfPowerValue,
-              rrMs: resolved?.rrMs ?? null,
-              rrSource: resolved?.rrSource ?? null,
-              ppiMs: resolved?.rrSource === "ppi" ? ppiMs : null,
-              skinTemperatureC: skinTemperatureCRef.current,
-              ...polarExtrasFromStash(
-                polarPpiExtrasRef.current,
-                polarHrExtrasRef.current
-              ),
-            }),
-            userStateHRV.deviceCode
+          console.log(
+            `Monitor: 📊 HRV=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`
           );
-          bumpAblyPulse();
-        } else {
-          console.log("❌ CONDIZIONI NON SODDISFATTE - Non invio dati ad Ably");
         }
       }
     });
@@ -577,6 +543,8 @@ export function useMonitorSession() {
       if (isStaleLaunch()) {
         return;
       }
+      // UI flush at polarLiveRateHz; Ably publish inside flush stays auth-gated.
+      startBiometricSending();
 
       const storedAuthData = await StorageService.getAuthDataForDevice(deviceId);
 
@@ -737,109 +705,138 @@ export function useMonitorSession() {
     }
   };
 
+  const resetHrPublishBucket = () => {
+    hrSumBucketRef.current = 0;
+    hrCountBucketRef.current = 0;
+  };
+
+  /** Flush Monitor UI + one Ably heartRate at polarLiveRateHz (default 1 Hz). */
+  const flushPolarLiveMetrics = () => {
+    const now = Date.now();
+    const rateHz = useSettingsStore.getState().polarLiveRateHz;
+    const intervalMs = polarLiveIntervalMs(rateHz);
+    if (
+      lastPolarLiveFlushAtRef.current > 0 &&
+      now - lastPolarLiveFlushAtRef.current < intervalMs
+    ) {
+      return;
+    }
+    lastPolarLiveFlushAtRef.current = now;
+
+    const avgHr = averageHrFromBucket(
+      hrSumBucketRef.current,
+      hrCountBucketRef.current
+    );
+    resetHrPublishBucket();
+
+    if (avgHr != null) {
+      setHeartRate(avgHr);
+      heartRateRef.current = avgHr;
+    }
+
+    const hr = heartRateRef.current;
+    const currentHrv = hrvRef.current;
+    const lf = lfPowerRef.current;
+    const hf = hfPowerRef.current;
+    const currentRrMs = rrMsRef.current;
+    const currentRrSource = rrSourceRef.current;
+
+    if (currentHrv > 0) {
+      setHrv(currentHrv);
+    }
+    if (lf > 0) {
+      setLfPower(lf);
+    }
+    if (hf > 0) {
+      setHfPower(hf);
+    }
+    if (currentRrMs > 0) {
+      setRrMs(currentRrMs);
+      setRrSource(currentRrSource);
+    }
+
+    const userStateBiometric = useUserStore.getState();
+    const deviceLabel =
+      connectedDeviceNameRef.current || connectedDeviceIdRef.current || "Polar";
+
+    if (
+      connectedDeviceIdRef.current &&
+      hr > 0 &&
+      lastPositiveSignalAtRef.current > 0 &&
+      now - lastPositiveSignalAtRef.current >= SIGNAL_LOSS_MS
+    ) {
+      clearLiveBiometricMetrics();
+      return;
+    }
+
+    if (debugMode) {
+      console.log("🔍 DEBUG BIOMETRIC FLUSH - rateHz:", rateHz, "hr:", hr);
+    }
+
+    if (
+      ablyService.current &&
+      userStateBiometric.authToken &&
+      userStateBiometric.userId &&
+      userStateBiometric.deviceCode &&
+      hr > 0
+    ) {
+      const isMuse = connectedFamilyRef.current === "muse";
+      ablyService.current.sendMessage(
+        userStateBiometric.userId,
+        "heartRate",
+        isMuse
+          ? {
+              deviceId: connectedDeviceIdRef.current,
+              deviceFamily: "muse",
+              hr,
+              alpha: bandAlphaRef.current || null,
+              theta: bandThetaRef.current || null,
+              beta: bandBetaRef.current || null,
+              delta: bandDeltaRef.current || null,
+              gamma: bandGammaRef.current || null,
+            }
+          : buildPolarAblyHeartRatePayload({
+              deviceId: connectedDeviceIdRef.current,
+              deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
+              hr,
+              hrv: currentHrv > 0 ? currentHrv : null,
+              lfPower: lf > 0 ? lf : null,
+              hfPower: hf > 0 ? hf : null,
+              rrMs: currentRrMs > 0 ? currentRrMs : null,
+              rrSource: currentRrSource,
+              ppiMs: currentRrSource === "ppi" ? currentRrMs : null,
+              skinTemperatureC: skinTemperatureCRef.current,
+              ...polarExtrasFromStash(
+                polarPpiExtrasRef.current,
+                polarHrExtrasRef.current
+              ),
+            }),
+        userStateBiometric.deviceCode
+      );
+      bumpAblyPulse();
+    }
+
+    if (connectedDeviceIdRef.current) {
+      polarSdk
+        .updateMonitorForegroundService(
+          deviceLabel,
+          hr,
+          currentHrv > 0 ? currentHrv : 0,
+          lf > 0 ? lf : 0,
+          hf > 0 ? hf : 0
+        )
+        .catch(() => {});
+    }
+  };
+
   const startBiometricSending = () => {
     if (biometricInterval.current) {
       clearInterval(biometricInterval.current);
     }
-
+    lastPolarLiveFlushAtRef.current = 0;
     biometricInterval.current = setInterval(() => {
-      const userStateBiometric = useUserStore.getState();
-      const hr = heartRateRef.current;
-      const currentHrv = hrvRef.current;
-      const lf = lfPowerRef.current;
-      const hf = hfPowerRef.current;
-      const deviceLabel =
-        connectedDeviceNameRef.current || connectedDeviceIdRef.current || "Polar";
-
-      // Watchdog: if HR events stop entirely while still connected, clear stale UI.
-      if (
-        connectedDeviceIdRef.current &&
-        hr > 0 &&
-        lastPositiveSignalAtRef.current > 0 &&
-        Date.now() - lastPositiveSignalAtRef.current >= SIGNAL_LOSS_MS
-      ) {
-        clearLiveBiometricMetrics();
-        return;
-      }
-
-      if (debugMode) {
-        console.log("🔍 DEBUG BIOMETRIC SENDING - Controllo condizioni:");
-        console.log("🔍 ablyService.current:", !!ablyService.current);
-        console.log("🔍 userId:", userStateBiometric.userId);
-        console.log("🔍 deviceCode:", userStateBiometric.deviceCode);
-        console.log("🔍 heartRate:", hr);
-        console.log("🔍 ablyStatus:", ablyStatus);
-      }
-
-      if (
-        ablyService.current &&
-        userStateBiometric.authToken &&
-        userStateBiometric.userId &&
-        userStateBiometric.deviceCode &&
-        hr > 0
-      ) {
-        console.log("✅ BIOMETRIC SENDING - Invio dati ad Ably");
-        const isMuse = connectedFamilyRef.current === "muse";
-        const currentRrMs = rrMsRef.current;
-        const currentRrSource = rrSourceRef.current;
-        ablyService.current.sendMessage(
-          userStateBiometric.userId,
-          "heartRate",
-          isMuse
-            ? {
-                deviceId: connectedDeviceIdRef.current,
-                deviceFamily: "muse",
-                hr,
-                alpha: bandAlphaRef.current || null,
-                theta: bandThetaRef.current || null,
-                beta: bandBetaRef.current || null,
-                delta: bandDeltaRef.current || null,
-                gamma: bandGammaRef.current || null,
-              }
-            : buildPolarAblyHeartRatePayload({
-                deviceId: connectedDeviceIdRef.current,
-                deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
-                hr,
-                hrv: currentHrv,
-                lfPower: lf,
-                hfPower: hf,
-                rrMs: currentRrMs,
-                rrSource: currentRrSource,
-                ppiMs: currentRrSource === "ppi" ? currentRrMs : null,
-                skinTemperatureC: skinTemperatureCRef.current,
-                ...polarExtrasFromStash(
-                  polarPpiExtrasRef.current,
-                  polarHrExtrasRef.current
-                ),
-              }),
-          userStateBiometric.deviceCode
-        );
-        bumpAblyPulse();
-      } else {
-        const isCriticalIssue =
-          !ablyService.current ||
-          !userStateBiometric.authToken ||
-          !userStateBiometric.userId ||
-          !userStateBiometric.deviceCode;
-        const isHeartRateIssue = hr === 0;
-
-        if (isCriticalIssue || (isHeartRateIssue && debugMode)) {
-          console.log("❌ BIOMETRIC SENDING - Condizioni non soddisfatte:");
-          console.log("  - ablyService.current:", !!ablyService.current);
-          console.log("  - authToken:", !!userStateBiometric.authToken);
-          console.log("  - userId:", userStateBiometric.userId);
-          console.log("  - deviceCode:", userStateBiometric.deviceCode);
-          console.log("  - heartRate:", hr);
-          console.log("  - ablyStatus:", ablyStatus);
-        }
-      }
-
-      if (connectedDeviceIdRef.current) {
-        polarSdk
-          .updateMonitorForegroundService(deviceLabel, hr, currentHrv > 0 ? currentHrv : 0, lf > 0 ? lf : 0, hf > 0 ? hf : 0)
-          .catch(() => {});
-      }
-    }, 1000);
+      flushPolarLiveMetrics();
+    }, POLAR_LIVE_TICK_MS);
   };
 
   const stopBiometricSending = () => {
@@ -890,6 +887,9 @@ export function useMonitorSession() {
     ppiWindow.current = [];
     lastValidPpiAtRef.current = 0;
     lastPpiEventAtRef.current = 0;
+    hrSumBucketRef.current = 0;
+    hrCountBucketRef.current = 0;
+    lastPolarLiveFlushAtRef.current = 0;
     cancelHrZeroClear();
     setIsSignalLost(true);
     console.log("Monitor: 📭 Nessun segnale dal sensore — metriche resettate");
@@ -930,8 +930,9 @@ export function useMonitorSession() {
     }
     cancelHrZeroClear();
     notePositiveSignal();
-    setHeartRate(hr);
     heartRateRef.current = hr;
+    hrSumBucketRef.current += hr;
+    hrCountBucketRef.current += 1;
   };
 
   const resetDeviceState = () => {
@@ -941,11 +942,18 @@ export function useMonitorSession() {
     resetScanState();
     resetUserState();
     setHeartRate(0);
+    heartRateRef.current = 0;
     setHrv(0);
+    hrvRef.current = 0;
     setLfPower(0);
+    lfPowerRef.current = 0;
     setHfPower(0);
+    hfPowerRef.current = 0;
     setRrMs(0);
     rrMsRef.current = 0;
+    hrSumBucketRef.current = 0;
+    hrCountBucketRef.current = 0;
+    lastPolarLiveFlushAtRef.current = 0;
     setRrSource(null);
     setEcgMicroVolts(0);
     setSkinTemperatureC(0);
@@ -1518,8 +1526,6 @@ export function useMonitorSession() {
             hrBpm: hrForStream > 0 ? hrForStream : undefined,
           });
           if (resolved) {
-            setRrMs(resolved.rrMs);
-            setRrSource(resolved.rrSource);
             rrMsRef.current = resolved.rrMs;
             rrSourceRef.current = resolved.rrSource;
           }
@@ -1533,57 +1539,18 @@ export function useMonitorSession() {
           }
         });
 
-        let hrvValue = null;
-        let lfPowerValue = null;
-        let hfPowerValue = null;
-
         if (ppiWindow.current.length === WINDOW_SIZE) {
           const rmssd = calculateRMSSD(ppiWindow.current);
           const roundedRmsdd = Math.round(rmssd);
-          setHrv(roundedRmsdd);
-          hrvValue = roundedRmsdd;
+          hrvRef.current = roundedRmsdd;
 
           const { lf, hf } = computeLfHf(ppiWindow.current);
           const roundedLf = Math.round(lf);
           const roundedHf = Math.round(hf);
-          setLfPower(roundedLf);
-          setHfPower(roundedHf);
-          lfPowerValue = roundedLf;
-          hfPowerValue = roundedHf;
+          lfPowerRef.current = roundedLf;
+          hfPowerRef.current = roundedHf;
 
           console.log(`Monitor: 📊 HRV (RR ECG)=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`);
-        }
-
-        const userStateHr = useUserStore.getState();
-        if (
-          hrForStream > 0 &&
-          userStateHr.authToken &&
-          ablyService.current &&
-          userStateHr.userId &&
-          userStateHr.deviceCode
-        ) {
-          ablyService.current.sendMessage(
-            userStateHr.userId,
-            "heartRate",
-            buildPolarAblyHeartRatePayload({
-              deviceId: connectedDeviceIdRef.current,
-              deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
-              hr: hrForStream,
-              hrv: hrvValue,
-              lfPower: lfPowerValue,
-              hfPower: hfPowerValue,
-              rrMs: rrMsRef.current,
-              rrSource: rrSourceRef.current,
-              ppiMs: null,
-              skinTemperatureC: skinTemperatureCRef.current,
-              ...polarExtrasFromStash(
-                polarPpiExtrasRef.current,
-                polarHrExtrasRef.current
-              ),
-            }),
-            userStateHr.deviceCode
-          );
-          bumpAblyPulse();
         }
         return;
       }
@@ -1604,8 +1571,6 @@ export function useMonitorSession() {
         const approximateRR = Math.round(60000 / data.hr);
         const resolved = resolveRrInterval({ hrBpm: data.hr });
         if (resolved) {
-          setRrMs(resolved.rrMs);
-          setRrSource(resolved.rrSource);
           rrMsRef.current = resolved.rrMs;
           rrSourceRef.current = resolved.rrSource;
           if (lastValidPpiAtRef.current <= 0) {
@@ -1623,66 +1588,18 @@ export function useMonitorSession() {
           ppiWindow.current.shift();
         }
 
-        let hrvValue = null;
-        let lfPowerValue = null;
-        let hfPowerValue = null;
-
         if (ppiWindow.current.length === WINDOW_SIZE) {
           const rmssd = calculateRMSSD(ppiWindow.current);
           const roundedRmsdd = Math.round(rmssd);
-          setHrv(roundedRmsdd);
-          hrvValue = roundedRmsdd;
+          hrvRef.current = roundedRmsdd;
 
           const { lf, hf } = computeLfHf(ppiWindow.current);
           const roundedLf = Math.round(lf);
           const roundedHf = Math.round(hf);
-          setLfPower(roundedLf);
-          setHfPower(roundedHf);
-          lfPowerValue = roundedLf;
-          hfPowerValue = roundedHf;
+          lfPowerRef.current = roundedLf;
+          hfPowerRef.current = roundedHf;
 
           console.log(`Monitor: 📊 HRV (da HR)=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`);
-        }
-
-        const userStateHRFallback = useUserStore.getState();
-        console.log("🔍 HR FALLBACK - Controllo condizioni:");
-        console.log("🔍 authToken:", !!userStateHRFallback.authToken);
-        console.log("🔍 ablyStatus:", ablyStatus);
-        console.log("🔍 userId:", userStateHRFallback.userId);
-        console.log("🔍 deviceCode:", userStateHRFallback.deviceCode);
-        console.log("🔍 ablyService.current:", !!ablyService.current);
-
-        if (
-          userStateHRFallback.authToken &&
-          ablyService.current &&
-          userStateHRFallback.userId &&
-          userStateHRFallback.deviceCode
-        ) {
-          console.log("✅ HR FALLBACK - Invio dati ad Ably");
-          ablyService.current.sendMessage(
-            userStateHRFallback.userId,
-            "heartRate",
-            buildPolarAblyHeartRatePayload({
-              deviceId: connectedDeviceIdRef.current,
-              deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
-              hr: data.hr,
-              hrv: hrvValue,
-              lfPower: lfPowerValue,
-              hfPower: hfPowerValue,
-              rrMs: resolved?.rrMs ?? null,
-              rrSource: resolved?.rrSource ?? null,
-              ppiMs: null,
-              skinTemperatureC: skinTemperatureCRef.current,
-              ...polarExtrasFromStash(
-                polarPpiExtrasRef.current,
-                polarHrExtrasRef.current
-              ),
-            }),
-            userStateHRFallback.deviceCode
-          );
-          bumpAblyPulse();
-        } else {
-          console.log("❌ HR FALLBACK - Condizioni non soddisfatte");
         }
       }
     });
@@ -1806,10 +1723,8 @@ export function useMonitorSession() {
 
         museSdk.addEventListener("onMuseHeartRate", (data) => {
           if (data.hr > 0) {
-            notePositiveSignal();
             setMuseHr(data.hr);
-            setHeartRate(data.hr);
-            heartRateRef.current = data.hr;
+            applyLiveHeartRate(data.hr);
           } else {
             noteMissingSignal();
           }

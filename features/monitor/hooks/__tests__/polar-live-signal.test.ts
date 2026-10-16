@@ -7,9 +7,13 @@ import {
   isPolarWearQualityPoor,
   isSustainedHrZero,
   isUsablePpiMs,
+  averageHrFromBucket,
   PPI_ERROR_ESTIMATE_POOR_MS,
+  PPI_ERROR_ESTIMATE_SANE_MS,
   PPI_STALE_MS,
   PPI_STREAM_ALIVE_MS,
+  polarLiveIntervalMs,
+  shouldUpdateLfHfFromPpiSample,
 } from "../polar-live-signal";
 
 describe("polar-live-signal", () => {
@@ -87,6 +91,49 @@ describe("polar-live-signal", () => {
           blocker: true,
         })
       ).toBe(true);
+    });
+  });
+
+  describe("polarLiveIntervalMs / averageHrFromBucket", () => {
+    it("mappa 1 Hz → 1000 ms e 4 Hz → 250 ms", () => {
+      expect(polarLiveIntervalMs(1)).toBe(1000);
+      expect(polarLiveIntervalMs(4)).toBe(250);
+    });
+
+    it("calcola la media HR del bucket", () => {
+      expect(averageHrFromBucket(60 + 70, 2)).toBe(65);
+      expect(averageHrFromBucket(0, 0)).toBeNull();
+    });
+  });
+
+  describe("shouldUpdateLfHfFromPpiSample", () => {
+    it("aggiorna LF/HF se errorEstimate manca o è ≤ soglia sana", () => {
+      expect(shouldUpdateLfHfFromPpiSample({})).toBe(true);
+      expect(shouldUpdateLfHfFromPpiSample({ errorEstimate: null })).toBe(true);
+      expect(shouldUpdateLfHfFromPpiSample({ errorEstimate: 5 })).toBe(true);
+      expect(
+        shouldUpdateLfHfFromPpiSample({
+          errorEstimate: PPI_ERROR_ESTIMATE_SANE_MS,
+        })
+      ).toBe(true);
+    });
+
+    it("non aggiorna LF/HF sopra la soglia sana (anche sotto card rossa)", () => {
+      expect(
+        shouldUpdateLfHfFromPpiSample({
+          errorEstimate: PPI_ERROR_ESTIMATE_SANE_MS + 1,
+        })
+      ).toBe(false);
+      expect(
+        shouldUpdateLfHfFromPpiSample({
+          errorEstimate: PPI_ERROR_ESTIMATE_POOR_MS,
+        })
+      ).toBe(false);
+      expect(
+        shouldUpdateLfHfFromPpiSample({
+          errorEstimate: PPI_ERROR_ESTIMATE_POOR_MS + 1,
+        })
+      ).toBe(false);
     });
   });
 

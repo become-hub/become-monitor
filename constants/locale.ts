@@ -160,6 +160,13 @@ export interface LocaleStrings {
         light: string;
         dark: string;
         system: string;
+        liveRate: string;
+        liveRateDescription: string;
+        liveRate1HzLabel: string;
+        liveRate1HzHint: string;
+        liveRate4HzLabel: string;
+        liveRate4HzHint: string;
+        liveRateComingSoon: string;
         notifications: string;
         notificationsDescription: string;
         enableNotifications: string;
@@ -334,6 +341,14 @@ export const translations: Record<Language, LocaleStrings> = {
             light: 'Chiaro',
             dark: 'Scuro',
             system: 'Sistema',
+            liveRate: 'Aggiornamento live',
+            liveRateDescription:
+                'Quanto spesso aggiornare HR, HRV, LF e HF in Monitor (e su Ably dopo il login).',
+            liveRate1HzLabel: '1 Hz',
+            liveRate1HzHint: '1 volta al secondo',
+            liveRate4HzLabel: '4 Hz',
+            liveRate4HzHint: '4 volte al secondo',
+            liveRateComingSoon: 'In arrivo',
             notifications: 'Notifiche',
             notificationsDescription: 'Gestisci le notifiche dell\'app',
             enableNotifications: 'Abilita Notifiche',
@@ -506,6 +521,14 @@ export const translations: Record<Language, LocaleStrings> = {
             light: 'Light',
             dark: 'Dark',
             system: 'System',
+            liveRate: 'Live updates',
+            liveRateDescription:
+                'How often to refresh HR, HRV, LF and HF in Monitor (and on Ably after sign-in).',
+            liveRate1HzLabel: '1 Hz',
+            liveRate1HzHint: 'Once per second',
+            liveRate4HzLabel: '4 Hz',
+            liveRate4HzHint: 'Four times per second',
+            liveRateComingSoon: 'Coming soon',
             notifications: 'Notifications',
             notificationsDescription: 'Manage app notifications',
             enableNotifications: 'Enable Notifications',

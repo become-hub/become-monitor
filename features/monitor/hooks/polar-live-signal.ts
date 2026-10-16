@@ -16,6 +16,29 @@ export const PPI_STREAM_ALIVE_MS = 8000;
 export const HR_ZERO_GRACE_MS = 10000;
 /** Polar docs: errorEstimate over ~30 ms often means motion or poor skin contact. */
 export const PPI_ERROR_ESTIMATE_POOR_MS = 30;
+/** Max errorEstimate (ms) allowed into the HRV / LF / HF window (sane samples only). */
+export const PPI_ERROR_ESTIMATE_SANE_MS = 10;
+
+/** Live Monitor + Ably publish rates (Hz). */
+export type PolarLiveRateHz = 1 | 4;
+
+/** Tick interval used to poll the publish cadence (supports 4 Hz later). */
+export const POLAR_LIVE_TICK_MS = 250;
+
+export function polarLiveIntervalMs(rateHz: PolarLiveRateHz): number {
+  return rateHz === 4 ? 250 : 1000;
+}
+
+/** Mean HR for a publish bucket; null if no samples. */
+export function averageHrFromBucket(
+  sum: number,
+  count: number
+): number | null {
+  if (count <= 0 || !Number.isFinite(sum)) {
+    return null;
+  }
+  return Math.round(sum / count);
+}
 
 export type PolarSignalQualityUi = {
   contactStatus: boolean | null;
@@ -77,6 +100,22 @@ export function isPolarPpiErrorPoor(
     quality?.errorEstimate != null &&
     quality.errorEstimate > PPI_ERROR_ESTIMATE_POOR_MS
   );
+}
+
+/**
+ * Whether this PPI sample may update the HRV / LF / HF window.
+ * Only low errorEstimate (≤ PPI_ERROR_ESTIMATE_SANE_MS) is treated as sane
+ * enough for the FFT; noisier intervals keep the last sane metrics even if
+ * the Errore PPI card is not red yet (red stays at > 30 ms).
+ */
+export function shouldUpdateLfHfFromPpiSample(sample: {
+  errorEstimate?: number | null;
+}): boolean {
+  const errorEstimate = sample.errorEstimate ?? null;
+  if (errorEstimate == null) {
+    return true;
+  }
+  return errorEstimate <= PPI_ERROR_ESTIMATE_SANE_MS;
 }
 
 /**

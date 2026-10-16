@@ -69,7 +69,7 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Augm
 
 ### Live vs flush a fine sessione (spike)
 
-- **Live**: HR / PPI / RR / HRV (e skin temp su Loop) restano in streaming verso Ably (`heartRate`) per la visibilità in Hub.
+- **Live**: le card Monitor (HR / RR / HRV / LF / HF, skin temp su Loop) si aggiornano a **1 Hz** appena parte lo streaming locale, anche **prima** del login Become. Ably (`heartRate`) parte solo dopo auth. Nei Settings compare anche 4 Hz (disabilitato per ora). I campioni PPI grezzi restano sul device/track; Contatto / Errore PPI / Movimento restano live.
 - **Tracciato intero**: a fine sessione Hub pubblica su `private:{userId}` l’evento Ably **`endSession`** (payload opzionale `{ "sessionId": "..." }`). L’app:
   1. ferma l’offline recording PPI, scarica il record dal Polar (o usa il buffer live)
   2. costruisce un payload grezzo `ppiTrack` (sample con `ppiMs`/`hr`, `rrMs`, `rrSource`)
@@ -116,6 +116,7 @@ Note:
 - `skinTemperatureC` è valorizzato **solo su Loop Gen 2** (stream SDK); su Polar 360 è sempre `null`.
 - `hrv` / `lfPower` / `hfPower` restano `null` finché non ci sono 30 campioni RR/PPI.
 - Salti successivi ≥ 200 ms tra intervalli RR/PPI non entrano in LF/HF (stesso limite dell’RMSSD): il posto in finestra viene interpolato, altrimenti lo spettro salirebbe a migliaia di ms² con un HRV ancora normale.
+- HRV / `lfPower` / `hfPower` si aggiornano solo su campioni PPI con `errorEstimate` ≤ 10 ms (rilevazioni sane). Sopra 10 ms il campione non entra nella finestra e restano all’ultimo valore sano. La card **Errore PPI** diventa rossa solo con `errorEstimate` > 30 ms.
 - `contactStatus` / `contactStatusSupported` preferiscono il skin contact dello stream **PPI**; se il PPI non lo supporta, usano la notifica BLE Heart Rate.
 - `errorEstimate` (ms) e `blocker` arrivano dal campione PPI (qualità ottica utile su 360/Loop).
 - `ppgQuality`, `correctedHr`, `rrAvailable`, `rrsMs` arrivano dalla notifica BLE Heart Rate. Su 360/Loop con PPI attivo sono spesso `null` / `false` / vuoti: il servizio HR standard non porta qualità PPG né HR corretto, e gli RR nativi restano sul canale PPI. L’app **non** avvia `startHrStreaming` in parallelo al PPI.

@@ -11,7 +11,6 @@ import {
   isPolarMotionPoor,
   isPolarPpiErrorPoor,
   isPolarSkinContactPoor,
-  PPI_ERROR_ESTIMATE_POOR_MS,
   type PolarSignalQualityUi,
 } from "@/features/monitor/hooks/polar-live-signal";
 import type { RrSource } from "@/services/rr-interval";
@@ -313,7 +312,7 @@ export function PolarMetricsGrid({
               label="Movimento"
               value={motionLabel(polarSignalQuality)}
               unit="blocker"
-              icon={Zap}
+              icon={PersonStanding}
               compact
               danger={motionPoor}
             />
@@ -321,7 +320,9 @@ export function PolarMetricsGrid({
         )}
         {showQualityCards && (
           <ThemedText style={monitorStyles.metricFootnote}>
-            * PPI: intervallo tra un battito e il successivo. Serve a determinare HR e HRV.
+            * PPI: intervallo tra un battito e il successivo. Serve a determinare
+            HR e HRV. HRV, LF e HF si aggiornano solo con Errore PPI ≤ 10 ms; con
+            valori più alti restano all’ultimo sano. Card rossa oltre 30 ms.
           </ThemedText>
         )}
       </View>
