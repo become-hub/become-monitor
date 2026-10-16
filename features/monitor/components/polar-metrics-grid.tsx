@@ -1,17 +1,32 @@
 /**
  * Polar Metrics Grid Component
  * Displays Polar device metrics (HR, HRV, LF/HF, RR, ECG, Temperature)
+ * plus compact signal-quality cards (contact / PPI error / motion).
  */
 
 import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
-import { Activity, Heart, Thermometer, Zap } from "lucide-react-native";
+import {
+  isPolarMotionPoor,
+  isPolarPpiErrorPoor,
+  isPolarSkinContactPoor,
+  PPI_ERROR_ESTIMATE_POOR_MS,
+  type PolarSignalQualityUi,
+} from "@/features/monitor/hooks/polar-live-signal";
+import type { RrSource } from "@/services/rr-interval";
+import {
+  Activity,
+  Hand,
+  Heart,
+  PersonStanding,
+  ShieldAlert,
+  Thermometer,
+  Zap,
+} from "lucide-react-native";
 import { View } from "react-native";
 import { MetricCard } from "./metric-card";
 import { monitorStyles } from "./monitor-styles";
-import type { RrSource } from "@/services/rr-interval";
 
 interface PolarMetricsGridProps {
   connectedDeviceId: string | null;
@@ -28,9 +43,31 @@ interface PolarMetricsGridProps {
   isH10Connected: boolean;
   showRawEcgCards: boolean;
   isSkinTemperatureSupported: boolean;
+  polarSignalQuality?: PolarSignalQualityUi | null;
 }
 
 const WINDOW_SIZE = 30;
+
+function contactLabel(quality: PolarSignalQualityUi | null | undefined): string {
+  if (!quality || quality.contactStatusSupported !== true) {
+    return "—";
+  }
+  return quality.contactStatus === true ? "OK" : "No";
+}
+
+function qualityLabel(quality: PolarSignalQualityUi | null | undefined): string {
+  if (quality?.errorEstimate == null) {
+    return "—";
+  }
+  return String(quality.errorEstimate);
+}
+
+function motionLabel(quality: PolarSignalQualityUi | null | undefined): string {
+  if (quality?.blocker == null) {
+    return "—";
+  }
+  return quality.blocker ? "Sì" : "No";
+}
 
 export function PolarMetricsGrid({
   connectedDeviceId,
@@ -47,8 +84,19 @@ export function PolarMetricsGrid({
   isH10Connected,
   showRawEcgCards,
   isSkinTemperatureSupported,
+  polarSignalQuality = null,
 }: PolarMetricsGridProps) {
   const { theme } = useTheme();
+  const showQualityCards =
+    !!connectedDeviceId && !isH10Connected && polarSignalQuality != null;
+  const contactPoor =
+    showQualityCards && isPolarSkinContactPoor(polarSignalQuality);
+  const motionPoor =
+    showQualityCards && isPolarMotionPoor(polarSignalQuality);
+  const qualityPoor =
+    showQualityCards && isPolarPpiErrorPoor(polarSignalQuality);
+  /** Loose fit / weak optical signal without an explicit no-contact flag. */
+  const showContactWearAlert = contactPoor || (qualityPoor && !motionPoor);
 
   return (
     <>
@@ -64,6 +112,71 @@ export function PolarMetricsGrid({
           H10 espone HR, RR ECG, ECG (uV), HRV (RMSSD) e LF/HF; non espone
           temperatura corporea/cutanea.
         </ThemedText>
+      )}
+
+      {(showContactWearAlert || motionPoor) && (
+        <View style={monitorStyles.wearWarningStack}>
+          {showContactWearAlert && (
+            <View
+              style={[
+                monitorStyles.wearWarningBanner,
+                monitorStyles.wearWarningBannerContact,
+              ]}
+            >
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <ShieldAlert size={18} color="#EF4444" />
+                <ThemedText
+                  style={[
+                    monitorStyles.wearWarningTitle,
+                    monitorStyles.wearWarningTitleContact,
+                  ]}
+                >
+                  Sistema bene il bracciale
+                </ThemedText>
+              </View>
+              <ThemedText style={monitorStyles.wearWarningBody}>
+                Contatto con la pelle insufficiente
+                {qualityPoor && !contactPoor
+                  ? " o segnale ottico debole"
+                  : ""}
+                . Indossa il Polar sul polso a contatto diretto con la pelle
+                (non sopra maniche o vestiti), a circa un dito dal polso.
+                Stringilo abbastanza perché i LED verdi restino fermi contro la
+                pelle, senza stringere fino a lasciarti un segno.
+              </ThemedText>
+            </View>
+          )}
+
+          {motionPoor && (
+            <View
+              style={[
+                monitorStyles.wearWarningBanner,
+                monitorStyles.wearWarningBannerMotion,
+              ]}
+            >
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <PersonStanding size={18} color="#D97706" />
+                <ThemedText
+                  style={[
+                    monitorStyles.wearWarningTitle,
+                    monitorStyles.wearWarningTitleMotion,
+                  ]}
+                >
+                  Resta fermo
+                </ThemedText>
+              </View>
+              <ThemedText style={monitorStyles.wearWarningBody}>
+                Movimento rilevato: la misura PPI (intervallo battito-battito)
+                è sensibile agli artefatti. Fermati, tieni il braccio rilassato
+                e attendi qualche secondo senza camminare o gesticolare.
+              </ThemedText>
+            </View>
+          )}
+        </View>
       )}
 
       <View style={monitorStyles.metricsGrid}>
@@ -175,6 +288,35 @@ export function PolarMetricsGrid({
                   : "—"}
               </ThemedText>
             </View>
+          </View>
+        )}
+
+        {showQualityCards && (
+          <View style={monitorStyles.metricsRow}>
+            <MetricCard
+              label="Contatto"
+              value={contactLabel(polarSignalQuality)}
+              unit="pelle"
+              icon={Hand}
+              compact
+              danger={contactPoor}
+            />
+            <MetricCard
+              label="Errore PPI"
+              value={qualityLabel(polarSignalQuality)}
+              unit="ms"
+              icon={Activity}
+              compact
+              danger={qualityPoor}
+            />
+            <MetricCard
+              label="Movimento"
+              value={motionLabel(polarSignalQuality)}
+              unit="blocker"
+              icon={Zap}
+              compact
+              danger={motionPoor}
+            />
           </View>
         )}
       </View>

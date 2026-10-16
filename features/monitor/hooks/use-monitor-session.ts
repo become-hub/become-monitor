@@ -8,7 +8,21 @@ import { Alert, PermissionsAndroid, Platform } from "react-native";
 import { AblyService, ConnectionStatus } from "@/services/ably-service";
 import { AuthService } from "@/services/auth-service";
 import { calculateRMSSD, computeLfHf } from "@/services/hrv-calculator";
-import { buildPolarAblyHeartRatePayload } from "@/services/polar-ably-payload";
+import {
+  buildPolarAblyHeartRatePayload,
+  EMPTY_POLAR_HR_EXTRAS,
+  EMPTY_POLAR_PPI_EXTRAS,
+  polarExtrasFromStash,
+  stashPolarHrExtras,
+  stashPolarPpiExtras,
+  type PolarHrExtrasStash,
+  type PolarPpiExtrasStash,
+} from "@/services/polar-ably-payload";
+import {
+  buildPolarSignalQualityUi,
+  EMPTY_POLAR_SIGNAL_QUALITY,
+  type PolarSignalQualityUi,
+} from "./polar-live-signal";
 import {
   PolarDeviceInfo,
   PolarEcgData,
@@ -134,6 +148,9 @@ export function useMonitorSession() {
   const [skinTemperatureC, setSkinTemperatureC] = useState(0);
   /** True after we had live metrics and then lost contact / HR while still connected. */
   const [isSignalLost, setIsSignalLost] = useState(false);
+  /** Live PPI/HR quality for compact Monitor cards + wear warning. */
+  const [polarSignalQuality, setPolarSignalQuality] =
+    useState<PolarSignalQualityUi>({ ...EMPTY_POLAR_SIGNAL_QUALITY });
 
   // Metrics - Muse
   const [connectedFamily, setConnectedFamily] = useState<"polar" | "muse" | null>(null);
@@ -168,6 +185,14 @@ export function useMonitorSession() {
   const flushInFlightRef = useRef(false);
   const rrMsRef = useRef(0);
   const rrSourceRef = useRef<RrSource | null>(null);
+  /** Last PPI quality / skin contact for Ably extras. */
+  const polarPpiExtrasRef = useRef<PolarPpiExtrasStash>({
+    ...EMPTY_POLAR_PPI_EXTRAS,
+  });
+  /** Last BLE HR notification extras (ppgQuality / correctedHr / rrsMs). */
+  const polarHrExtrasRef = useRef<PolarHrExtrasStash>({
+    ...EMPTY_POLAR_HR_EXTRAS,
+  });
 
   // Notification state
   const [notification, setNotification] = useState<NotificationType>(null);
@@ -306,12 +331,23 @@ export function useMonitorSession() {
     return true;
   };
 
+  const syncPolarSignalQualityUi = () => {
+    setPolarSignalQuality(
+      buildPolarSignalQualityUi(
+        polarPpiExtrasRef.current,
+        polarHrExtrasRef.current
+      )
+    );
+  };
+
   const handlePpiData = (data: PolarPpiData) => {
     console.log(`Monitor: 🔬 Elaborazione ${data.samples.length} campioni PPI`);
     lastPpiEventAtRef.current = Date.now();
 
     data.samples.forEach((sample) => {
       const ppiMs = sample.ppi;
+      polarPpiExtrasRef.current = stashPolarPpiExtras(sample);
+      syncPolarSignalQualityUi();
 
       if (!isUsablePpiMs(ppiMs)) {
         console.log(
@@ -409,6 +445,10 @@ export function useMonitorSession() {
               rrSource: resolved?.rrSource ?? null,
               ppiMs: resolved?.rrSource === "ppi" ? ppiMs : null,
               skinTemperatureC: skinTemperatureCRef.current,
+              ...polarExtrasFromStash(
+                polarPpiExtrasRef.current,
+                polarHrExtrasRef.current
+              ),
             }),
             userStateHRV.deviceCode
           );
@@ -767,6 +807,10 @@ export function useMonitorSession() {
                 rrSource: currentRrSource,
                 ppiMs: currentRrSource === "ppi" ? currentRrMs : null,
                 skinTemperatureC: skinTemperatureCRef.current,
+                ...polarExtrasFromStash(
+                  polarPpiExtrasRef.current,
+                  polarHrExtrasRef.current
+                ),
               }),
           userStateBiometric.deviceCode
         );
@@ -839,6 +883,9 @@ export function useMonitorSession() {
     setEcgMicroVolts(0);
     setSkinTemperatureC(0);
     skinTemperatureCRef.current = 0;
+    polarPpiExtrasRef.current = { ...EMPTY_POLAR_PPI_EXTRAS };
+    polarHrExtrasRef.current = { ...EMPTY_POLAR_HR_EXTRAS };
+    setPolarSignalQuality({ ...EMPTY_POLAR_SIGNAL_QUALITY });
     setMuseHr(0);
     ppiWindow.current = [];
     lastValidPpiAtRef.current = 0;
@@ -903,6 +950,9 @@ export function useMonitorSession() {
     setEcgMicroVolts(0);
     setSkinTemperatureC(0);
     skinTemperatureCRef.current = 0;
+    polarPpiExtrasRef.current = { ...EMPTY_POLAR_PPI_EXTRAS };
+    polarHrExtrasRef.current = { ...EMPTY_POLAR_HR_EXTRAS };
+    setPolarSignalQuality({ ...EMPTY_POLAR_SIGNAL_QUALITY });
     setIsSignalLost(false);
     setConnectedFamily(null);
     setEegTp9(0);
@@ -1419,6 +1469,9 @@ export function useMonitorSession() {
             : "")
       );
 
+      polarHrExtrasRef.current = stashPolarHrExtras(data);
+      syncPolarSignalQualityUi();
+
       const noContact =
         data.contactSupported === true && data.contactDetected === false;
       if (noContact) {
@@ -1523,6 +1576,10 @@ export function useMonitorSession() {
               rrSource: rrSourceRef.current,
               ppiMs: null,
               skinTemperatureC: skinTemperatureCRef.current,
+              ...polarExtrasFromStash(
+                polarPpiExtrasRef.current,
+                polarHrExtrasRef.current
+              ),
             }),
             userStateHr.deviceCode
           );
@@ -1616,6 +1673,10 @@ export function useMonitorSession() {
               rrSource: resolved?.rrSource ?? null,
               ppiMs: null,
               skinTemperatureC: skinTemperatureCRef.current,
+              ...polarExtrasFromStash(
+                polarPpiExtrasRef.current,
+                polarHrExtrasRef.current
+              ),
             }),
             userStateHRFallback.deviceCode
           );
@@ -1842,6 +1903,7 @@ export function useMonitorSession() {
     ecgMicroVolts,
     skinTemperatureC,
     isSignalLost,
+    polarSignalQuality,
     ppiWindowLength: ppiWindow.current.length,
 
     // Metrics - Muse

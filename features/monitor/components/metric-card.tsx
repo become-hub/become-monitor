@@ -92,10 +92,16 @@ interface MetricCardProps {
   icon?: LucideIcon;
   highlighted?: boolean;
   fullWidth?: boolean;
+  /** Smaller padding / type for secondary signal cards. */
+  compact?: boolean;
+  /** Red border / icon when wear or signal quality is poor. */
+  danger?: boolean;
   /** Heartbeat pulse on the icon every second while live. */
   pulse?: boolean;
   style?: ViewStyle;
 }
+
+const DANGER_RED = "#EF4444";
 
 function useSmoothNumber(value: string | number, durationMs = 420): string | number {
   const [display, setDisplay] = useState<string | number>(value);
@@ -162,12 +168,23 @@ export function MetricCard({
   icon: Icon,
   highlighted = false,
   fullWidth = false,
+  compact = false,
+  danger = false,
   pulse = false,
   style,
 }: MetricCardProps) {
   const { theme } = useTheme();
   const isLive = pulse && typeof value === "number" && value > 0;
-  const iconColor = isLive ? LIVE_HEART : Colors[theme].tint;
+  const iconColor = danger
+    ? DANGER_RED
+    : isLive
+      ? LIVE_HEART
+      : Colors[theme].tint;
+  const borderColor = danger
+    ? DANGER_RED
+    : highlighted
+      ? Colors[theme].tint
+      : Colors[theme].border;
   const displayValue = useSmoothNumber(value);
   const scale = useRef(new Animated.Value(1)).current;
   const glow = useRef(new Animated.Value(0)).current;
@@ -235,16 +252,21 @@ export function MetricCard({
     <View
       style={[
         monitorStyles.metricCard,
+        compact && monitorStyles.metricCardCompact,
         fullWidth && monitorStyles.metricCardFull,
         highlighted && monitorStyles.metricCardHighlight,
-        {
-          borderColor: highlighted ? Colors[theme].tint : Colors[theme].border,
-        },
+        danger && monitorStyles.metricCardDanger,
+        { borderColor },
         style,
       ]}
     >
       {Icon && (
-        <View style={monitorStyles.metricIconContainer}>
+        <View
+          style={[
+            monitorStyles.metricIconContainer,
+            compact && monitorStyles.metricIconContainerCompact,
+          ]}
+        >
           <Animated.View
             style={[
               monitorStyles.metricIconPulseHalo,
@@ -257,16 +279,39 @@ export function MetricCard({
           />
           <Animated.View style={{ transform: [{ scale }], zIndex: 1 }}>
             <Icon
-              size={24}
+              size={compact ? 18 : 24}
               color={iconColor}
-              fill={isLive ? LIVE_HEART : "transparent"}
+              fill={isLive && !danger ? LIVE_HEART : "transparent"}
             />
           </Animated.View>
         </View>
       )}
-      <ThemedText style={monitorStyles.metricLabel}>{label}</ThemedText>
-      <ThemedText style={monitorStyles.metricValue}>{displayValue}</ThemedText>
-      <ThemedText style={monitorStyles.metricUnit}>{unit}</ThemedText>
+      <ThemedText
+        style={[
+          monitorStyles.metricLabel,
+          compact && monitorStyles.metricLabelCompact,
+          danger && { color: DANGER_RED, opacity: 1 },
+        ]}
+      >
+        {label}
+      </ThemedText>
+      <ThemedText
+        style={[
+          monitorStyles.metricValue,
+          compact && monitorStyles.metricValueCompact,
+          danger && { color: DANGER_RED },
+        ]}
+      >
+        {displayValue}
+      </ThemedText>
+      <ThemedText
+        style={[
+          monitorStyles.metricUnit,
+          compact && monitorStyles.metricUnitCompact,
+        ]}
+      >
+        {unit}
+      </ThemedText>
     </View>
   );
 }

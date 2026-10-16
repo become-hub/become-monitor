@@ -92,6 +92,15 @@ Esempio payload Ably live `heartRate` (360 / Loop):
   "rrSource": "ppi",
   "ppiMs": 812,
   "skinTemperatureC": 33.4,
+  "contactStatus": true,
+  "contactStatusSupported": true,
+  "errorEstimate": 5,
+  "blocker": false,
+  "ppgQuality": null,
+  "correctedHr": null,
+  "rrAvailable": false,
+  "rrsMs": null,
+  "appVersion": "v1.2.2",
   "type": "heartRate",
   "code": "deviceCode",
   "timestamp": "ISO"
@@ -106,6 +115,11 @@ Note:
 - `ppiMs` è valorizzato solo quando `rrSource === "ppi"`, altrimenti `null`.
 - `skinTemperatureC` è valorizzato **solo su Loop Gen 2** (stream SDK); su Polar 360 è sempre `null`.
 - `hrv` / `lfPower` / `hfPower` restano `null` finché non ci sono 30 campioni RR/PPI.
+- `contactStatus` / `contactStatusSupported` preferiscono il skin contact dello stream **PPI**; se il PPI non lo supporta, usano la notifica BLE Heart Rate.
+- `errorEstimate` (ms) e `blocker` arrivano dal campione PPI (qualità ottica utile su 360/Loop).
+- `ppgQuality`, `correctedHr`, `rrAvailable`, `rrsMs` arrivano dalla notifica BLE Heart Rate. Su 360/Loop con PPI attivo sono spesso `null` / `false` / vuoti: il servizio HR standard non porta qualità PPG né HR corretto, e gli RR nativi restano sul canale PPI. L’app **non** avvia `startHrStreaming` in parallelo al PPI.
+- `appVersion` è la versione marketing dell’app (`v` + valore da `app.json` / Expo config).
+- In Monitor, sotto le card principali, compaiono card compatte **Contatto** / **Errore PPI** / **Movimento**. Senza contatto pelle (o con `errorEstimate` > 30 ms) compare l’alert rosso **«Sistema bene il bracciale»**; con `blocker` (movimento) compare un alert distinto ambra **«Resta fermo»**.
 
 Esempio payload POST:
 

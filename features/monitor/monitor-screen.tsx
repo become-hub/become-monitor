@@ -105,6 +105,7 @@ export default function MonitorScreen() {
                 isH10Connected={session.isH10Connected}
                 showRawEcgCards={session.showRawEcgCards}
                 isSkinTemperatureSupported={session.isSkinTemperatureSupported}
+                polarSignalQuality={session.polarSignalQuality}
               />
             )}
           </ThemedView>
