@@ -302,7 +302,7 @@ export function PolarMetricsGrid({
               danger={contactPoor}
             />
             <MetricCard
-              label="Errore PPI"
+              label="Errore PPI*"
               value={qualityLabel(polarSignalQuality)}
               unit="ms"
               icon={Activity}
@@ -318,6 +318,11 @@ export function PolarMetricsGrid({
               danger={motionPoor}
             />
           </View>
+        )}
+        {showQualityCards && (
+          <ThemedText style={monitorStyles.metricFootnote}>
+            * PPI: intervallo tra un battito e il successivo. Serve a determinare HR e HRV.
+          </ThemedText>
         )}
       </View>
     </>

@@ -115,6 +115,7 @@ Note:
 - `ppiMs` è valorizzato solo quando `rrSource === "ppi"`, altrimenti `null`.
 - `skinTemperatureC` è valorizzato **solo su Loop Gen 2** (stream SDK); su Polar 360 è sempre `null`.
 - `hrv` / `lfPower` / `hfPower` restano `null` finché non ci sono 30 campioni RR/PPI.
+- Salti successivi ≥ 200 ms tra intervalli RR/PPI non entrano in LF/HF (stesso limite dell’RMSSD): il posto in finestra viene interpolato, altrimenti lo spettro salirebbe a migliaia di ms² con un HRV ancora normale.
 - `contactStatus` / `contactStatusSupported` preferiscono il skin contact dello stream **PPI**; se il PPI non lo supporta, usano la notifica BLE Heart Rate.
 - `errorEstimate` (ms) e `blocker` arrivano dal campione PPI (qualità ottica utile su 360/Loop).
 - `ppgQuality`, `correctedHr`, `rrAvailable`, `rrsMs` arrivano dalla notifica BLE Heart Rate. Su 360/Loop con PPI attivo sono spesso `null` / `false` / vuoti: il servizio HR standard non porta qualità PPG né HR corretto, e gli RR nativi restano sul canale PPI. L’app **non** avvia `startHrStreaming` in parallelo al PPI.
@@ -204,7 +205,7 @@ Fonte: profilo Polar BLE SDK (360 / Loop). Tabella allineata all’accordion in-
 | PPI / PP interval | Sì (da PPG) | Sì | Base HRV time-domain | Sì |
 | RR (ms) | Da PPI o `60000/HR` fallback | Idem | `rrSource`: `ppi`, `hr_derived` | Sì |
 | HRV (RMSSD) | Derivata da RR/PPI | Derivata da RR/PPI | Calcolo in-app | Sì |
-| LF / HF | Da finestra RR | Da finestra RR | Spettrale RR | Sì |
+| LF / HF | Da finestra RR | Da finestra RR | Spettrale RR; salti ≥ 200 ms interpolati | Sì |
 | PPG grezzo | Sì (SDK) | Stesso profilo SDK | Offline / live track | Sì |
 | Accelerometro | Sì | Sì | Fuori scope UI | No |
 | Temperatura cute | No | Sì | Solo Loop Gen 2 | Sì (solo Loop) |

@@ -365,6 +365,12 @@ export const monitorStyles = StyleSheet.create({
   metricUnitCompact: {
     fontSize: 11,
   },
+  metricFootnote: {
+    fontSize: 12,
+    lineHeight: 16,
+    opacity: 0.65,
+    textAlign: "center",
+  },
   controlsSection: {
     padding: 24,
   },
