@@ -129,6 +129,29 @@ describe("hrv-analysis-mode", () => {
       expect(next.shouldCompute).toBe(true);
     });
 
+    it("live: conserva ordine reale e non duplica l'ultimo valore", () => {
+      let acc = createEmptyHrvEpochAccumulator();
+      const policy = getHrvAnalysisPolicy("client", "ppi");
+      const sequence = [1280, 1268, 1275, 1263, 1274];
+      for (let i = 0; i < sequence.length; i++) {
+        acc = pushHrvInterval(acc, policy, sequence[i], 1000 + i).accumulator;
+      }
+      expect(acc.intervals).toEqual(sequence);
+
+      // Fill to capacity then push a new distinct beat — oldest drops, no fill(last).
+      for (let i = sequence.length; i < CLIENT_WINDOW_INTERVALS; i++) {
+        acc = pushHrvInterval(acc, policy, 800 + (i % 7), 2000 + i).accumulator;
+      }
+      const before = [...acc.intervals];
+      const pushed = pushHrvInterval(acc, policy, 1299, 9000);
+      expect(pushed.accumulator.intervals).toHaveLength(CLIENT_WINDOW_INTERVALS);
+      expect(pushed.accumulator.intervals[0]).toBe(before[1]);
+      expect(pushed.accumulator.intervals[CLIENT_WINDOW_INTERVALS - 1]).toBe(1299);
+      expect(
+        pushed.accumulator.intervals.every((v) => v === 1299)
+      ).toBe(false);
+    });
+
     it("estesa: calcola solo a ≥ 5 min di durata accettata", () => {
       let acc = createEmptyHrvEpochAccumulator();
       const policy = getHrvAnalysisPolicy("clinical", "ecg_rr");

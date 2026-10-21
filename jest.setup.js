@@ -5,7 +5,7 @@ global.console.warn = jest.fn();
 jest.mock("expo-constants", () => ({
   __esModule: true,
   default: {
-    expoConfig: { version: "1.2.2" },
-    nativeAppVersion: "1.2.2",
+    expoConfig: { version: "1.2.4" },
+    nativeAppVersion: "1.2.4",
   },
 }));

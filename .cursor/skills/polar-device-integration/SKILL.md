@@ -18,7 +18,7 @@ Polar **360** and **Loop Gen 2** behavior must stay identical unless explicitly 
 | Offline track | `startPpiOfflineRecording` + flush fetch/remove | Skip offline PPI; live buffer only |
 | Monitor grid | PPI/HR RR cards; **skin temp card only if `skinTemperatureUi`** (Loop Gen 2 yes, Polar 360 no — intentional app scope) | Extra raw cards only when `capabilities.rawEcg` |
 | Skin temperature | 360: `skinTemperature`/`skinTemperatureUi` false; Loop: both true | Usually false unless product ships the metric in Monitor |
-| RR source | `ppi` > `hr_derived` | `ecg_rr` from `rrsMs`; never `60000/HR` if raw RR exists |
+| RR source | `ppi` > `hr_derived`; live `rrsMs`/`ppisMs` = accepted PPI window for LF/HF | `ecg_rr` from native `rrsMs`; never `60000/HR` if raw RR exists |
 | Auth | Per-`deviceId` token in `StorageService` | Same — no auto-connect on scan |
 
 **Rule:** branch on `product.id` / `capabilities`; additive native events and SDK overloads only. No unified manager refactors that change 360/Loop defaults.

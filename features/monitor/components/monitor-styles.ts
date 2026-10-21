@@ -318,6 +318,10 @@ export const monitorStyles = StyleSheet.create({
     borderWidth: 1.5,
     backgroundColor: "rgba(239, 68, 68, 0.06)",
   },
+  metricCardWarning: {
+    borderWidth: 1.5,
+    backgroundColor: "rgba(245, 158, 11, 0.1)",
+  },
   metricIconContainer: {
     marginBottom: 8,
     width: 40,
@@ -411,6 +415,54 @@ export const monitorStyles = StyleSheet.create({
     lineHeight: 16,
     opacity: 0.65,
     textAlign: "center",
+  },
+  lfHfProgressCard: {
+    padding: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 10,
+  },
+  lfHfProgressHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  lfHfProgressTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  lfHfProgressPercent: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  lfHfProgressTrack: {
+    height: 8,
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  lfHfProgressTrackSmall: {
+    height: 4,
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  lfHfProgressFill: {
+    height: "100%",
+  },
+  lfHfRequirementRow: {
+    gap: 4,
+  },
+  lfHfRequirementLabelRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  lfHfRequirementLabel: {
+    fontSize: 12,
+    opacity: 0.8,
+  },
+  lfHfHint: {
+    fontSize: 12,
+    lineHeight: 16,
+    opacity: 0.75,
   },
   controlsSection: {
     padding: 24,

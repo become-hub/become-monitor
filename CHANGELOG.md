@@ -4,6 +4,24 @@ Tutte le modifiche rilevanti a Augmented Monitor.
 
 Il formato si ispira a [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [1.2.4] — LF/HF live da PPI (360/Loop)
+
+### Added
+- LF/HF sempre stimati dai PPI (non letti dalla SDK), con livelli di qualità Bassa / Media / Ottima e vibrazione alla salita
+- Barra progresso verso il livello successivo (battiti buoni, buco massimo, durata finestra ~5 min)
+- Card rapporto LF/HF in Monitor (griglia con Errore PPI / Contatto / Movimento) e fasce di plausibilità
+- Soglia errore PPI dedicata a LF/HF (20 ms; RMSSD resta a 10 ms), allineata al confronto con H10
+- Registro validazione vs Polar H10: `docs/lf-hf-validation-log.md`
+- Nota in UI su stima al polso e scarto tipico ±35% rispetto a una fascia ECG
+
+### Changed
+- LF/HF in UI e su Ably solo dopo HRV pronta (Live: ~30 battiti), per evitare picchi sulle finestre corte
+- Payload Ably: `lfHfStatus`, `lfHfAcceptedRatio`, `lfHfMaxArtifactGapSec`, tachogramma/export per ricalcolo esterno
+- Guida Polar 360 aggiornata (qualità LF/HF, validazione H10, warm-up)
+
+### Fixed
+- Con soglia 10 ms LF/HF del 360 risultavano ~10× troppo bassi rispetto all’ECG; con 20 ms tornano nell’ordine di grandezza corretto
+
 ## [1.2.3] — Qualità segnale Polar e HRV Live/Estesa
 
 ### Added

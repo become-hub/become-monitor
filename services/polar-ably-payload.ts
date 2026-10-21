@@ -7,6 +7,27 @@
 import { APP_VERSION } from "@/constants/app-version";
 import type { PolarProductId } from "@/features/devices/polar/polar-products";
 import type { RrSource } from "./rr-interval";
+import type {
+  LfHfIntervalKind,
+  LfHfStatus,
+  TachogramSample,
+} from "./hrv-calculator";
+import type {
+  HrvPreprocessingExport,
+  PpiRejectReason,
+} from "./ppi-sample-window";
+
+export type PolarPpiSampleExport = {
+  ppiMs: number;
+  errorEstimate: number | null;
+  timestamp: number;
+  rejectReason?: PpiRejectReason;
+  accepted?: boolean;
+  kind?: LfHfIntervalKind;
+  includedInTimeline?: boolean;
+  includedInTachogram?: boolean;
+  correctedPpiMs?: number | null;
+};
 
 export type PolarAblyHeartRateInput = {
   deviceId: string | null;
@@ -17,6 +38,21 @@ export type PolarAblyHeartRateInput = {
   hrv?: number | null;
   lfPower?: number | null;
   hfPower?: number | null;
+  /** LF/HF ratio; null when invalid or hf is 0. */
+  lfHfRatio?: number | null;
+  /** True when lfPower/hfPower come from a ready 5 min PPI window. */
+  lfHfValid?: boolean | null;
+  /**
+   * Trust grade of lfPower/hfPower. When set, powers are published for every
+   * status except `unavailable`, even if `lfHfValid` is false.
+   */
+  lfHfStatus?: LfHfStatus | null;
+  /** Accepted / raw PPI in the LF/HF window (live gate ≥ 0.60, valid ≥ 0.75). */
+  lfHfAcceptedRatio?: number | null;
+  /** Longest run of corrected beats in seconds (live gate ≤ 10, valid ≤ 5). */
+  lfHfMaxArtifactGapSec?: number | null;
+  /** Wall-clock ms when the LF/HF spectrum was last computed (not Live tick time). */
+  lfHfComputedAt?: number | null;
   rrMs?: number | null;
   rrSource?: RrSource | null;
   /**
@@ -24,6 +60,43 @@ export type PolarAblyHeartRateInput = {
    * If omitted while source is ppi, falls back to `rrMs`.
    */
   ppiMs?: number | null;
+  /**
+   * Corrected Y series for Hub compatibility (same as correctedPpiSeries).
+   * Alone is NOT enough to recompute LF/HF — needs ppiTimesSec / tachogramSamples.
+   */
+  ppisMs?: number[] | null;
+  /** Per-beat PPI with timestamp / errorEstimate (PPI source only). */
+  ppiSamples?: PolarPpiSampleExport[] | null;
+  /**
+   * Explicit tachogram for external recompute: timeSec (X raw) + corrected Y.
+   */
+  tachogramSamples?: TachogramSample[] | null;
+  /** Cumulative raw-included beat times (X). Same length as correctedPpiSeries. */
+  ppiTimesSec?: number[] | null;
+  /** Raw included PPI ms (accepted + quality_rejected). */
+  rawIncludedPpiMs?: number[] | null;
+  /** Corrected Y series (same length as ppiTimesSec). */
+  correctedPpiSeries?: number[] | null;
+  /** Uniform 4 Hz series fed to the FFT. */
+  resampledSeries?: number[] | null;
+  /** Sum of included raw PPI / 1000. */
+  includedIntervalDurationSec?: number | null;
+  /** ppiTimesSec[last] - ppiTimesSec[0]. */
+  tachogramDomainSec?: number | null;
+  /** Resample end − start (PSD domain). Prefer this over hrvWindowSeconds. */
+  resampledDurationSec?: number | null;
+  /** @deprecated alias of includedIntervalDurationSec for Hub compat. */
+  hrvWindowSeconds?: number | null;
+  /** Length of corrected series used for LF/HF (`ppisMs.length`). */
+  hrvIntervalCount?: number | null;
+  hrvMethod?: "periodogram" | null;
+  hrvSamplingHz?: number | null;
+  /** Live publish rate (1 Hz) — not the tachogram sample rate. */
+  livePublishHz?: number | null;
+  peakFrequencyHz?: number | null;
+  lfBandHz?: [number, number] | null;
+  hfBandHz?: [number, number] | null;
+  hrvPreprocessing?: HrvPreprocessingExport | null;
   /** Loop Gen 2 skin temp °C; always null on 360 / when absent. */
   skinTemperatureC?: number | null;
   /** Prefer PPI skin contact when supported; else HR notification contact. */
@@ -37,9 +110,9 @@ export type PolarAblyHeartRateInput = {
   ppgQuality?: number | null;
   /** From BLE HR sample; null when 0 / unavailable. */
   correctedHr?: number | null;
-  /** From BLE HR sample. */
+  /** From BLE HR sample, overridden when PPI series is published. */
   rrAvailable?: boolean | null;
-  /** From BLE HR sample; null when empty. */
+  /** From BLE HR sample, overridden when PPI series is published. */
   rrsMs?: number[] | null;
 };
 
@@ -50,9 +123,34 @@ export type PolarAblyHeartRatePayload = {
   hrv: number | null;
   lfPower: number | null;
   hfPower: number | null;
+  lfHfRatio: number | null;
+  lfHfValid: boolean | null;
+  lfHfStatus: LfHfStatus | null;
+  lfHfAcceptedRatio: number | null;
+  lfHfMaxArtifactGapSec: number | null;
+  lfHfComputedAt: number | null;
   rrMs: number | null;
   rrSource: RrSource | null;
   ppiMs: number | null;
+  ppisMs: number[] | null;
+  ppiSamples: PolarPpiSampleExport[] | null;
+  tachogramSamples: TachogramSample[] | null;
+  ppiTimesSec: number[] | null;
+  rawIncludedPpiMs: number[] | null;
+  correctedPpiSeries: number[] | null;
+  resampledSeries: number[] | null;
+  includedIntervalDurationSec: number | null;
+  tachogramDomainSec: number | null;
+  resampledDurationSec: number | null;
+  hrvWindowSeconds: number | null;
+  hrvIntervalCount: number | null;
+  hrvMethod: "periodogram" | null;
+  hrvSamplingHz: number | null;
+  livePublishHz: number | null;
+  peakFrequencyHz: number | null;
+  lfBandHz: [number, number] | null;
+  hfBandHz: [number, number] | null;
+  hrvPreprocessing: HrvPreprocessingExport | null;
   skinTemperatureC: number | null;
   contactStatus: boolean | null;
   contactStatusSupported: boolean | null;
@@ -110,6 +208,12 @@ function nonNegativeOrNull(value: number | null | undefined): number | null {
 
 function boolOrNull(value: boolean | null | undefined): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function copyNumberArray(
+  values: number[] | null | undefined
+): number[] | null {
+  return values != null && values.length > 0 ? [...values] : null;
 }
 
 /**
@@ -216,19 +320,131 @@ export function buildPolarAblyHeartRatePayload(
     rrSource === "ppi"
       ? positiveOrNull(input.ppiMs ?? input.rrMs)
       : null;
-  const rrsMs =
-    input.rrsMs != null && input.rrsMs.length > 0 ? [...input.rrsMs] : null;
+
+  const ppisFromInput = copyNumberArray(input.ppisMs);
+  const hrRrsMs = copyNumberArray(input.rrsMs);
+
+  let ppisMs: number[] | null = null;
+  let rrsMs: number[] | null = null;
+  let rrAvailable: boolean | null = boolOrNull(input.rrAvailable);
+  let ppiSamples: PolarPpiSampleExport[] | null = null;
+
+  let tachogramSamples: TachogramSample[] | null = null;
+  let ppiTimesSec: number[] | null = null;
+  let rawIncludedPpiMs: number[] | null = null;
+  let correctedPpiSeries: number[] | null = null;
+  let resampledSeries: number[] | null = null;
+  let includedIntervalDurationSec: number | null = null;
+  let tachogramDomainSec: number | null = null;
+  let resampledDurationSec: number | null = null;
+  let livePublishHz: number | null = null;
+  let lfHfComputedAt: number | null = null;
+
+  if (rrSource === "ppi") {
+    ppisMs = ppisFromInput;
+    // Corrected Y for Hub — never fabricate from scalar ppiMs. Alone ≠ recompute LF/HF.
+    rrsMs = ppisFromInput != null ? [...ppisFromInput] : null;
+    rrAvailable = rrsMs != null && rrsMs.length >= 2;
+    ppiSamples =
+      input.ppiSamples != null && input.ppiSamples.length > 0
+        ? input.ppiSamples.map((s) => ({ ...s }))
+        : null;
+    tachogramSamples =
+      input.tachogramSamples != null && input.tachogramSamples.length > 0
+        ? input.tachogramSamples.map((s) => ({ ...s }))
+        : null;
+    ppiTimesSec = copyNumberArray(input.ppiTimesSec);
+    rawIncludedPpiMs = copyNumberArray(input.rawIncludedPpiMs);
+    correctedPpiSeries = copyNumberArray(input.correctedPpiSeries);
+    resampledSeries = copyNumberArray(input.resampledSeries);
+    includedIntervalDurationSec = nonNegativeOrNull(
+      input.includedIntervalDurationSec ?? input.hrvWindowSeconds
+    );
+    tachogramDomainSec = nonNegativeOrNull(input.tachogramDomainSec);
+    resampledDurationSec = nonNegativeOrNull(input.resampledDurationSec);
+    livePublishHz = positiveOrNull(input.livePublishHz ?? 1);
+    lfHfComputedAt = nonNegativeOrNull(input.lfHfComputedAt);
+  } else if (rrSource === "ecg_rr") {
+    ppisMs = null;
+    ppiSamples = null;
+    tachogramSamples = null;
+    ppiTimesSec = null;
+    rawIncludedPpiMs = null;
+    correctedPpiSeries = null;
+    resampledSeries = null;
+    rrsMs = hrRrsMs;
+    if (rrAvailable == null) {
+      rrAvailable = rrsMs != null && rrsMs.length >= 2;
+    }
+  } else {
+    // hr_derived or unknown: do not fill rrsMs from PPI window.
+    ppisMs = null;
+    ppiSamples = null;
+    tachogramSamples = null;
+    ppiTimesSec = null;
+    rawIncludedPpiMs = null;
+    correctedPpiSeries = null;
+    resampledSeries = null;
+    rrsMs = hrRrsMs;
+  }
+
+  const lfHfValid = boolOrNull(input.lfHfValid);
+  const lfHfStatus = input.lfHfStatus ?? null;
+  // With a status, only `unavailable` hides powers. Without one, legacy rules:
+  // lfHfValid=false → null, true → allow 0, unset → positiveOrNull.
+  const hidden =
+    lfHfStatus != null ? lfHfStatus === "unavailable" : lfHfValid === false;
+  const allowZero = lfHfStatus != null || lfHfValid === true;
+  const powerOrNull = (value: number | null | undefined): number | null => {
+    if (hidden || value == null || !Number.isFinite(value)) {
+      return null;
+    }
+    if (allowZero) {
+      return value >= 0 ? value : null;
+    }
+    return value > 0 ? value : null;
+  };
+  const lfPower = powerOrNull(input.lfPower);
+  const hfPower = powerOrNull(input.hfPower);
+  const lfHfRatio = hidden ? null : positiveOrNull(input.lfHfRatio);
 
   return {
     deviceId: input.deviceId,
     deviceModel: input.deviceModel,
     hr: input.hr,
     hrv: positiveOrNull(input.hrv),
-    lfPower: positiveOrNull(input.lfPower),
-    hfPower: positiveOrNull(input.hfPower),
+    lfPower,
+    hfPower,
+    lfHfRatio,
+    lfHfValid,
+    lfHfStatus,
+    lfHfAcceptedRatio: nonNegativeOrNull(input.lfHfAcceptedRatio),
+    lfHfMaxArtifactGapSec: nonNegativeOrNull(input.lfHfMaxArtifactGapSec),
+    lfHfComputedAt,
     rrMs,
     rrSource,
     ppiMs,
+    ppisMs,
+    ppiSamples,
+    tachogramSamples,
+    ppiTimesSec,
+    rawIncludedPpiMs,
+    correctedPpiSeries,
+    resampledSeries,
+    includedIntervalDurationSec,
+    tachogramDomainSec,
+    resampledDurationSec,
+    hrvWindowSeconds:
+      includedIntervalDurationSec ??
+      nonNegativeOrNull(input.hrvWindowSeconds),
+    hrvIntervalCount: nonNegativeOrNull(input.hrvIntervalCount),
+    hrvMethod: input.hrvMethod ?? null,
+    hrvSamplingHz: positiveOrNull(input.hrvSamplingHz),
+    livePublishHz,
+    peakFrequencyHz: nonNegativeOrNull(input.peakFrequencyHz),
+    lfBandHz: input.lfBandHz ?? null,
+    hfBandHz: input.hfBandHz ?? null,
+    hrvPreprocessing: input.hrvPreprocessing ?? null,
     skinTemperatureC: positiveOrNull(input.skinTemperatureC),
     contactStatus: boolOrNull(input.contactStatus),
     contactStatusSupported: boolOrNull(input.contactStatusSupported),
@@ -236,7 +452,7 @@ export function buildPolarAblyHeartRatePayload(
     blocker: boolOrNull(input.blocker),
     ppgQuality: positiveOrNull(input.ppgQuality),
     correctedHr: positiveOrNull(input.correctedHr),
-    rrAvailable: boolOrNull(input.rrAvailable),
+    rrAvailable,
     rrsMs,
     appVersion: `v${APP_VERSION}`,
   };

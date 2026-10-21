@@ -108,6 +108,9 @@ export default function MonitorScreen() {
                 hrv={session.hrv}
                 lfPower={session.lfPower}
                 hfPower={session.hfPower}
+                lfHfStatus={session.lfHfStatus}
+                lfHfProgress={session.lfHfProgress}
+                lfHfRatio={session.lfHfRatio}
                 rrMs={session.rrMs}
                 rrSource={session.rrSource}
                 ecgMicroVolts={session.ecgMicroVolts}
