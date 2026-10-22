@@ -3,7 +3,7 @@
  */
 
 import { PolarOfflinePpiSample } from "@/features/devices/polar/polar-ble-sdk";
-import { resolveRrInterval } from "./rr-interval";
+import { resolveRrInterval } from "@/features/hrv/ppi/rr-interval";
 import { TrackSample } from "./session-track-buffer";
 
 export type TrackSource = "polar_offline_ppi" | "app_live_buffer";

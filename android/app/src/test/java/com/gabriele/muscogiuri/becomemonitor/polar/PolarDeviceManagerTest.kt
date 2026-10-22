@@ -1,6 +1,8 @@
 package com.gabriele.muscogiuri.becomemonitor.polar
 
 import com.polar.sdk.api.PolarBleApi
+import com.polar.sdk.api.PolarBleApiCallback
+import com.polar.sdk.api.model.PolarHrData
 import com.polar.sdk.api.model.PolarDeviceInfo
 import io.reactivex.rxjava3.android.plugins.RxAndroidPlugins
 import io.reactivex.rxjava3.core.Flowable
@@ -199,5 +201,111 @@ class PolarDeviceManagerTest {
 
         // Assert
         assert(!deviceManager.isDeviceConnected())
+    }
+
+    // --- Reference device (H10 next to a 360/Loop) ---
+
+    private fun apiCallback(): PolarBleApiCallback {
+        val captor = argumentCaptor<PolarBleApiCallback>()
+        verify(mockApi).setApiCallback(captor.capture())
+        return captor.firstValue
+    }
+
+    private fun deviceInfo(id: String, @Suppress("UNUSED_PARAMETER") name: String): PolarDeviceInfo {
+        val info = mock<PolarDeviceInfo>()
+        whenever(info.deviceId).thenReturn(id)
+        return info
+    }
+
+    @Test
+    fun `reference connect is routed to reference callback and leaves primary state untouched`() {
+        val callback = apiCallback()
+        var primaryConnected = 0
+        var referenceConnected = 0
+        deviceManager.onDeviceConnected = { primaryConnected += 1 }
+        deviceManager.onReferenceDeviceConnected = { referenceConnected += 1 }
+
+        deviceManager.connectReferenceDevice("H10-1")
+        callback.deviceConnected(deviceInfo("H10-1", "Polar H10 1"))
+
+        assert(referenceConnected == 1)
+        assert(primaryConnected == 0)
+        assert(deviceManager.getConnectedDeviceId() == null)
+    }
+
+    @Test
+    fun `reference disconnect does not drop the primary device`() {
+        val callback = apiCallback()
+        var primaryDisconnected = 0
+        var referenceDisconnected = 0
+        deviceManager.onDeviceDisconnected = { primaryDisconnected += 1 }
+        deviceManager.onReferenceDeviceDisconnected = { referenceDisconnected += 1 }
+
+        callback.deviceConnected(deviceInfo("360-1", "Polar 360 1"))
+        deviceManager.connectReferenceDevice("H10-1")
+        callback.deviceConnected(deviceInfo("H10-1", "Polar H10 1"))
+        callback.deviceDisconnected(deviceInfo("H10-1", "Polar H10 1"))
+
+        assert(referenceDisconnected == 1)
+        assert(primaryDisconnected == 0)
+        assert(deviceManager.getConnectedDeviceId() == "360-1")
+    }
+
+    @Test
+    fun `late disconnect after disconnectReferenceDevice is still routed to reference`() {
+        val callback = apiCallback()
+        var primaryDisconnected = 0
+        var referenceDisconnected = 0
+        deviceManager.onDeviceDisconnected = { primaryDisconnected += 1 }
+        deviceManager.onReferenceDeviceDisconnected = { referenceDisconnected += 1 }
+
+        callback.deviceConnected(deviceInfo("360-1", "Polar 360 1"))
+        deviceManager.connectReferenceDevice("H10-1")
+        deviceManager.disconnectReferenceDevice()
+        // The SDK reports the disconnect asynchronously, after our call returned.
+        callback.deviceDisconnected(deviceInfo("H10-1", "Polar H10 1"))
+
+        assert(referenceDisconnected == 1)
+        assert(primaryDisconnected == 0)
+        assert(deviceManager.getConnectedDeviceId() == "360-1")
+    }
+
+    @Test
+    fun `HR notification from the reference device never reaches the primary callback`() {
+        val callback = apiCallback()
+        val received = mutableListOf<String>()
+        deviceManager.onHeartRateReceived = { id, _ -> received += id }
+        val sample = PolarHrData.PolarHrSample(72, 72, 0, listOf(820), true, true, true)
+
+        deviceManager.connectReferenceDevice("H10-1")
+        callback.hrNotificationReceived("H10-1", sample)
+        callback.hrNotificationReceived("360-1", sample)
+
+        assert(received == listOf("360-1"))
+    }
+
+    @Test
+    fun `reference connect rejects the primary device id`() {
+        val callback = apiCallback()
+        callback.deviceConnected(deviceInfo("360-1", "Polar 360 1"))
+
+        val result = deviceManager.connectReferenceDevice("360-1")
+
+        assert(result.isFailure)
+        verify(mockApi, never()).connectToDevice("360-1")
+    }
+
+    @Test
+    fun `connecting a former reference device as primary routes it back to primary`() {
+        val callback = apiCallback()
+        var primaryConnected = 0
+        deviceManager.onDeviceConnected = { primaryConnected += 1 }
+
+        deviceManager.connectReferenceDevice("H10-1")
+        deviceManager.connectToDevice("H10-1")
+        callback.deviceConnected(deviceInfo("H10-1", "Polar H10 1"))
+
+        assert(primaryConnected == 1)
+        assert(deviceManager.getConnectedDeviceId() == "H10-1")
     }
 }

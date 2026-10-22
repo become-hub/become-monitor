@@ -210,13 +210,14 @@ export class AblyService {
      * Metodo generico per inviare messaggi ad Ably.
      * During transient disconnect/reconnect, publish is still called so the SDK
      * can queue (`queueMessages` default) and flush when connected again.
+     * @returns Promise that resolves true on Ably ack, false on drop/reject.
      */
     sendMessage(
         userId: number,
         eventType: string,
         data: any,
         deviceCode?: string
-    ) {
+    ): Promise<boolean> {
         // Debug ridotto - solo per errori
         console.log(`AblyService: 📤 Sending ${eventType} to user ${userId}`);
 
@@ -227,7 +228,7 @@ export class AblyService {
                     this.ably?.connection?.state ?? "n/a"
                 }, isConnected: ${this.isConnected}`
             );
-            return;
+            return Promise.resolve(false);
         }
 
         try {
@@ -245,8 +246,13 @@ export class AblyService {
             );
             this.trackPublish(publishResult, message);
             console.log(`AblyService: ✅ Sent ${eventType} to private:${userId}`);
+            return publishResult.then(
+                () => true,
+                () => false
+            );
         } catch (error: any) {
             console.error(`AblyService: ❌ Failed to send ${eventType}:`, error.message);
+            return Promise.resolve(false);
         }
     }
 

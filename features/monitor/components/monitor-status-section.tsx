@@ -6,8 +6,8 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
-import type { HrvAnalysisMode } from "@/features/monitor/hooks/hrv-analysis-mode";
-import { hrvProgressPercent } from "@/features/monitor/hooks/hrv-analysis-mode";
+import type { HrvAnalysisMode } from "@/features/hrv/core/hrv-analysis-mode";
+import { hrvProgressPercent } from "@/features/hrv/core/hrv-analysis-mode";
 import type { AblySendStats } from "@/services/ably-service";
 import { AblyLastEventModal } from "./ably-last-event-modal";
 import {

@@ -21,25 +21,45 @@ import {
   type LfHfProgress,
   type LfHfResult,
   type LfHfStatus,
-} from "@/services/hrv-calculator";
+} from "@/features/hrv/core/hrv-calculator";
+import { APP_VERSION } from "@/constants/app-version";
 import {
-  buildPolarAblyHeartRatePayload,
   EMPTY_POLAR_HR_EXTRAS,
   EMPTY_POLAR_PPI_EXTRAS,
-  polarExtrasFromStash,
   stashPolarHrExtras,
   stashPolarPpiExtras,
   type PolarHrExtrasStash,
   type PolarPpiExtrasStash,
-} from "@/services/polar-ably-payload";
+} from "@/features/devices/polar/polar-signal-extras";
+import {
+  buildPolarHeartRateTick,
+  buildPolarH10HeartRateTick,
+} from "@/features/hrv/contract/build-tick";
+import { buildPolarSessionEndPayload } from "@/features/hrv/contract/build-session-end";
+import { buildPolarSessionMetaPayload } from "@/features/hrv/contract/build-session-meta";
+import type { PolarContractDeviceModel } from "@/features/hrv/contract/types";
+import {
+  ackUpTo,
+  bumpEpoch,
+  createBeatOutbox,
+  markInFlight,
+  nackFrom,
+  nextFrame,
+  pushBeat,
+  selectPending,
+  type BeatOutbox,
+} from "@/features/hrv/ppi/beat-outbox";
 import {
   appendPpiSample,
+  classifyPpiRejectReason,
   computeLfHfForPpiWindow,
   createEmptyPpiSampleWindow,
   HRV_PREPROCESSING_EXPORT,
-  ppiSamplesForExport,
+  rejectReasonToKind,
   type PpiSampleWindow,
-} from "@/services/ppi-sample-window";
+} from "@/features/hrv/ppi/ppi-sample-window";
+import { isUsablePpiMs } from "@/features/hrv/ppi/ppi-limits";
+import { buildWindowCheckpoint } from "@/features/hrv/ppi/window-checkpoint";
 import {
   buildPolarSignalQualityUi,
   EMPTY_POLAR_SIGNAL_QUALITY,
@@ -57,6 +77,9 @@ import {
   ensurePolarReady,
   startPolarStreamingForProduct,
 } from "@/features/devices/polar/polar-device-setup";
+import { isPolarReferenceCandidate } from "@/features/devices/polar/polar-reference-device";
+import { referenceRecorder } from "@/features/hrv/reference/reference-recorder";
+import { useReferenceStore } from "@/stores/reference-store";
 import {
   isSupportedPolarDevice,
   PolarProduct,
@@ -77,7 +100,7 @@ import {
 } from "@/features/devices/muse/muse-products";
 import { isMuseFamilyAvailable } from "@/constants/device-availability";
 import { captureException, logToSentry } from "@/services/sentry";
-import { resolveRrInterval, type RrSource } from "@/services/rr-interval";
+import { resolveRrInterval, type RrSource } from "@/features/hrv/ppi/rr-interval";
 import { sessionTrackBuffer } from "@/services/session-track-buffer";
 import { StorageService, StoredAuthData } from "@/services/storage-service";
 import {
@@ -90,7 +113,6 @@ import {
   HR_ZERO_GRACE_MS,
   isFresh,
   isSustainedHrZero,
-  isUsablePpiMs,
   POLAR_LIVE_TICK_MS,
   polarLiveIntervalMs,
   PPI_STALE_MS,
@@ -111,7 +133,7 @@ import {
   pushHrvInterval,
   type HrvEpochAccumulator,
   type HrvIntervalSource,
-} from "./hrv-analysis-mode";
+} from "@/features/hrv/core/hrv-analysis-mode";
 import {
   useScanStore,
   type DiscoveredDevice,
@@ -306,6 +328,17 @@ export function useMonitorSession() {
   const ablyHeartRateLatchedRef = useRef(false);
   /** Wall-clock ms when the current stale (hr=0) Ably period started; 0 if not stale. */
   const signalStaleSinceRef = useRef(0);
+  /** Ably delta beat outbox (survives PPI window resets). */
+  const beatOutboxRef = useRef<BeatOutbox>(createBeatOutbox());
+  /** Short session id linking ticks / sessionMeta / sessionEnd. */
+  const ablySessionIdRef = useRef<string | null>(null);
+  /** heartRate ticks published in this Ably session (for sessionEnd). */
+  const ablyTickCountRef = useRef(0);
+  /** True after sessionMeta has been sent for the current ep. */
+  const sessionMetaSentForEpRef = useRef<number | null>(null);
+  /** Publish windowCrc every N ticks. */
+  const windowCrcTickCounterRef = useRef(0);
+  const WINDOW_CRC_EVERY_N_TICKS = 30;
 
   // Derived state
   const connectedProduct: PolarProduct | null = resolvePolarProduct(connectedDeviceName);
@@ -462,6 +495,72 @@ export function useMonitorSession() {
     setLfHfProgress(null);
     lfHfRatioRef.current = null;
     setLfHfRatio(null);
+    // New epoch for Ably beats; pending outbox beats are kept until ack.
+    beatOutboxRef.current = bumpEpoch(beatOutboxRef.current);
+    sessionMetaSentForEpRef.current = null;
+  };
+
+  const ensureAblySessionId = (): string => {
+    if (ablySessionIdRef.current == null) {
+      ablySessionIdRef.current = Math.random().toString(36).slice(2, 10);
+    }
+    return ablySessionIdRef.current;
+  };
+
+  const publishSessionMetaIfNeeded = (
+    userId: number,
+    deviceCode: string | undefined
+  ) => {
+    if (!ablyService.current) return;
+    const box = beatOutboxRef.current;
+    if (sessionMetaSentForEpRef.current === box.ep) return;
+    const sid = ensureAblySessionId();
+    const productId = resolvePolarProductId(connectedDeviceNameRef.current);
+    const meta = buildPolarSessionMetaPayload({
+      sid,
+      ep: box.ep,
+      deviceId: connectedDeviceIdRef.current,
+      deviceModel: (productId as PolarContractDeviceModel | null) ?? null,
+      rrSource: rrSourceRef.current || null,
+      contactStatusSupported:
+        polarPpiExtrasRef.current.skinContactSupported ??
+        polarHrExtrasRef.current.contactSupported ??
+        null,
+      hrvAnalysisMode: useSettingsStore.getState().hrvAnalysisMode,
+      hrvPreprocessing: HRV_PREPROCESSING_EXPORT,
+      appVersion: `v${APP_VERSION}`,
+    });
+    const metaEp = box.ep;
+    // Marked as sent immediately (no duplicate per tick); reverted if Ably
+    // drops/rejects it so the next tick re-publishes it.
+    sessionMetaSentForEpRef.current = metaEp;
+    ablyService.current
+      .sendMessage(userId, "sessionMeta", meta, deviceCode)
+      .then((ok) => {
+        if (
+          !ok &&
+          ablySessionIdRef.current === sid &&
+          sessionMetaSentForEpRef.current === metaEp
+        ) {
+          sessionMetaSentForEpRef.current = null;
+        }
+      });
+  };
+
+  const publishSessionEnd = (
+    userId: number,
+    deviceCode: string | undefined
+  ) => {
+    if (!ablyService.current || ablySessionIdRef.current == null) return;
+    const box = beatOutboxRef.current;
+    const end = buildPolarSessionEndPayload({
+      sid: ablySessionIdRef.current,
+      lastSeq: Math.max(0, box.nextSeq - 1),
+      beatCount: Math.max(0, box.nextSeq - 1),
+      epochs: box.ep,
+      ticks: ablyTickCountRef.current,
+    });
+    ablyService.current.sendMessage(userId, "sessionEnd", end, deviceCode);
   };
 
   const resetHrvEpochAccumulator = (clearMetrics: boolean) => {
@@ -699,10 +798,36 @@ export function useMonitorSession() {
     const mode = useSettingsStore.getState().hrvAnalysisMode;
     let appendedAny = false;
 
+    beatOutboxRef.current = nextFrame(beatOutboxRef.current);
+
     data.samples.forEach((sample) => {
       const ppiMs = sample.ppi;
       polarPpiExtrasRef.current = stashPolarPpiExtras(sample);
       syncPolarSignalQualityUi();
+
+      const rejectReason = classifyPpiRejectReason(mode, {
+        ppiMs,
+        errorEstimate: sample.errorEstimate,
+        blocker: sample.blocker,
+      });
+      const kind = rejectReasonToKind(rejectReason);
+      const pushed = pushBeat(beatOutboxRef.current, {
+        ppiMs,
+        errorEstimate:
+          sample.errorEstimate != null && Number.isFinite(sample.errorEstimate)
+            ? sample.errorEstimate
+            : null,
+        kind,
+        blocker: typeof sample.blocker === "boolean" ? sample.blocker : null,
+      });
+      beatOutboxRef.current = pushed.outbox;
+      // Passive tap for the developer H10 comparison; no-op unless the reference is recording.
+      referenceRecorder.recordPrimaryBeat({
+        tMs: frameNowMs,
+        seq: pushed.seq,
+        ppiMs,
+        kind,
+      });
 
       // Every SDK sample enters the LF/HF window (accepted or rejected with reason).
       ppiSampleWindowRef.current = appendPpiSample(ppiSampleWindowRef.current, {
@@ -711,6 +836,7 @@ export function useMonitorSession() {
         blocker: sample.blocker,
         frameNowMs,
         mode,
+        seq: pushed.seq,
       });
       appendedAny = true;
 
@@ -1102,17 +1228,12 @@ export function useMonitorSession() {
     const currentHrv = hrvRef.current;
     const lf = lfPowerRef.current;
     const hf = hfPowerRef.current;
-    const lfHfValid = lfHfValidRef.current;
     const currentLfHfStatus = lfHfStatusRef.current;
     // LF/HF only with HRV ready (same gate as starting Ably heartRate).
     const lfHfShown =
       currentHrv > 0 && isLfHfPublishable(currentLfHfStatus);
-    const lfHfRatio = lfHfRatioRef.current;
     const currentRrMs = rrMsRef.current;
     const currentRrSource = rrSourceRef.current;
-    const lfHfResult = lastLfHfResultRef.current;
-    const lfHfSeries = lfHfResult?.correctedPpiSeries ?? [];
-    const ppiWindow = ppiSampleWindowRef.current;
 
     if (currentHrv > 0) {
       setHrv(currentHrv);
@@ -1185,165 +1306,107 @@ export function useMonitorSession() {
       const liveHrv = hrvRef.current;
       const liveLf = lfPowerRef.current;
       const liveHf = hfPowerRef.current;
-      const liveLfHfValid = lfHfValidRef.current;
       const liveLfHfStatus = lfHfStatusRef.current;
       const liveLfHfShown =
         !signalStale && liveHrv > 0 && isLfHfPublishable(liveLfHfStatus);
-      const liveLfHfRatio = lfHfRatioRef.current;
-      const liveRrMs = rrMsRef.current;
       const liveRrSource = rrSourceRef.current;
-      const liveLfHfResult = lastLfHfResultRef.current;
-      const liveLfHfSeries = liveLfHfResult?.correctedPpiSeries ?? [];
-      const livePpiWindow = ppiSampleWindowRef.current;
+      const sid = ensureAblySessionId();
+      const deviceCode = userStateBiometric.deviceCode;
 
-      ablyService.current.sendMessage(
+      if (!isMuse) {
+        publishSessionMetaIfNeeded(userStateBiometric.userId, deviceCode);
+      }
+
+      let payload: Record<string, unknown>;
+      let ackUpToSeq: number | null = null;
+      let firstBeatSeq: number | null = null;
+
+      if (isMuse) {
+        payload = {
+          deviceId: connectedDeviceIdRef.current,
+          deviceFamily: "muse",
+          hr: signalStale ? 0 : publishHr,
+          alpha: signalStale ? null : bandAlphaRef.current || null,
+          theta: signalStale ? null : bandThetaRef.current || null,
+          beta: signalStale ? null : bandBetaRef.current || null,
+          delta: signalStale ? null : bandDeltaRef.current || null,
+          gamma: signalStale ? null : bandGammaRef.current || null,
+          signalStale,
+          staleSinceMs,
+        };
+      } else if (liveRrSource === "ecg_rr") {
+        payload = buildPolarH10HeartRateTick({
+          sid,
+          hr: signalStale ? 0 : publishHr,
+          signalStale,
+          hrv: !signalStale && liveHrv > 0 ? liveHrv : null,
+          lfPower: liveLfHfShown ? liveLf : null,
+          hfPower: liveLfHfShown ? liveHf : null,
+          lfHfStatus: signalStale ? "unavailable" : liveLfHfStatus,
+          rrsMs: polarHrExtrasRef.current.rrsMs,
+        }) as unknown as Record<string, unknown>;
+      } else {
+        // Stale tick sends no beats: keep them queued (no ack, no in-flight).
+        const pending = signalStale
+          ? []
+          : selectPending(beatOutboxRef.current);
+        if (pending.length > 0) {
+          firstBeatSeq = pending[0][0];
+          ackUpToSeq = pending[pending.length - 1][0];
+          beatOutboxRef.current = markInFlight(
+            beatOutboxRef.current,
+            ackUpToSeq
+          );
+        }
+        windowCrcTickCounterRef.current += 1;
+        const includeCrc =
+          windowCrcTickCounterRef.current % WINDOW_CRC_EVERY_N_TICKS === 0;
+        const checkpoint = buildWindowCheckpoint(ppiSampleWindowRef.current);
+        payload = buildPolarHeartRateTick({
+          sid,
+          hr: signalStale ? 0 : publishHr,
+          signalStale,
+          hrv: !signalStale && liveHrv > 0 ? liveHrv : null,
+          lfPower: liveLfHfShown ? liveLf : null,
+          hfPower: liveLfHfShown ? liveHf : null,
+          lfHfStatus: signalStale ? "unavailable" : liveLfHfStatus,
+          beats: pending,
+          windowFromSeq: signalStale ? null : checkpoint.windowFromSeq,
+          includeWindowCheckpoint: !signalStale && includeCrc,
+          windowCrc: checkpoint.windowCrc,
+          windowBeatCount: checkpoint.windowBeatCount,
+          blocker: polarPpiExtrasRef.current.blocker,
+          contactStatus:
+            polarPpiExtrasRef.current.skinContactSupported === true
+              ? polarPpiExtrasRef.current.skinContactStatus
+              : polarHrExtrasRef.current.contactSupported === true
+                ? polarHrExtrasRef.current.contactDetected
+                : null,
+          skinTemperatureC: signalStale
+            ? null
+            : skinTemperatureCRef.current,
+        }) as unknown as Record<string, unknown>;
+      }
+
+      const publishPromise = ablyService.current.sendMessage(
         userStateBiometric.userId,
         "heartRate",
-        isMuse
-          ? {
-              deviceId: connectedDeviceIdRef.current,
-              deviceFamily: "muse",
-              hr: signalStale ? 0 : publishHr,
-              alpha: signalStale ? null : bandAlphaRef.current || null,
-              theta: signalStale ? null : bandThetaRef.current || null,
-              beta: signalStale ? null : bandBetaRef.current || null,
-              delta: signalStale ? null : bandDeltaRef.current || null,
-              gamma: signalStale ? null : bandGammaRef.current || null,
-              signalStale,
-              staleSinceMs,
-            }
-          : buildPolarAblyHeartRatePayload({
-              deviceId: connectedDeviceIdRef.current,
-              deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
-              hr: signalStale ? 0 : publishHr,
-              signalStale,
-              staleSinceMs,
-              hrv:
-                !signalStale && liveHrv > 0 ? liveHrv : null,
-              lfPower: liveLfHfShown ? liveLf : null,
-              hfPower: liveLfHfShown ? liveHf : null,
-              lfHfRatio: liveLfHfShown ? liveLfHfRatio : null,
-              lfHfValid: signalStale ? null : liveLfHfValid,
-              lfHfStatus: signalStale ? "unavailable" : liveLfHfStatus,
-              lfHfAcceptedRatio: signalStale
-                ? null
-                : liveLfHfResult?.acceptedRatio ?? null,
-              lfHfMaxArtifactGapSec: signalStale
-                ? null
-                : liveLfHfResult?.maxArtifactGapSec ?? null,
-              lfHfComputedAt: signalStale
-                ? null
-                : liveLfHfResult?.lfHfComputedAt ?? null,
-              rrMs:
-                !signalStale && liveRrMs > 0 ? liveRrMs : null,
-              rrSource: signalStale ? null : liveRrSource,
-              ppiMs:
-                !signalStale && liveRrSource === "ppi" ? liveRrMs : null,
-              // ppisMs/rrsMs = corrected Y (compat); recompute needs tachogramSamples / ppiTimesSec.
-              ppisMs:
-                !signalStale &&
-                liveRrSource === "ppi" &&
-                liveLfHfSeries.length > 0
-                  ? liveLfHfSeries
-                  : null,
-              ppiSamples:
-                !signalStale &&
-                liveRrSource === "ppi" &&
-                livePpiWindow.samples.length > 0
-                  ? ppiSamplesForExport(livePpiWindow)
-                  : null,
-              tachogramSamples:
-                !signalStale &&
-                liveRrSource === "ppi" &&
-                liveLfHfResult != null &&
-                liveLfHfResult.tachogramSamples.length > 0
-                  ? liveLfHfResult.tachogramSamples
-                  : null,
-              ppiTimesSec:
-                !signalStale &&
-                liveRrSource === "ppi" &&
-                liveLfHfResult != null &&
-                liveLfHfResult.ppiTimesSec.length > 0
-                  ? [...liveLfHfResult.ppiTimesSec]
-                  : null,
-              rawIncludedPpiMs:
-                !signalStale &&
-                liveRrSource === "ppi" &&
-                liveLfHfResult != null &&
-                liveLfHfResult.rawIncludedPpiMs.length > 0
-                  ? [...liveLfHfResult.rawIncludedPpiMs]
-                  : null,
-              correctedPpiSeries:
-                !signalStale &&
-                liveRrSource === "ppi" &&
-                liveLfHfSeries.length > 0
-                  ? liveLfHfSeries
-                  : null,
-              resampledSeries:
-                !signalStale &&
-                liveRrSource === "ppi" &&
-                liveLfHfResult != null &&
-                liveLfHfResult.resampledSeries.length > 0
-                  ? [...liveLfHfResult.resampledSeries]
-                  : null,
-              includedIntervalDurationSec:
-                !signalStale && liveRrSource === "ppi"
-                  ? liveLfHfResult?.includedIntervalDurationSec ?? null
-                  : null,
-              tachogramDomainSec:
-                !signalStale && liveRrSource === "ppi"
-                  ? liveLfHfResult?.tachogramDomainSec ?? null
-                  : null,
-              resampledDurationSec:
-                !signalStale && liveRrSource === "ppi"
-                  ? liveLfHfResult?.resampledDurationSec ?? null
-                  : null,
-              hrvWindowSeconds:
-                !signalStale && liveRrSource === "ppi"
-                  ? liveLfHfResult?.includedIntervalDurationSec ?? null
-                  : null,
-              hrvIntervalCount:
-                !signalStale && liveRrSource === "ppi"
-                  ? liveLfHfSeries.length
-                  : null,
-              hrvMethod:
-                !signalStale && liveRrSource === "ppi"
-                  ? HRV_PREPROCESSING_EXPORT.method
-                  : null,
-              hrvSamplingHz:
-                !signalStale && liveRrSource === "ppi"
-                  ? HRV_PREPROCESSING_EXPORT.samplingHz
-                  : null,
-              livePublishHz:
-                !signalStale && liveRrSource === "ppi"
-                  ? HRV_PREPROCESSING_EXPORT.livePublishHz
-                  : null,
-              peakFrequencyHz:
-                !signalStale && liveRrSource === "ppi" && liveLfHfShown
-                  ? liveLfHfResult?.peakFrequencyHz ?? null
-                  : null,
-              lfBandHz:
-                !signalStale && liveRrSource === "ppi"
-                  ? HRV_PREPROCESSING_EXPORT.lfBandHz
-                  : null,
-              hfBandHz:
-                !signalStale && liveRrSource === "ppi"
-                  ? HRV_PREPROCESSING_EXPORT.hfBandHz
-                  : null,
-              hrvPreprocessing:
-                !signalStale && liveRrSource === "ppi"
-                  ? HRV_PREPROCESSING_EXPORT
-                  : null,
-              skinTemperatureC: signalStale
-                ? null
-                : skinTemperatureCRef.current,
-              ...polarExtrasFromStash(
-                polarPpiExtrasRef.current,
-                polarHrExtrasRef.current
-              ),
-            }),
-        userStateBiometric.deviceCode
+        payload,
+        deviceCode
       );
+      if (ackUpToSeq != null && firstBeatSeq != null) {
+        const seqToAck = ackUpToSeq;
+        const seqFrom = firstBeatSeq;
+        publishPromise.then((ok) => {
+          // Late result from a previous session: seqs restarted, ignore.
+          if (ablySessionIdRef.current !== sid) return;
+          beatOutboxRef.current = ok
+            ? ackUpTo(beatOutboxRef.current, seqToAck)
+            : nackFrom(beatOutboxRef.current, seqFrom);
+
+        });
+      }
+      ablyTickCountRef.current += 1;
       if (!ablyHeartRateLatchedRef.current) {
         ablyHeartRateLatchedRef.current = true;
         setAblyHeartRateLatched(true);
@@ -1369,10 +1432,19 @@ export function useMonitorSession() {
   };
 
   const clearAblyHeartRateLatch = () => {
+    const user = useUserStore.getState();
+    if (user.userId && ablyHeartRateLatchedRef.current) {
+      publishSessionEnd(user.userId, user.deviceCode);
+    }
     ablyHeartRateLatchedRef.current = false;
     signalStaleSinceRef.current = 0;
     setAblyHeartRateLatched(false);
     ablyService.current?.resetSendStats();
+    beatOutboxRef.current = createBeatOutbox();
+    ablySessionIdRef.current = null;
+    ablyTickCountRef.current = 0;
+    sessionMetaSentForEpRef.current = null;
+    windowCrcTickCounterRef.current = 0;
   };
 
   const startBiometricSending = () => {
@@ -1435,8 +1507,8 @@ export function useMonitorSession() {
     polarHrExtrasRef.current = { ...EMPTY_POLAR_HR_EXTRAS };
     setPolarSignalQuality({ ...EMPTY_POLAR_SIGNAL_QUALITY });
     setMuseHr(0);
+    // Clears HRV epoch + PPI window (bumps Ably beat epoch once).
     resetHrvEpochAccumulator(false);
-    resetPpiSampleWindow();
     lastValidPpiAtRef.current = 0;
     lastPpiEventAtRef.current = 0;
     hrSumBucketRef.current = 0;
@@ -1518,7 +1590,6 @@ export function useMonitorSession() {
     polarPpiExtrasRef.current = { ...EMPTY_POLAR_PPI_EXTRAS };
     polarHrExtrasRef.current = { ...EMPTY_POLAR_HR_EXTRAS };
     setPolarSignalQuality({ ...EMPTY_POLAR_SIGNAL_QUALITY });
-    resetPpiSampleWindow();
     setIsSignalLost(false);
     setConnectedFamily(null);
     setEegTp9(0);
@@ -1972,6 +2043,19 @@ export function useMonitorSession() {
 
     polarSdk.addEventListener("onDeviceFound", (device: PolarDeviceInfo) => {
       console.log(`Monitor: 📡 Trovato: ${device.name} (${device.deviceId})`);
+
+      // Developer Mode: an H10 (hidden as primary device) can be picked as read-only reference.
+      if (
+        useSettingsStore.getState().developerMode &&
+        !isSupportedPolarDevice(device.name) &&
+        isPolarReferenceCandidate(device.name)
+      ) {
+        useReferenceStore.getState().upsertCandidate({
+          deviceId: device.deviceId,
+          name: device.name,
+        });
+        return;
+      }
 
       if (!isSupportedPolarDevice(device.name)) {
         console.log(`Monitor: ⏭️ Ignorato (non supportato): ${device.name}`);

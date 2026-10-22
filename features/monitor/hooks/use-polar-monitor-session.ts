@@ -5,7 +5,7 @@
  */
 
 import type { PolarProduct } from "@/features/devices/polar/polar-products";
-import type { RrSource } from "@/services/rr-interval";
+import type { RrSource } from "@/features/hrv/ppi/rr-interval";
 
 export type PolarMonitorMetrics = {
   heartRate: number;

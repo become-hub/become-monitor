@@ -6,7 +6,7 @@
 // Mock Ably prima dell'import
 import * as Ably from 'ably';
 import { AblyService, ConnectionStatus } from '../ably-service';
-import { buildPolarAblyHeartRatePayload } from '../polar-ably-payload';
+import { buildPolarHeartRateTick } from '@/features/hrv/contract/build-tick';
 
 jest.mock('ably', () => ({
     Realtime: jest.fn(),
@@ -325,21 +325,20 @@ describe('AblyService', () => {
             expect(message).toHaveProperty('timestamp');
         });
 
-        it('pubblica payload Polar costruito da buildPolarAblyHeartRatePayload senza perdere campi', () => {
+        it('pubblica payload Polar v2 (tick snello) senza perdere campi', () => {
             ablyService.connectWithToken('test-token', 456, 'dev-123');
             const onCallback = mockAbly.connection.on.mock.calls[0][0];
             onCallback({ current: 'connected' });
 
-            const polarPayload = buildPolarAblyHeartRatePayload({
-                deviceId: 'loop-1',
-                deviceModel: 'polar_loop',
+            const polarPayload = buildPolarHeartRateTick({
+                sid: 'a1b2c3',
                 hr: 74,
                 hrv: 42,
                 lfPower: 1200,
                 hfPower: 800,
-                rrMs: 812,
-                rrSource: 'ppi',
-                ppiMs: 812,
+                lfHfStatus: 'provisional',
+                beats: [[1, 812, 6, 0, 0, 1, 1]],
+                windowFromSeq: 1,
                 skinTemperatureC: 33.4,
             });
 
@@ -351,39 +350,31 @@ describe('AblyService', () => {
                 type: 'heartRate',
                 code: 'code-1',
             });
-            expect(message.deviceModel).toBe('polar_loop');
-            expect(message.ppiMs).toBe(812);
+            expect(message.sid).toBe('a1b2c3');
+            expect(message.beats).toEqual([[1, 812, 6, 0, 0, 1, 1]]);
             expect(message.skinTemperatureC).toBe(33.4);
-            expect(message.rrSource).toBe('ppi');
+            expect(message).not.toHaveProperty('ppisMs');
             expect(message).not.toHaveProperty('date');
             expect(message).toHaveProperty('timestamp');
         });
 
-        it('non inventa ppiMs su publish quando il builder lo azzera (hr_derived)', () => {
+        it('sendMessage risolve true su ack e false su rifiuto', async () => {
             ablyService.connectWithToken('test-token', 456, 'dev-123');
             const onCallback = mockAbly.connection.on.mock.calls[0][0];
             onCallback({ current: 'connected' });
 
-            const polarPayload = buildPolarAblyHeartRatePayload({
-                deviceId: '360',
-                deviceModel: 'polar_360',
-                hr: 75,
-                rrMs: 800,
-                rrSource: 'hr_derived',
-                ppiMs: 999,
-                skinTemperatureC: 0,
-            });
+            await expect(
+                ablyService.sendMessage(456, 'heartRate', { hr: 70 }, 'dev-123')
+            ).resolves.toBe(true);
 
-            ablyService.sendMessage(456, 'heartRate', polarPayload, 'code-1');
-
-            const message = JSON.parse(mockChannel.publish.mock.calls[0][1]);
-            expect(message.hr).toBe(75);
-            expect(message.deviceModel).toBe('polar_360');
-            expect(message.rrSource).toBe('hr_derived');
-            expect(message.ppiMs).toBeNull();
-            expect(message.skinTemperatureC).toBeNull();
-            expect(message).not.toHaveProperty('date');
+            mockChannel.publish = jest.fn(() =>
+                Promise.reject(new Error('Maximum size of messages exceeded'))
+            );
+            await expect(
+                ablyService.sendMessage(456, 'heartRate', { hr: 71 }, 'dev-123')
+            ).resolves.toBe(false);
         });
+
 
         it('gestisce errore durante publish', () => {
             mockChannel.publish.mockImplementation(() => {

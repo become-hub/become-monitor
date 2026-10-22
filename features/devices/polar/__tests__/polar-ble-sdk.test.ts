@@ -16,6 +16,10 @@ jest.mock('react-native', () => {
         startMonitorForegroundService: jest.fn(),
         updateMonitorForegroundService: jest.fn(),
         stopMonitorForegroundService: jest.fn(),
+        connectReferenceDevice: jest.fn(),
+        disconnectReferenceDevice: jest.fn(),
+        startReferenceHrStreaming: jest.fn(),
+        stopReferenceHrStreaming: jest.fn(),
     };
 
     const mockEventEmitter = {
@@ -46,6 +50,10 @@ const mockPolarBleModule = NativeModules.PolarBleModule as {
     ensureFirstTimeUse: jest.Mock;
     startPpiStreaming: jest.Mock;
     stopPpiStreaming: jest.Mock;
+    connectReferenceDevice: jest.Mock;
+    disconnectReferenceDevice: jest.Mock;
+    startReferenceHrStreaming: jest.Mock;
+    stopReferenceHrStreaming: jest.Mock;
 };
 
 // Access event emitter mock via the constructor call pattern
@@ -127,6 +135,43 @@ describe('PolarBleSdk', () => {
             await polarSdk.disconnectFromDevice('ABC123');
 
             expect(mockPolarBleModule.disconnectFromDevice).toHaveBeenCalledWith('ABC123');
+        });
+    });
+
+    describe('reference device', () => {
+        it('inoltra connect/stream/disconnect al modulo nativo dedicato', async () => {
+            mockPolarBleModule.connectReferenceDevice.mockResolvedValue(undefined);
+            mockPolarBleModule.startReferenceHrStreaming.mockResolvedValue(undefined);
+            mockPolarBleModule.stopReferenceHrStreaming.mockResolvedValue(undefined);
+            mockPolarBleModule.disconnectReferenceDevice.mockResolvedValue(undefined);
+
+            await polarSdk.connectReferenceDevice('H10-1');
+            await polarSdk.startReferenceHrStreaming('H10-1');
+            await polarSdk.stopReferenceHrStreaming();
+            await polarSdk.disconnectReferenceDevice();
+
+            expect(mockPolarBleModule.connectReferenceDevice).toHaveBeenCalledWith('H10-1');
+            expect(mockPolarBleModule.startReferenceHrStreaming).toHaveBeenCalledWith('H10-1');
+            expect(mockPolarBleModule.stopReferenceHrStreaming).toHaveBeenCalled();
+            expect(mockPolarBleModule.disconnectReferenceDevice).toHaveBeenCalled();
+            // Mai sui metodi del dispositivo principale
+            expect(mockPolarBleModule.connectToDevice).not.toHaveBeenCalled();
+            expect(mockPolarBleModule.startPpiStreaming).not.toHaveBeenCalled();
+        });
+
+        it('registra gli eventi onReference* senza sovrascrivere quelli principali', () => {
+            polarSdk.addEventListener('onHeartRateReceived', jest.fn());
+            polarSdk.addEventListener('onReferenceHrReceived', jest.fn());
+
+            expect(mockEventEmitter.addListener).toHaveBeenCalledWith(
+                'onHeartRateReceived',
+                expect.any(Function)
+            );
+            expect(mockEventEmitter.addListener).toHaveBeenCalledWith(
+                'onReferenceHrReceived',
+                expect.any(Function)
+            );
+            polarSdk.removeAllListeners();
         });
     });
 

@@ -2,7 +2,7 @@
  * In-memory live PPI/RR track buffer (fallback when Polar offline recording fails).
  */
 
-import { resolveRrInterval, RrSource } from "./rr-interval";
+import { resolveRrInterval, RrSource } from "@/features/hrv/ppi/rr-interval";
 
 export interface TrackSample {
   t: string;

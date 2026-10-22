@@ -7,17 +7,12 @@ import {
   resolvePolarContact,
   type PolarHrExtrasStash,
   type PolarPpiExtrasStash,
-} from "@/services/polar-ably-payload";
-
-export const MIN_PPI_MS = 300;
-export const MAX_PPI_MS = 2000;
+} from "@/features/devices/polar/polar-signal-extras";
 export const PPI_STALE_MS = 4000;
 export const PPI_STREAM_ALIVE_MS = 8000;
 export const HR_ZERO_GRACE_MS = 10000;
 /** Polar docs: errorEstimate over ~30 ms often means motion or poor skin contact. */
 export const PPI_ERROR_ESTIMATE_POOR_MS = 30;
-/** Max errorEstimate (ms) allowed into the HRV / LF / HF window (sane samples only). */
-export const PPI_ERROR_ESTIMATE_SANE_MS = 10;
 
 /** Live Monitor + Ably publish rates (Hz). Fixed at 1 Hz in product; 4 kept for tests/helpers. */
 export type PolarLiveRateHz = 1 | 4;
@@ -55,10 +50,6 @@ export const EMPTY_POLAR_SIGNAL_QUALITY: PolarSignalQualityUi = {
   blocker: null,
   ppgQuality: null,
 };
-
-export function isUsablePpiMs(ppiMs: number): boolean {
-  return Number.isFinite(ppiMs) && ppiMs >= MIN_PPI_MS && ppiMs <= MAX_PPI_MS;
-}
 
 /** Build Monitor UI quality snapshot from PPI + HR stashes. */
 export function buildPolarSignalQualityUi(
@@ -100,22 +91,6 @@ export function isPolarPpiErrorPoor(
     quality?.errorEstimate != null &&
     quality.errorEstimate > PPI_ERROR_ESTIMATE_POOR_MS
   );
-}
-
-/**
- * Whether this PPI sample may update the HRV / LF / HF window.
- * Only low errorEstimate (≤ PPI_ERROR_ESTIMATE_SANE_MS) is treated as sane
- * enough for the FFT; noisier intervals keep the last sane metrics even if
- * the Errore PPI card is not red yet (red stays at > 30 ms).
- */
-export function shouldUpdateLfHfFromPpiSample(sample: {
-  errorEstimate?: number | null;
-}): boolean {
-  const errorEstimate = sample.errorEstimate ?? null;
-  if (errorEstimate == null) {
-    return true;
-  }
-  return errorEstimate <= PPI_ERROR_ESTIMATE_SANE_MS;
 }
 
 /**

@@ -26,7 +26,7 @@ npm run test:coverage
 ## 📊 Coverage
 
 I test coprono:
-- **HRV Calculator** (`services/hrv-calculator.ts`)
+- **HRV Calculator** (`features/hrv/core/hrv-calculator.ts`)
   - Calcolo RMSSD
   - Calcolo LF/HF
   - Gestione edge cases

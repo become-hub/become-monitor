@@ -17,6 +17,8 @@ Periodo: 21/10/2026. Dispositivi: Polar 360 (questa app, Android CPH2415), Polar
 | 7 | Confronto 360 vs H10 (sessione 1) | Sapere se i valori sono giusti rispetto a un ECG | Con soglia 10 ms LF/HF ~10× troppo bassi; 20 ms vicino all'ECG | Soglia LF/HF a 20 ms (RMSSD resta 10 ms) |
 | 8 | Confronto valori live app vs H10 (sessione 2) | "Sono tornati valori alti" | Ordine di grandezza giusto; LF/HF entro ±16% a finestra piena | Soglia 20 ms confermata |
 | 9 | Esperimento di pesatura (11 varianti) + prova su sessione 3 | Ridurre lo scarto dall'ECG | Nessuna variante migliore in modo consistente | Nessuna modifica; regola attuale resta |
+| 10 | Dopo refactor `features/hrv/` + contratto Ably v2: live vs replay vs H10 (sessione 4, 22/10) | Verificare che il refactor non abbia alterato LF/HF e misurare lo scarto reale | Live = replay in 562/562 tick; 18/18 checkpoint CRC; scarto dall'H10 più alto del previsto | Calcolo invariato; avviare confronto sullo stesso telefono per ottimizzare |
+| 11 | Sette sessioni sullo stesso telefono: calma vs movimento | Ridurre la soglia ±35% e capire l'effetto del movimento | A riposo 8–21% (una sessione 67%); con movimento 45–255%; `errorEstimate` non lo vede, `blocker` sì | Motion gate: `blocker` ≥ 95% in 120 s → stato `low_quality`; ±35% invariato |
 
 ## 1. Test unitari del calcolo
 
@@ -140,7 +142,7 @@ La durata bastava; bloccava solo la qualità.
 
 L'abbinamento è approssimativo (il 360 consegna i PPI a gruppi, orari ricostruiti): le differenze per battito sono un limite superiore.
 
-**Decisione (scelta dell'utente).** `LF_HF_PPI_ERROR_ESTIMATE_MAX_MS = 20` in `services/ppi-sample-window.ts`, solo per LF/HF. Il RMSSD resta a 10 ms (`PPI_ERROR_ESTIMATE_SANE_MS`), non validato contro ECG.
+**Decisione (scelta dell'utente).** `LF_HF_PPI_ERROR_ESTIMATE_MAX_MS = 20` in `features/hrv/ppi/ppi-sample-window.ts`, solo per LF/HF. Il RMSSD resta a 10 ms (`PPI_ERROR_ESTIMATE_SANE_MS`), non validato contro ECG.
 
 ## 8. Confronto valori live vs H10, sessione 2 (18:19–18:26)
 
@@ -193,11 +195,49 @@ Valori dell'ordine giusto; a finestra piena LF/HF entro ±16%. Prima dei 5 minut
 
 **Decisione.** Nessuna modifica. Lo scarto cambia segno tra sessioni: non è una sovrastima fissa correggibile con un fattore.
 
+## 10. Sessione 4 (22/10/2026): live vs replay vs H10 dopo il contratto v2
+
+**Perché.** Dopo il refactor in `features/hrv/` (calcolatore e limiti PPI invariati byte per byte) e il contratto Ably v2, serviva sapere se i valori live fossero ancora corretti e quanto distassero da un ECG.
+
+**Metodo.** Log di debug dei beat del 360 (`seq`, `ppiMs`, `kind`) e dei tick pubblicati, rigiocati offline con `appendPpiSample` + `computeLfHfForPpiWindow`; RR dell'H10 (Polar Sensor Logger, secondo telefono) calcolati con la stessa `computeLfHfFromIntervals` sulla stessa durata di finestra (~310 s). 12 finestre complete, 17:25–17:32.
+
+**Risultati.**
+- **Live = replay:** LF e HF pubblicati coincidono con il replay in 562 tick su 562; `windowCrc`, `windowFromSeq` e `windowBeatCount` corretti in 18 su 18. Il refactor non ha alterato i numeri.
+- **360 vs H10:** scarto mediano in valore assoluto LF 34% (da −70% a +9%), HF 76% (da +45% a +93%), LF/HF 64% (da −83% a −25%). LF sottostimato, HF sovrastimato, rapporto troppo basso in tutte le finestre.
+- **Non è lo sfasamento tra telefoni:** spostando l'H10 da −40 a +40 s lo scarto mediano resta 36–45% su LF e 72–86% su HF.
+- **Non sono i battiti scartati:** nelle finestre usate il 6–12% dei battiti era `quality_rejected`, nessuno fuori range.
+
+**Decisione.** Nessuna modifica al calcolo. Lo scarto di questa sessione supera il «±35%» finora dichiarato, ma con una sola sessione e un solo soggetto non si cambia la nota in UI. Per distinguere rumore del sensore da errore di calcolo servono più sessioni appaiate sullo stesso telefono: card **Riferimento H10** (vedi [Come ripetere un confronto con H10](#come-ripetere-un-confronto-con-h10)).
+
+## 11. Stesso telefono, 7 sessioni (22/10/2026): calma vs movimento
+
+**Perché.** Con la card **Riferimento H10** (stesso orologio) misurare lo scarto del 360 dall'ECG a riposo e col polso in movimento, e vedere se la soglia «±35%» si poteva ridurre.
+
+**Metodo.** Sette registrazioni appaiate (360 al polso + H10 al torace, stesso telefono), esportate in CSV. Beat del 360 uniti per `seq` ai log di debug (`errorEstimate`, `blocker`); stessa `computeLfHfFromIntervals` su finestre di 300 s e 120 s ogni 15–30 s. Offline il replay dei beat del 360 coincide con i tick live. RR anomali dell'H10 (buco di 8 s nella sessione E) esclusi dal riferimento.
+
+**Risultati (errore mediano LF/HF vs H10, finestre di 300 s).**
+
+| Condizione | Sessioni | Errore mediano |
+|---|---|---|
+| Calma | C, D, E, F, G | 11%, 18%, 21%, 14%, 8% (max 26%) |
+| Calma, sessione rumorosa | B | 67% (rumore di fondo HF alto) |
+| Scrittura al PC | E, F | 46%, 45% |
+| Gesti | G | 77% (H10 13,4 vs 360 2,7) |
+| Movimento del braccio | D | 255% (salti nei PPI gonfiano LF) |
+
+- **A riposo** l'errore è tipicamente 8–21%. Il segno non è costante: nelle sessioni C–F il rapporto è prevalentemente più basso dell'H10 (circa −15/−20%, il jitter del tempo di transito dell'onda di pulsazione alza l'HF), nella G è più alto (+6%). Sintesi: [lf-hf-accuracy-vs-h10.md](./lf-hf-accuracy-vs-h10.md). La soglia «±35%» regge, ma non è ristretta: la sessione B la supera.
+- **Col movimento** il PPG dà valori sbagliati del 45–255%. In parte è fisiologia vera (nella sessione G la frequenza cardiaca H10 sale da 59 a 82 bpm e LF/HF dell'H10 arriva a 27) che il polso non segue.
+- **`errorEstimate` non aiuta:** resta 8–13 ms col movimento, i battiti scartati sono 3–20%. Stringere la soglia (14 o 12 ms) non corregge il movimento e a riposo scarta troppi battiti (stato `low_quality`).
+- **`blocker` sì:** la frazione di battiti con `blocker=true` negli ultimi 120 s è ≥ 0,95 per 0–1% del tempo a riposo (sessioni C, D, F, G), per il 67% del tempo mentre si scrive (F) e per il 61% con i gesti (G). Non scatta nel movimento della sessione D (0%).
+
+**Decisione.** Aggiunto un *motion gate* di solo stato (`isPpiWindowMotionBlocked` in `features/hrv/ppi/ppi-sample-window.ts`): se negli ultimi 120 s ≥ 95% dei battiti ha `blocker=true` (almeno 20 battiti), lo stato LF/HF diventa `low_quality`. LF, HF e rapporto non cambiano, quindi i risultati `hrv-1` restano riproducibili. Soglia «±35%» invariata e valida a riposo; il movimento della sessione D resta non rilevato.
+
 ## Conclusioni
 
 - Il **calcolo** di LF/HF è corretto e verificabile (test 1).
 - La soglia 10 ms rendeva LF/HF del 360 circa 10 volte troppo bassi; con **20 ms** sono dell'ordine dell'ECG (test 7–8).
-- Margine realistico del 360 rispetto a un ECG: circa **±35%** su LF, HF e LF/HF, anche con segnale buono, con segno variabile (test 9). È un limite del sensore ottico al polso (rumore, ritardo variabile dell'onda di polso), non del codice. Costante UI: `LF_HF_VS_ECG_TYPICAL_ERROR_PCT` in `services/ppi-sample-window.ts`.
+- Margine realistico del 360 rispetto a un ECG: circa **±35%** su LF, HF e LF/HF, anche con segnale buono, con segno variabile (test 9). È un limite del sensore ottico al polso (rumore, ritardo variabile dell'onda di polso), non del codice. Costante UI: `LF_HF_VS_ECG_TYPICAL_ERROR_PCT` in `features/hrv/ppi/ppi-sample-window.ts`.
+- Col polso in movimento (scrittura, gesti) lo scarto sale a 45–255% e `errorEstimate` non lo segnala. Con `blocker` acceso su ≥ 95% dei battiti negli ultimi 120 s lo stato diventa «Bassa» (test 11).
 - Uso consigliato: tendenze e confronti nella stessa persona con qualità almeno Media. Per valori assoluti confrontabili con un ECG usare la fascia H10.
 - In app (360/Loop) sotto LF/HF: nota esplicita che i valori sono **stimati dai PPI**, non letti dal dispositivo, e scarto tipico ±35% vs H10.
 
@@ -212,8 +252,31 @@ Valori dell'ordine giusto; a finestra piena LF/HF entro ±16%. Prima dei 5 minut
 
 ## Come ripetere un confronto con H10
 
-1. Indossare H10 e 360 insieme; registrare H10 con Polar Sensor Logger (stream HR con RR).
+### Stesso telefono (consigliato)
+
+Con **Developer Mode** attivo, in Monitor compare la card **Riferimento H10 (solo sviluppatore)**. Registra i battiti del 360 e gli RR dell'H10 con lo **stesso orologio del telefono**, quindi non serve alcun allineamento tra due dispositivi.
+
+1. Indossare H10 e 360 insieme. Nelle Impostazioni attivare Developer Mode.
+2. Collegare il 360 come di consueto (pairing, avvio streaming).
+3. Nella card **Riferimento H10** toccare **Cerca H10**, poi **Connetti** sul dispositivo trovato. Quando lo stato diventa «H10 in registrazione» partono entrambe le serie.
+4. Restare fermi (8–12 minuti; per il protocollo con respiro guidato vedi sotto).
+5. Toccare **Esporta CSV** e salvare/inviare il file `.csv` dallo share sheet (colonne `source,t_ms,t_iso,seq,value_ms,hr,kind`; `source` = `primary` per i PPI del 360, `reference` per gli RR dell'H10).
+6. Calcolare LF/HF di entrambe le serie con `computeLfHfFromIntervals` sulle stesse finestre di 300 s e aggiungere i risultati a questo registro.
+
+Note:
+- L'H10 è un dispositivo **secondario di sola lettura**: non entra in Ably, nel calcolo LF/HF live né nella sessione del 360. Se si disconnette, la sessione del 360 continua.
+- Il tempo `t_ms` di ogni RR H10 è preso nel modulo nativo quando il pacchetto HR esce dall'SDK (circa uno al secondo, con uno o più RR). L'ordine temporale dentro un pacchetto va ricostruito sommando gli RR.
+- I PPI del 360 arrivano a gruppi: `t_ms` è l'istante del gruppo, non del singolo battito.
+- La registrazione è in memoria (max 100 000 righe) e va esportata prima di chiudere l'app. L'export usa il foglio di condivisione di sistema: per sessioni molto lunghe (oltre un'ora) il testo potrebbe superare il limite del sistema.
+
+### Due telefoni (metodo del 21–22/10)
+
+1. Registrare H10 con Polar Sensor Logger (stream HR con RR) su un secondo telefono.
 2. Avviare lo streaming del 360 in questa app, restare fermi 8–10 minuti, fermare 360 e poi H10.
-3. Serie 360: usare `ppiSamples` dal payload Ably (per battito `timestamp`, `ppiMs`, `errorEstimate`, `blocker`, `kind`). La riga diagnostica di logcat usata il 21/10 è stata rimossa.
-4. Calcolare LF/HF di entrambe le serie con `computeLfHfFromIntervals` (o lo snippet Python in [Verifica LF/HF](polar-360-connection-guide.md#verifica-lfhf-esterna)) sulle stesse finestre temporali di 300 s.
+3. Serie 360: usare i `beats` Ably v2 (`[seq, ppiMs, errorEstimate, kind, blocker, ep, frameId]`) più `sessionMeta`; vedi [docs/hrv/](./hrv/README.md). (Prima del contratto v2 si usava `ppiSamples` sul tick.)
+4. Calcolare LF/HF di entrambe le serie con `computeLfHfFromIntervals` (o lo snippet Python in [Verifica LF/HF](polar-360-connection-guide.md#verifica-lfhf-esterna)) sulle stesse finestre di 300 s. Lo sfasamento tra gli orologi dei due telefoni va stimato.
 5. Aggiungere i risultati a questo registro.
+
+### Protocollo suggerito per ottimizzare il calcolo
+
+Per distinguere errore di banda da rumore: 12 minuti da seduti e fermi, 4 minuti di respiro libero, 4 a 0,25 Hz (4 s per ciclo, banda HF), 4 a 0,1 Hz (10 s per ciclo, banda LF). Raccogliere almeno 6–10 sessioni prima di cambiare il calcolo o la nota «±35%».

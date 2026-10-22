@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { HrvAnalysisMode } from "@/features/monitor/hooks/hrv-analysis-mode";
+import type { HrvAnalysisMode } from "@/features/hrv/core/hrv-analysis-mode";
 import { useScanStore } from "@/stores/scan-store";
 
 export type { HrvAnalysisMode };

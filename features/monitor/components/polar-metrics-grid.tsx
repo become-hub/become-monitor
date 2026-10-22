@@ -7,7 +7,7 @@
 import { ThemedText } from "@/components/themed-text";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
-import type { HrvAnalysisMode } from "@/features/monitor/hooks/hrv-analysis-mode";
+import type { HrvAnalysisMode } from "@/features/hrv/core/hrv-analysis-mode";
 import {
   isPolarMotionPoor,
   isPolarPpiErrorPoor,
@@ -20,9 +20,9 @@ import {
   type LfHfProgress,
   type LfHfQualityLevel,
   type LfHfStatus,
-} from "@/services/hrv-calculator";
-import { LF_HF_PPI_ERROR_ESTIMATE_MAX_MS } from "@/services/ppi-sample-window";
-import type { RrSource } from "@/services/rr-interval";
+} from "@/features/hrv/core/hrv-calculator";
+import { LF_HF_PPI_ERROR_ESTIMATE_MAX_MS } from "@/features/hrv/ppi/ppi-sample-window";
+import type { RrSource } from "@/features/hrv/ppi/rr-interval";
 import {
   Activity,
   Hand,

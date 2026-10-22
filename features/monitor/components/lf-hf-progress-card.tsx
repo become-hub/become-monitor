@@ -12,8 +12,8 @@ import {
   type LfHfQualityLevel,
   type LfHfRequirementProgress,
   type LfHfStatus,
-} from "@/services/hrv-calculator";
-import { LF_HF_PPI_ERROR_ESTIMATE_MAX_MS } from "@/services/ppi-sample-window";
+} from "@/features/hrv/core/hrv-calculator";
+import { LF_HF_PPI_ERROR_ESTIMATE_MAX_MS } from "@/features/hrv/ppi/ppi-sample-window";
 import { ChevronDown, ChevronUp } from "lucide-react-native";
 import { useState } from "react";
 import { TouchableOpacity, View } from "react-native";

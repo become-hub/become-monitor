@@ -18,7 +18,7 @@ Polar **360** and **Loop Gen 2** behavior must stay identical unless explicitly 
 | Offline track | `startPpiOfflineRecording` + flush fetch/remove | Skip offline PPI; live buffer only |
 | Monitor grid | PPI/HR RR cards; **skin temp card only if `skinTemperatureUi`** (Loop Gen 2 yes, Polar 360 no — intentional app scope) | Extra raw cards only when `capabilities.rawEcg` |
 | Skin temperature | 360: `skinTemperature`/`skinTemperatureUi` false; Loop: both true | Usually false unless product ships the metric in Monitor |
-| RR source | `ppi` > `hr_derived`; live `rrsMs`/`ppisMs` = accepted PPI window for LF/HF | `ecg_rr` from native `rrsMs`; never `60000/HR` if raw RR exists |
+| RR source | `ppi` > `hr_derived`; Ably v2 sends PPI `beats` delta (not full window) | `ecg_rr` from native `rrsMs`; never `60000/HR` if raw RR exists |
 | Auth | Per-`deviceId` token in `StorageService` | Same — no auto-connect on scan |
 
 **Rule:** branch on `product.id` / `capabilities`; additive native events and SDK overloads only. No unified manager refactors that change 360/Loop defaults.
@@ -52,14 +52,15 @@ Polar **360** and **Loop Gen 2** behavior must stay identical unless explicitly 
    - **Prefer raw signals in UI** when `capabilities.rawEcg` or native RR exists
    - Calculated metrics (RMSSD, LF/HF) secondary to raw cards
 
-6. **Ably live** — `services/polar-ably-payload.ts` via `buildPolarAblyHeartRatePayload`
+6. **Ably live** — `features/hrv/contract/` (`buildPolarHeartRateTick` / `sessionMeta` / `sessionEnd`)
    - Event name `heartRate`; body always uses `hr` (not `heartRate` field)
-   - `deviceModel: PolarProductId | null` from `resolvePolarProductId`
+   - Schema v2: scalars + `beats` delta; device/static fields in `sessionMeta`
    - No `date` field — `AblyService.sendMessage` adds `timestamp`
-   - Do **not** reintroduce legacy `AblyService.sendHeartRate`
+   - Do **not** reintroduce legacy `AblyService.sendHeartRate` or full-window `ppisMs`
+   - Docs: `docs/hrv/`
 
 7. **Track buffer / flush**
-   - `services/rr-interval.ts` — extend `RrSource` if needed (`ecg_rr`)
+   - `features/hrv/ppi/rr-interval.ts` — extend `RrSource` if needed (`ecg_rr`)
    - `session-track-buffer.ts` — product-specific push helpers
    - `session-track-flush.ts` — `skipOfflinePpi` for non-PPI products
 
@@ -71,7 +72,7 @@ Polar **360** and **Loop Gen 2** behavior must stay identical unless explicitly 
 9. **Tests**
    - Existing FTU/PPI/setup tests must stay green
    - Add separate cases for new product; Kotlin tests for new stream methods
-   - Polar Ably payload contract tests in `services/__tests__/polar-ably-payload.test.ts`
+   - Polar Ably contract tests in `features/hrv/contract/__tests__/`
 
 ## Capability matrix (reference)
 
@@ -97,4 +98,5 @@ When `capabilities.rawEcg === true`:
 
 - Multi-device auth scoped by `deviceId`
 - No auto-connect on scan (except post-FTU reconnect same `deviceId` for 360/Loop)
+- **Reference device** (Developer Mode, H10 next to a 360/Loop): separate slots in `PolarDeviceManager` / `PolarStreamManager`, events `onReference*`, recorder in `features/hrv/reference/`. It must never change primary `connectedDeviceId`, `readyFeatures`, Ably, the beat outbox or live LF/HF. Keep `referenceDeviceId` set until the async SDK disconnect arrives, or the late callback is mistaken for a primary drop. `DEVICE_AVAILABILITY.polar_h10` stays `false`.
 - Structural changes → update docs in the same commit set

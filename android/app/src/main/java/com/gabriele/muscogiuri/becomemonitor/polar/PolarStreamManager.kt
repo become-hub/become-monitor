@@ -41,6 +41,14 @@ class PolarStreamManager(private val api: PolarBleApi) {
     private var skinTemperatureDisposable: Disposable? = null
     private var skinTemperatureFirstSampleTimeoutDisposable: Disposable? = null
 
+    // Reference device (developer validation, e.g. H10 next to a 360). Separate slot: it never
+    // disposes the primary HR stream and is not counted by isStreaming().
+    private var referenceHrDisposable: Disposable? = null
+    private var referenceHrFirstSampleTimeoutDisposable: Disposable? = null
+
+    var onReferenceHrDataReceived: ((String, PolarHrData) -> Unit)? = null
+    var onReferenceHrStreamError: ((Throwable) -> Unit)? = null
+
     var onPpiDataReceived: ((String, PolarPpiData) -> Unit)? = null
     var onPpiStreamError: ((Throwable) -> Unit)? = null
     var onHrDataReceived: ((String, PolarHrData) -> Unit)? = null
@@ -162,6 +170,48 @@ class PolarStreamManager(private val api: PolarBleApi) {
             timeoutMessage = "Nessun campione HR entro ${FIRST_SAMPLE_TIMEOUT_SECONDS}s"
         )
     }
+
+    fun startReferenceHrStreaming(deviceId: String): Completable {
+        if (referenceHrDisposable?.isDisposed == false) {
+            referenceHrDisposable?.dispose()
+        }
+        referenceHrFirstSampleTimeoutDisposable?.dispose()
+
+        Log.d(TAG, "💓 Starting reference HR stream for $deviceId...")
+
+        return awaitFirstSample(
+            source = api.startHrStreaming(deviceId),
+            onData = { hrData ->
+                onReferenceHrDataReceived?.invoke(deviceId, hrData)
+            },
+            onError = { error ->
+                Log.e(
+                    TAG,
+                    "❌ Reference HR stream error: ${error.javaClass.simpleName}: ${error.message}"
+                )
+                onReferenceHrStreamError?.invoke(error)
+            },
+            retainDisposable = { referenceHrDisposable = it },
+            retainTimeoutDisposable = { referenceHrFirstSampleTimeoutDisposable = it },
+            timeoutMessage = "Nessun campione HR di riferimento entro ${FIRST_SAMPLE_TIMEOUT_SECONDS}s"
+        )
+    }
+
+    fun stopReferenceHrStreaming(): Result<Unit> {
+        return try {
+            referenceHrFirstSampleTimeoutDisposable?.dispose()
+            referenceHrFirstSampleTimeoutDisposable = null
+            referenceHrDisposable?.dispose()
+            referenceHrDisposable = null
+            Log.d(TAG, "Reference HR streaming stopped")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop reference HR streaming: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    fun isReferenceHrStreaming(): Boolean = referenceHrDisposable?.isDisposed == false
 
     fun startEcgStreaming(deviceId: String): Completable {
         if (ecgDisposable?.isDisposed == false) {
@@ -291,6 +341,7 @@ class PolarStreamManager(private val api: PolarBleApi) {
         isPpiStreaming() || isHrStreaming() || isEcgStreaming() || isSkinTemperatureStreaming()
 
     fun cleanup() {
+        stopReferenceHrStreaming()
         ppiFirstSampleTimeoutDisposable?.dispose()
         ppiFirstSampleTimeoutDisposable = null
         ppiDisposable?.dispose()

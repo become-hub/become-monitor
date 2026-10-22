@@ -6,7 +6,7 @@
 import {
   isUsablePpiMs,
   shouldUpdateLfHfFromPpiSample,
-} from "./polar-live-signal";
+} from "@/features/hrv/ppi/ppi-limits";
 
 export type HrvAnalysisMode = "client" | "clinical";
 

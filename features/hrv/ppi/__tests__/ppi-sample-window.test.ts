@@ -5,6 +5,8 @@ import {
   LF_HF_PPI_ERROR_ESTIMATE_MAX_MS,
   createEmptyPpiSampleWindow,
   isLfHfWindowReady,
+  isPpiWindowMotionBlocked,
+  PPI_MOTION_GATE_MIN_SAMPLES,
   physiologicalDurationFromWindow,
   PPI_RAW_RETENTION_MAX_MS,
   PPI_RAW_RETENTION_MIN_MS,
@@ -14,7 +16,7 @@ import {
 import {
   computeLfHfFromTachogram,
   MIN_RESAMPLED_DURATION_SEC,
-} from "../hrv-calculator";
+} from "@/features/hrv/core/hrv-calculator";
 
 describe("ppi-sample-window", () => {
   const baseNow = 1_000_000;
@@ -323,5 +325,53 @@ describe("ppi-sample-window", () => {
     expect(w.samples.some((s) => s.timestamp === oldTs)).toBe(true);
     expect(PPI_RAW_RETENTION_MIN_MS).toBe(310_000);
     expect(PPI_RAW_RETENTION_MAX_MS).toBe(360_000);
+  });
+
+  describe("motion gate (blocker)", () => {
+    const build = (
+      count: number,
+      blockerAt: (i: number) => boolean
+    ) => {
+      let w = createEmptyPpiSampleWindow();
+      for (let i = 0; i < count; i++) {
+        w = appendPpiSample(w, {
+          ppiMs: 800 + (i % 2 === 0 ? 20 : -20),
+          errorEstimate: 5,
+          blocker: blockerAt(i),
+          frameNowMs: baseNow,
+          mode: "client",
+        });
+      }
+      return w;
+    };
+
+    it("blocker quasi sempre attivo negli ultimi 120 s → low_quality, numeri invariati", () => {
+      const clean = build(300, () => false);
+      const moving = build(300, () => true);
+      const cleanResult = computeLfHfForPpiWindow(clean);
+      const movingResult = computeLfHfForPpiWindow(moving);
+      expect(isPpiWindowMotionBlocked(clean)).toBe(false);
+      expect(isPpiWindowMotionBlocked(moving)).toBe(true);
+      expect(cleanResult.status).not.toBe("low_quality");
+      expect(movingResult.status).toBe("low_quality");
+      expect(movingResult.valid).toBe(false);
+      expect(movingResult.lf).toBe(cleanResult.lf);
+      expect(movingResult.hf).toBe(cleanResult.hf);
+    });
+
+    it("blocker intermittente (< 95%) non scatta", () => {
+      const w = build(300, (i) => i % 10 !== 0 && i % 7 !== 0);
+      expect(isPpiWindowMotionBlocked(w)).toBe(false);
+    });
+
+    it("blocker vecchio fuori dai 120 s non scatta", () => {
+      const w = build(300, (i) => i < 150);
+      expect(isPpiWindowMotionBlocked(w)).toBe(false);
+    });
+
+    it("poche campioni → non scatta", () => {
+      const w = build(PPI_MOTION_GATE_MIN_SAMPLES - 1, () => true);
+      expect(isPpiWindowMotionBlocked(w)).toBe(false);
+    });
   });
 });

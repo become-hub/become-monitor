@@ -24,10 +24,18 @@ class PolarDeviceManager(private val api: PolarBleApi) {
     private var connectedAtMs: Long? = null
     private val readyFeatures = mutableSetOf<PolarBleApi.PolarBleSdkFeature>()
 
+    /**
+     * Second, read-only device (developer validation: Polar H10 next to a 360/Loop).
+     * Its connect / disconnect / HR / feature events never touch the primary-device state above.
+     */
+    private var referenceDeviceId: String? = null
+
     // Callbacks
     var onDeviceFound: ((PolarDeviceInfo) -> Unit)? = null
     var onDeviceConnected: ((PolarDeviceInfo) -> Unit)? = null
     var onDeviceDisconnected: ((PolarDeviceInfo) -> Unit)? = null
+    var onReferenceDeviceConnected: ((PolarDeviceInfo) -> Unit)? = null
+    var onReferenceDeviceDisconnected: ((PolarDeviceInfo) -> Unit)? = null
     var onHeartRateReceived: ((String, PolarHrData.PolarHrSample) -> Unit)? = null
     var onBluetoothStateChanged: ((Boolean) -> Unit)? = null
     var onFeatureReady: ((String, PolarBleApi.PolarBleSdkFeature) -> Unit)? = null
@@ -51,6 +59,11 @@ class PolarDeviceManager(private val api: PolarBleApi) {
             }
 
             override fun deviceConnected(info: PolarDeviceInfo) {
+                if (isReferenceDevice(info.deviceId)) {
+                    Log.d(TAG, "✅ Reference connected: ${info.deviceId}")
+                    onReferenceDeviceConnected?.invoke(info)
+                    return
+                }
                 connectedDeviceId = info.deviceId
                 connectedAtMs = System.currentTimeMillis()
                 readyFeatures.clear()
@@ -59,6 +72,11 @@ class PolarDeviceManager(private val api: PolarBleApi) {
             }
 
             override fun deviceDisconnected(info: PolarDeviceInfo) {
+                if (isReferenceDevice(info.deviceId)) {
+                    Log.d(TAG, "⚠️ Reference disconnected: ${info.deviceId}")
+                    onReferenceDeviceDisconnected?.invoke(info)
+                    return
+                }
                 val connectedMs = connectedAtMs?.let { System.currentTimeMillis() - it }
                 val featureNames = readyFeatures.map { it.name }.toSet()
                 val hasEncryptedFeature = readyFeatures.any {
@@ -83,6 +101,9 @@ class PolarDeviceManager(private val api: PolarBleApi) {
                 identifier: String,
                 feature: PolarBleApi.PolarBleSdkFeature
             ) {
+                if (isReferenceDevice(identifier)) {
+                    return
+                }
                 readyFeatures.add(feature)
                 Log.d(TAG, "Feature ready: $feature for $identifier")
                 onFeatureReady?.invoke(identifier, feature)
@@ -93,6 +114,10 @@ class PolarDeviceManager(private val api: PolarBleApi) {
             }
 
             override fun hrNotificationReceived(identifier: String, data: PolarHrData.PolarHrSample) {
+                if (isReferenceDevice(identifier)) {
+                    // Reference HR/RR arrives through PolarStreamManager.startReferenceHrStreaming.
+                    return
+                }
                 Log.d(TAG, "💓 HR: ${data.hr} BPM")
                 onHeartRateReceived?.invoke(identifier, data)
             }
@@ -165,6 +190,10 @@ class PolarDeviceManager(private val api: PolarBleApi) {
                 Log.d(TAG, "Already connected to $deviceId — skip connect")
                 return Result.success(Unit)
             }
+            if (referenceDeviceId == deviceId) {
+                // Device was used as reference; from now on it is the primary one.
+                referenceDeviceId = null
+            }
             Log.d(TAG, "🔗 Connecting to $deviceId...")
             api.connectToDevice(deviceId)
             Result.success(Unit)
@@ -189,6 +218,48 @@ class PolarDeviceManager(private val api: PolarBleApi) {
         }
     }
 
+    private fun isReferenceDevice(deviceId: String): Boolean =
+        referenceDeviceId != null && referenceDeviceId == deviceId
+
+    /**
+     * Connetti il dispositivo di riferimento (es. H10) accanto al principale.
+     * Rifiuta l'id del dispositivo principale.
+     */
+    fun connectReferenceDevice(deviceId: String): Result<Unit> {
+        return try {
+            if (connectedDeviceId == deviceId) {
+                return Result.failure(
+                    IllegalArgumentException("Il dispositivo di riferimento coincide con il principale")
+                )
+            }
+            referenceDeviceId = deviceId
+            Log.d(TAG, "🔗 Connecting reference $deviceId...")
+            api.connectToDevice(deviceId)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            referenceDeviceId = null
+            Log.e(TAG, "❌ Reference connection error: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Keeps [referenceDeviceId] set: the SDK reports the disconnect asynchronously, and that
+     * late callback must still be routed to the reference path, not treated as a primary drop.
+     */
+    fun disconnectReferenceDevice(): Result<Unit> {
+        val id = referenceDeviceId ?: return Result.success(Unit)
+        return try {
+            api.disconnectFromDevice(id)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to disconnect reference: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    fun getReferenceDeviceId(): String? = referenceDeviceId
+
     /**
      * Ottiene l'ID del dispositivo connesso
      */
@@ -206,5 +277,6 @@ class PolarDeviceManager(private val api: PolarBleApi) {
         scanDisposable?.dispose()
         scanDisposable = null
         connectedDeviceId = null
+        referenceDeviceId = null
     }
 }

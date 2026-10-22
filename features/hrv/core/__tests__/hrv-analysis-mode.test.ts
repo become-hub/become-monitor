@@ -14,7 +14,7 @@ import {
   markHrvAcquisitionStarted,
   pushHrvInterval,
 } from "../hrv-analysis-mode";
-import { PPI_ERROR_ESTIMATE_SANE_MS } from "../polar-live-signal";
+import { PPI_ERROR_ESTIMATE_SANE_MS } from "@/features/hrv/ppi/ppi-limits";
 
 describe("hrv-analysis-mode", () => {
   describe("getHrvAnalysisPolicy", () => {

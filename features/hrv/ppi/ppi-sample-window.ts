@@ -3,8 +3,7 @@
  * SDK samples only — never from Live 1 Hz UI state.
  */
 
-import { isUsablePpiMs } from "@/features/monitor/hooks/polar-live-signal";
-import type { HrvAnalysisMode } from "@/features/monitor/hooks/hrv-analysis-mode";
+import type { HrvAnalysisMode } from "@/features/hrv/core/hrv-analysis-mode";
 import {
   computeLfHfFromIntervals,
   DEFAULT_HRV_SAMPLING_HZ,
@@ -16,7 +15,8 @@ import {
   type LfHfIntervalInput,
   type LfHfIntervalKind,
   type LfHfResult,
-} from "@/services/hrv-calculator";
+} from "@/features/hrv/core/hrv-calculator";
+import { isUsablePpiMs } from "@/features/hrv/ppi/ppi-limits";
 
 /**
  * Max PPI errorEstimate accepted into the LF/HF spectrum. Looser than the
@@ -62,6 +62,8 @@ export type PpiSampleRecord = {
   includedInTimeline: boolean;
   includedInTachogram: boolean;
   correctedPpiMs: number | null;
+  /** Session outbox seq when published via Ably delta (optional). */
+  seq?: number;
 };
 
 export type PpiSampleWindow = {
@@ -186,9 +188,19 @@ export function appendPpiSample(
     blocker?: boolean | null;
     frameNowMs: number;
     mode: HrvAnalysisMode;
+    /** Session outbox seq for Ably windowFromSeq checkpoints. */
+    seq?: number;
+    /**
+     * Pre-decided reject reason (offline replay of a stored `kind`).
+     * `undefined` = classify live from mode + sample; `null` = accepted.
+     */
+    rejectReasonOverride?: PpiRejectReason;
   }
 ): PpiSampleWindow {
-  const rejectReason = classifyPpiRejectReason(input.mode, input);
+  const rejectReason =
+    input.rejectReasonOverride !== undefined
+      ? input.rejectReasonOverride
+      : classifyPpiRejectReason(input.mode, input);
   const kind = rejectReasonToKind(rejectReason);
   const included =
     kind === "accepted" || kind === "quality_rejected";
@@ -222,6 +234,7 @@ export function appendPpiSample(
     includedInTimeline: included,
     includedInTachogram: included,
     correctedPpiMs: null,
+    ...(input.seq != null ? { seq: input.seq } : {}),
   };
 
   const samples = [...window.samples, record];
@@ -278,10 +291,44 @@ export function toLfHfIntervalInputs(
   }));
 }
 
+/**
+ * Wrist-motion gate (status only, LF/HF numbers are never altered).
+ * Polar 360 vs H10 field tests: during typing / gesturing the SDK `blocker`
+ * flag stays on for nearly every beat while `errorEstimate` stays low, and
+ * LF/HF drifts 45–77% from ECG. At rest the rolling blocker fraction over
+ * 120 s stayed >= 0.95 for only 0–1% of the time. See
+ * docs/lf-hf-validation-log.md.
+ */
+export const PPI_MOTION_GATE_SPAN_MS = 120_000;
+export const PPI_MOTION_GATE_BLOCKER_RATIO = 0.95;
+export const PPI_MOTION_GATE_MIN_SAMPLES = 20;
+
+export function isPpiWindowMotionBlocked(window: PpiSampleWindow): boolean {
+  const last = window.lastTimestampMs;
+  if (last == null) return false;
+  const cutoff = last - PPI_MOTION_GATE_SPAN_MS;
+  let total = 0;
+  let blocked = 0;
+  for (let i = window.samples.length - 1; i >= 0; i -= 1) {
+    const s = window.samples[i];
+    if (s.timestamp <= cutoff) break;
+    total += 1;
+    if (s.blocker === true) blocked += 1;
+  }
+  return (
+    total >= PPI_MOTION_GATE_MIN_SAMPLES &&
+    blocked / total >= PPI_MOTION_GATE_BLOCKER_RATIO
+  );
+}
+
 export function computeLfHfForPpiWindow(
   window: PpiSampleWindow
 ): LfHfResult {
-  return computeLfHfFromIntervals(toLfHfIntervalInputs(window));
+  const result = computeLfHfFromIntervals(toLfHfIntervalInputs(window));
+  if (result.status !== "unavailable" && isPpiWindowMotionBlocked(window)) {
+    return { ...result, valid: false, status: "low_quality" };
+  }
+  return result;
 }
 
 export function isLfHfWindowReady(window: PpiSampleWindow): boolean {
@@ -304,7 +351,7 @@ export function ppiWindowSpanSeconds(window: PpiSampleWindow): number {
   return physiologicalDurationFromWindow(window);
 }
 
-export function ppiSamplesForExport(window: PpiSampleWindow): Array<{
+export function ppiSamplesForExport(window: PpiSampleWindow): {
   ppiMs: number;
   errorEstimate: number | null;
   timestamp: number;
@@ -314,7 +361,7 @@ export function ppiSamplesForExport(window: PpiSampleWindow): Array<{
   includedInTimeline: boolean;
   includedInTachogram: boolean;
   correctedPpiMs: number | null;
-}> {
+}[] {
   const result = computeLfHfForPpiWindow(window);
   // Map tachogram corrected Y onto included samples in order
   let includedIdx = 0;

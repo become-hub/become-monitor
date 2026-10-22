@@ -148,4 +148,74 @@ class PolarStreamManagerTest {
 
         assert(!streamManager.isStreaming())
     }
+
+    @Test
+    fun `reference HR stream uses its own slot and callback`() {
+        val reference = "H10-REF"
+        val primary = "360-1"
+        val hrSample = PolarHrData.PolarHrSample(66, 66, 0, listOf(910), true, true, true)
+        whenever(mockApi.startHrStreaming(reference))
+            .thenReturn(
+                // A live HR stream never completes.
+                Flowable.just(PolarHrData(listOf(hrSample)))
+                    .delay(1, TimeUnit.SECONDS, testScheduler)
+                    .concatWith(Flowable.never())
+            )
+
+        var referenceId: String? = null
+        var primaryCalls = 0
+        streamManager.onReferenceHrDataReceived = { id, _ -> referenceId = id }
+        streamManager.onHrDataReceived = { _, _ -> primaryCalls += 1 }
+
+        val observer = streamManager.startReferenceHrStreaming(reference).test()
+        testScheduler.advanceTimeBy(2, TimeUnit.SECONDS)
+
+        observer.assertComplete()
+        assert(referenceId == reference)
+        assert(primaryCalls == 0)
+        assert(streamManager.isReferenceHrStreaming())
+        // Reference streaming is invisible to the primary-stream checks.
+        assert(!streamManager.isHrStreaming())
+        assert(!streamManager.isStreaming())
+        verify(mockApi, never()).startHrStreaming(primary)
+    }
+
+    @Test
+    fun `starting reference HR does not dispose the primary HR stream`() {
+        val sample = PolarHrData.PolarHrSample(70, 70, 0, emptyList(), false, true, true)
+        // Live HR streams never complete.
+        whenever(mockApi.startHrStreaming("PRIMARY"))
+            .thenReturn(Flowable.just(PolarHrData(listOf(sample))).concatWith(Flowable.never()))
+        whenever(mockApi.startHrStreaming("H10-REF"))
+            .thenReturn(Flowable.just(PolarHrData(listOf(sample))).concatWith(Flowable.never()))
+
+        streamManager.startHrStreaming("PRIMARY").test()
+        testScheduler.triggerActions()
+        streamManager.startReferenceHrStreaming("H10-REF").test()
+        testScheduler.triggerActions()
+
+        assert(streamManager.isHrStreaming())
+        assert(streamManager.isReferenceHrStreaming())
+
+        streamManager.stopReferenceHrStreaming()
+        assert(streamManager.isHrStreaming())
+        assert(!streamManager.isReferenceHrStreaming())
+    }
+
+    @Test
+    fun `reference HR stream errors use the reference error callback`() {
+        whenever(mockApi.startHrStreaming("H10-REF"))
+            .thenReturn(Flowable.error(RuntimeException("boom")))
+
+        var referenceError: Throwable? = null
+        var primaryError: Throwable? = null
+        streamManager.onReferenceHrStreamError = { referenceError = it }
+        streamManager.onHrStreamError = { primaryError = it }
+
+        streamManager.startReferenceHrStreaming("H10-REF").test()
+        testScheduler.triggerActions()
+
+        assert(referenceError != null)
+        assert(primaryError == null)
+    }
 }

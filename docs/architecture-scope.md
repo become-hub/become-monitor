@@ -8,11 +8,14 @@ This app is **Expo Router + React Native**, with **Android-only** native modules
 |-------|----------|------|
 | Presentation | `app/`, `features/*/components/` | Screens and UI |
 | Session / orchestration | `features/monitor/hooks/` | BLE listeners, auth, Ably, flush |
+| HRV domain (pure TS) | `features/hrv/{core,ppi,contract,recompute}/` | Spectral pipeline, PPI window, Ably contract v2, session recompute |
 | Device catalogs & bridges | `features/devices/{polar,muse}/` | Products, setup helpers, TS ↔ NativeModules |
-| Shared I/O | `services/` | Auth, Ably, storage, HRV, upload, Sentry |
+| Shared I/O | `services/` | Auth, Ably, storage, upload, Sentry |
 | Native BLE | `android/.../polar/`, `muse/`, `bluetooth/` | Thin RN modules + managers |
 
 Import Polar/Muse from `@/features/devices/polar/*` and `@/features/devices/muse/*` (no `services/` re-export shims).
+
+`features/hrv/` is designed as an extractable package: TypeScript only (no React / RN / Expo / Ably / `@/services` / `@/stores` / `@/constants` / `@/features/monitor`). ESLint `no-restricted-imports` enforces the boundary. External values such as `appVersion` are passed as builder arguments.
 
 User-facing connect / pair / catalog visibility is gated by [`constants/device-availability.ts`](../constants/device-availability.ts) (H10 and Muse 2 can be off while code stays integrated).
 

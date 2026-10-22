@@ -14,10 +14,14 @@ import { MonitorStatusSection } from "./components/monitor-status-section";
 import { MuseMetricsGrid } from "./components/muse-metrics-grid";
 import { PolarMetricsGrid } from "./components/polar-metrics-grid";
 import { monitorStyles } from "./components/monitor-styles";
+import { ReferenceDeviceCard } from "./components/reference-device-card";
 import { useMonitorSession } from "./hooks/use-monitor-session";
+import { useReferenceDevice } from "./hooks/use-reference-device";
 
 export default function MonitorScreen() {
   const session = useMonitorSession();
+  // Must stay after useMonitorSession: its effect cleanup calls removeAllListeners.
+  const reference = useReferenceDevice(session.developerMode);
 
   const subtitle = session.connectedDeviceId
     ? session.isMuseConnected
@@ -149,6 +153,22 @@ export default function MonitorScreen() {
           onFlushTrack={() => session.handleFlushTrack(null)}
           onClearStoredAuth={session.clearStoredAuth}
         />
+
+        {session.developerMode ? (
+          <ReferenceDeviceCard
+            status={reference.status}
+            candidates={reference.candidates}
+            deviceName={reference.deviceName}
+            errorMessage={reference.errorMessage}
+            summary={reference.summary}
+            bluetoothPowered={session.bluetoothPowered}
+            onScan={reference.startScan}
+            onConnect={reference.connect}
+            onDisconnect={reference.disconnect}
+            onExport={reference.exportCsv}
+            onClear={reference.clearRecording}
+          />
+        ) : null}
 
         <ThemedView style={monitorStyles.infoSection}>
           <ThemedText style={monitorStyles.infoText}>

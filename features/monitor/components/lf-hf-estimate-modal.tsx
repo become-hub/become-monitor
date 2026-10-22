@@ -5,7 +5,7 @@
 import { ThemedText } from "@/components/themed-text";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
-import { LF_HF_VS_ECG_TYPICAL_ERROR_PCT } from "@/services/ppi-sample-window";
+import { LF_HF_VS_ECG_TYPICAL_ERROR_PCT } from "@/features/hrv/ppi/ppi-sample-window";
 import { X } from "lucide-react-native";
 import { Modal, Pressable, StyleSheet, TouchableOpacity, View } from "react-native";
 

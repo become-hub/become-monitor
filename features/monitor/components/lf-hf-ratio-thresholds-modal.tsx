@@ -9,7 +9,7 @@ import {
   assessLfHfRatio,
   LF_HF_RATIO_BANDS,
   type LfHfRatioSeverity,
-} from "@/services/hrv-calculator";
+} from "@/features/hrv/core/hrv-calculator";
 import { X } from "lucide-react-native";
 import {
   Modal,

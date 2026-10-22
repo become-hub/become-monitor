@@ -28,6 +28,12 @@ export interface PolarHrData {
   rrsMs?: number[];
 }
 
+/** HR/RR sample from the reference device (e.g. H10) — never enters the live LF/HF or Ably path. */
+export interface PolarReferenceHrData extends PolarHrData {
+  /** Wall-clock ms (Date.now) taken natively when the sample left the SDK. */
+  nativeAtMs: number;
+}
+
 export interface PolarEcgData {
   deviceId: string;
   /** Last sample voltage in µV. */
@@ -94,7 +100,11 @@ export type PolarEventType =
     | "onSkinTemperatureReceived"
     | "onSkinTemperatureStreamError"
     | "onEcgDataReceived"
-    | "onEcgStreamError";
+    | "onEcgStreamError"
+    | "onReferenceDeviceConnected"
+    | "onReferenceDeviceDisconnected"
+    | "onReferenceHrReceived"
+    | "onReferenceHrStreamError";
 
 class PolarBleSdk {
     private eventEmitter: NativeEventEmitter;
@@ -204,6 +214,26 @@ class PolarBleSdk {
 
     async stopHrStreaming(): Promise<void> {
         return PolarBleModule.stopHrStreaming();
+    }
+
+    /**
+     * Second read-only device (developer validation: H10 next to a 360/Loop).
+     * Events arrive as onReference* and never touch the primary device state.
+     */
+    async connectReferenceDevice(deviceId: string): Promise<void> {
+        return PolarBleModule.connectReferenceDevice(deviceId);
+    }
+
+    async disconnectReferenceDevice(): Promise<void> {
+        return PolarBleModule.disconnectReferenceDevice();
+    }
+
+    async startReferenceHrStreaming(deviceId: string): Promise<void> {
+        return PolarBleModule.startReferenceHrStreaming(deviceId);
+    }
+
+    async stopReferenceHrStreaming(): Promise<void> {
+        return PolarBleModule.stopReferenceHrStreaming();
     }
 
     async startEcgStreaming(deviceId: string): Promise<void> {
@@ -329,6 +359,22 @@ class PolarBleSdk {
     ): void;
     addEventListener(
         event: "onEcgStreamError",
+        callback: (error: { error: string }) => void
+    ): void;
+    addEventListener(
+        event: "onReferenceDeviceConnected",
+        callback: (device: PolarDeviceInfo) => void
+    ): void;
+    addEventListener(
+        event: "onReferenceDeviceDisconnected",
+        callback: (device: { deviceId: string }) => void
+    ): void;
+    addEventListener(
+        event: "onReferenceHrReceived",
+        callback: (data: PolarReferenceHrData) => void
+    ): void;
+    addEventListener(
+        event: "onReferenceHrStreamError",
         callback: (error: { error: string }) => void
     ): void;
     addEventListener(event: PolarEventType, callback: (data: any) => void): void {

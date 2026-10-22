@@ -1,4 +1,9 @@
 import {
+  isUsablePpiMs,
+  PPI_ERROR_ESTIMATE_SANE_MS,
+  shouldUpdateLfHfFromPpiSample,
+} from "@/features/hrv/ppi/ppi-limits";
+import {
   buildPolarSignalQualityUi,
   HR_ZERO_GRACE_MS,
   isFresh,
@@ -6,15 +11,12 @@ import {
   isPolarSkinContactPoor,
   isPolarWearQualityPoor,
   isSustainedHrZero,
-  isUsablePpiMs,
   averageHrFromBucket,
   PPI_ERROR_ESTIMATE_POOR_MS,
-  PPI_ERROR_ESTIMATE_SANE_MS,
   PPI_STALE_MS,
   PPI_STREAM_ALIVE_MS,
   polarLiveIntervalMs,
   shouldPublishLiveHeartRate,
-  shouldUpdateLfHfFromPpiSample,
 } from "../polar-live-signal";
 
 describe("polar-live-signal", () => {

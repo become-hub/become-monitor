@@ -6,17 +6,30 @@ Il formato si ispira a [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.5] — Ably v2, riferimento H10 e motion gate LF/HF
+
 ### Added
+- Documentazione: `docs/lf-hf-accuracy-vs-h10.md` (errore LF/HF del 360 vs H10, a riposo e in movimento) e `docs/hrv/lf-hf-calculation.md` (calcolo di LF/HF in dettaglio)
+- Developer Mode: card **Riferimento H10** per registrare un Polar H10 insieme al 360/Loop sullo stesso telefono (stesso orologio) ed esportare i due flussi di battiti come file `.csv` (share sheet, via `expo-sharing` + `expo-file-system`); l'H10 è secondario e di sola lettura (nessun effetto su Ably, LF/HF live o sessione del 360)
+- Modulo nativo Polar: slot dispositivo/stream di riferimento (`connectReferenceDevice`, `startReferenceHrStreaming`, eventi `onReference*`) con test Kotlin e Jest
+- Registro validazione: sessioni appaiate 360 vs H10 (22/10) e procedura per lo stesso telefono
+- Dominio HRV centralizzato in `features/hrv/` (core, ppi, contract, recompute) con confine ESLint
+- Contratto Ably Polar **v2**: tick snello (~250 B) con `beats` delta, `sessionMeta`, `sessionEnd`, checkpoint `windowFromSeq` / `windowCrc`
+- Modulo di ricalcolo/correzione sessione (`features/hrv/recompute/`) e docs in `docs/hrv/`
 - Presence Ably: `data` include `deviceName` oltre a `deviceCode`
 - Monitor → Streaming: badge con il numero di `heartRate` confermati da Ably (e rifiutati); al tocco mostra l’ultimo evento inviato formattato
 
 ### Changed
-- Ably `heartRate`: dopo il primo tick valido (auth + `hr > 0` + HRV pronta) resta a 1 Hz per tutta la sessione BLE; con segnale perso invia `hr: 0`, `signalStale: true`, `staleSinceMs`
-- Ably `heartRate`: il payload non supera più il limite Ably di 64 KiB (errore `40009`, publish scartati dal server con finestra PPI piena): serie pesanti/ridondanti tolte in ordine fisso, elencate in `payloadTrimmed`
+- LF/HF (360/Loop): motion gate di solo stato — con `blocker` su ≥ 95% dei battiti degli ultimi 120 s lo stato diventa `low_quality` (numeri invariati); validato su sessioni appaiate con H10 (registro validazione, test 11)
+- Ably `heartRate` Polar: non ripubblica più la finestra PPI 300 s (`ppisMs` / `tachogramSamples` / …); solo scalari + beat nuovi (outbox con ack, cursore in volo senza rinvii duplicati durante un outage, nack che rimette in coda)
+- Ably `heartRate`: dopo il primo tick valido (auth + `hr > 0` + HRV pronta) resta a 1 Hz per tutta la sessione BLE; con segnale perso invia `hr: 0`, `signalStale: true`
 - Ably `heartRate`: il flush a 1 Hz parte anche dagli eventi HR del Polar, non solo dal timer; con schermo bloccato o app in background il timer JS viene rallentato dal sistema e il publish andava a scatti (buchi di 10–18 s)
 - Ably `closed` (chiusura voluta) non è più loggato come errore
 - Disconnect Ably transitorio: i publish vengono comunque accodati dall’SDK (niente drop silenzioso in `connecting` / `disconnected`)
 - Stato Monitor: «Connesso · segnale perso» quando lo stream è latched ma senza HR
+
+### Removed
+- Payload Ably Polar v1 a finestra piena (`services/polar-ably-payload.ts` e serie ridondanti sul tick)
 
 ## [1.2.4] — LF/HF live da PPI (360/Loop)
 

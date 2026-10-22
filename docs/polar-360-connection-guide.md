@@ -90,98 +90,49 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Augm
 - Se `EXPO_PUBLIC_TRACK_UPLOAD_URL` è vuoto, lo spike fa **dry-run** (solo log).
 - In Monitor, con **debug mode** attivo, è disponibile il bottone **“Simula endSession / Flush track”** per test senza Hub.
 
-Esempio payload Ably live `heartRate` (360 / Loop):
+Esempio payload Ably live `heartRate` **v2** (360 / Loop) — tick snello (~250 B):
 
 ```json
 {
-  "deviceId": "...",
-  "deviceModel": "polar_loop",
+  "sid": "a1b2c3",
   "hr": 74,
-  "signalStale": false,
-  "staleSinceMs": null,
   "hrv": 42,
   "lfPower": 1200,
   "hfPower": 800,
-  "lfHfRatio": 1.5,
-  "lfHfValid": true,
-  "lfHfStatus": "valid",
-  "lfHfAcceptedRatio": 0.93,
-  "lfHfMaxArtifactGapSec": 1.8,
-  "lfHfComputedAt": 1700000300000,
-  "rrMs": 812,
-  "rrSource": "ppi",
-  "ppiMs": 812,
-  "ppisMs": [800, 810, 805, 812],
-  "rrsMs": [800, 810, 805, 812],
-  "rrAvailable": true,
-  "ppiTimesSec": [0.8, 1.61, 2.415, 3.227],
-  "rawIncludedPpiMs": [800, 810, 805, 812],
-  "correctedPpiSeries": [800, 810, 805, 812],
-  "tachogramSamples": [
-    { "timeSec": 0.8, "rawPpiMs": 800, "correctedPpiMs": 800, "kind": "accepted", "jumpCorrected": false }
-  ],
-  "ppiSamples": [
-    { "ppiMs": 800, "errorEstimate": 5, "timestamp": 1700000000000, "rejectReason": null, "kind": "accepted" },
-    { "ppiMs": 810, "errorEstimate": 4, "timestamp": 1700000000800, "rejectReason": null, "kind": "accepted" }
-  ],
-  "includedIntervalDurationSec": 300.5,
-  "tachogramDomainSec": 299.7,
-  "resampledDurationSec": 299.7,
-  "hrvWindowSeconds": 300.5,
-  "hrvIntervalCount": 4,
-  "hrvMethod": "periodogram",
-  "hrvSamplingHz": 4,
-  "livePublishHz": 1,
-  "lfBandHz": [0.04, 0.15],
-  "hfBandHz": [0.15, 0.4],
-  "hrvPreprocessing": { "unit": "ms2", "method": "periodogram", "samplingHz": 4, "livePublishHz": 1 },
-  "skinTemperatureC": 33.4,
-  "contactStatus": true,
-  "contactStatusSupported": true,
-  "errorEstimate": 5,
-  "blocker": false,
-  "ppgQuality": null,
-  "correctedHr": null,
-  "appVersion": "v1.2.2",
+  "lfHfStatus": "provisional",
+  "windowFromSeq": 903,
+  "beats": [[1203, 812, 6, 0, 0, 2, 411]],
   "type": "heartRate",
   "code": "deviceCode",
   "timestamp": "ISO"
 }
 ```
 
-Note:
+Colonne di `beats`: `[seq, ppiMs, errorEstimate, kind, blocker, ep, frameId]`. Eventi correlati: `sessionMeta` (statico, una volta per epoch) e `sessionEnd` (a chiusura).
 
-- `deviceModel` è un `PolarProductId` (`polar_360` | `polar_loop` | `polar_h10`), o `null` se il nome BLE non risolve; Hub può mapparlo a `POLAR_PRODUCTS[id].displayName`.
-- `timestamp` è aggiunto da `AblyService.sendMessage` (non c'è un campo `date` duplicato).
-- `rrSource` è `"ppi"` (preferito), `"hr_derived"` in fallback, o `"ecg_rr"` su dispositivi ECG.
-- `ppiMs` / `rrMs` sono l'ultimo intervallo usabile; con `rrSource === "ppi"` **non** si fabbrica una serie ripetendo quel valore.
-- `ppisMs` / `rrsMs` (quando `rrSource === "ppi"`) sono la serie **Y corretta** (compat Hub). **Da soli non bastano** per ricalcolare LF/HF: serve anche `ppiTimesSec` (X da PPI raw inclusi) o `tachogramSamples`. `rrAvailable` è `true` se la serie ha ≥ 2 intervalli. Non sono RR ECG.
-- Live publish è a **1 Hz** (`livePublishHz: 1`): ripubblica l’ultimo LF/HF senza aggiungere PPI al buffer. `lfHfComputedAt` è quando è stato calcolato lo spettro (frame PPI), distinto dal `timestamp` Ably del tick Live.
-- `ppiSamples` elenca ogni PPI del buffer con `errorEstimate`, `timestamp` wall, `rejectReason` / `kind` (`accepted` | `quality_rejected` | `out_of_physiological_range`).
-- Pipeline: X = timeline cumulativa dei PPI **inclusi** (accepted + quality_rejected); Y = valori corretti/interpolati; out_of_physiological_range **esclusi** (non avanzano X). Resample lineare **4 Hz** solo su `[ppiTimesSec[0], ppiTimesSec[last]]` (no extrapolazione). Periodogramma Hann one-sided; LF `f ≥ 0.04 && f < 0.15`, HF `f ≥ 0.15 && f ≤ 0.40` (0.15 solo HF). Unità **ms²**.
-- Tre durate: `includedIntervalDurationSec` = sum(included)/1000; `tachogramDomainSec` = last−first X; `resampledDurationSec` = dominio PSD. `lfHfValid` richiede `resampledDurationSec ≥ 300` più accepted ≥ 150, ratio ≥ 0.75, `maxArtifactGapSec ≤ 5`, timeline monotona. Retention raw 310–360 s: 310 s **non garantisce** validità se molti out_of_range.
-- LF/HF live (UI + Ably) partono **solo dopo HRV pronta**; prima restano "—" / `null` e `lfHfStatus: "unavailable"`. Poi restano pubblicati con uno spettro e `lfHfStatus` (anche se `lfHfValid` è false). Vedi [Qualità LF/HF](#qualità-lfhf-monitor). I consumer che vogliono solo valori standard Task Force (5 min) filtrano su `lfHfStatus === "valid"`.
-- RMSSD (`hrv`) resta sulla finestra Live da 30 battiti; LF/HF sul buffer PPI SDK (ma non esposti finché RMSSD non è pronto).
-- `skinTemperatureC` è valorizzato **solo su Loop Gen 2** (stream SDK); su Polar 360 è sempre `null`.
-- Finché HRV (RMSSD) non è pronta non parte alcun `heartRate` su Ably e LF/HF restano `null`. Dopo il primo tick valido, vedi [Continuità heartRate](#continuità-heartrate-ably).
-- Salti successivi ≥ 200 ms: Y interpolato (stesso limite RMSSD).
+Contratto completo, algoritmo e ricalcolo: **[docs/hrv/](./hrv/README.md)**.
+
+Note (riassunto):
+
+- `timestamp` è aggiunto da `AblyService.sendMessage`.
+- Live publish a **1 Hz**: scalari + solo i beat nuovi (outbox, ack Ably). Niente finestra 300 s sul filo.
+- LF/HF in UI e Ably solo dopo HRV pronta; poi con `lfHfStatus`. Vedi [Qualità LF/HF](#qualità-lfhf-monitor).
+- `skinTemperatureC` solo su Loop Gen 2 (campo opzionale sul tick).
+- Finché HRV non è pronta non parte alcun `heartRate`. Dopo il primo tick: [Continuità heartRate](#continuità-heartrate-ably).
 
 ### Continuità heartRate (Ably)
 
 - **Gate di partenza** (invariato): auth Become (`authToken` + `userId` + `deviceCode`), `hr > 0`, HRV pronta (Live ≈ 30 battiti; Muse senza gate HRV).
 - **Latch**: al primo `heartRate` inviato con successo la sessione si “blocca” sul publish a **1 Hz**. Da quel momento il gate non si riapplica: ogni tick manda un evento finché la sessione BLE è attiva.
-- **Segnale perso** (bracciale tolto, contatto perso, `hr = 0` dopo grace): le metriche UI si azzerano, ma Ably continua con `hr: 0`, `hrv` / LF/HF / serie PPI a `null`, `signalStale: true`, `staleSinceMs` (ms dall’inizio del periodo stale). Quando il segnale torna, `hr` riprende subito; `hrv` resta `null` finché la finestra non è di nuovo piena.
-- **Stop definitivo** solo su: disconnect BLE, disconnect manuale, logout / reset auth, o evento Hub `endSession` (il latch si azzera; un nuovo warm-up riparte se il device resta collegato).
+- **Segnale perso** (bracciale tolto, contatto perso, `hr = 0` dopo grace): le metriche UI si azzerano, ma Ably continua con `hr: 0`, `signalStale: true`, `beats: []`. Quando il segnale torna, `hr` riprende subito; `hrv` resta assente finché la finestra non è di nuovo piena.
+- **Stop definitivo** solo su: disconnect BLE, disconnect manuale, logout / reset auth, o evento Hub `endSession` (il latch si azzera; viene inviato `sessionEnd`; un nuovo warm-up riparte se il device resta collegato).
 - **Presence** (`private:<userId>`, azione `enter`): `data` è `{ "deviceCode": "...", "deviceName": "Polar 360 E5BEEB29" }`; `deviceName` è `null` se il nome non è ancora noto.
-- **Contatore eventi (Monitor → Streaming)**: accanto allo stato compare il numero di `heartRate` **confermati da Ably** nella sessione BLE (azzerato a disconnect / logout / `endSession`); se Ably ne rifiuta qualcuno compare anche `N✕`. Toccando il badge si apre l’ultimo evento inviato (JSON formattato; le serie lunghe sono riassunte, il payload reale non cambia).
-- **Limite dimensione messaggio**: Ably rifiuta i publish sopra **65 536 byte** (errore `40009`, lato server: l’app non se ne accorge). Con la finestra PPI piena (310–360 s) il payload completo supera il limite, quindi `buildPolarAblyHeartRatePayload` lo porta sotto **60 000 byte** togliendo (→ `null`) una serie alla volta, in quest’ordine: `resampledSeries`, `ppiSamples`, `rawIncludedPpiMs`, `rrsMs`, `tachogramSamples`, `correctedPpiSeries`, `ppiTimesSec`, `ppisMs`. `hr`, `hrv`, LF/HF e metadati restano sempre. `payloadTrimmed` elenca le serie tolte (`null` se il payload è completo): i consumer che ricalcolano LF/HF devono controllarlo (per il ricalcolo bastano `ppiTimesSec` + `correctedPpiSeries`, oppure `tachogramSamples`).
+- **Contatore eventi (Monitor → Streaming)**: accanto allo stato compare il numero di `heartRate` **confermati da Ably** nella sessione BLE (azzerato a disconnect / logout / `endSession`); se Ably ne rifiuta qualcuno compare anche `N✕`. Toccando il badge si apre l’ultimo evento inviato (JSON formattato).
+- **Dimensione messaggio**: il tick v2 è ~250 B (più eventuali beat rimandati, cap 120). Il limite Ably 64 KiB non è più raggiunto in uso normale. Dettagli in [docs/hrv/ably-contract-v2.md](./hrv/ably-contract-v2.md).
 - **Disconnect Ably transitorio** (`connecting` / `disconnected`): l’app continua a chiamare `channel.publish`; l’SDK Ably accoda i messaggi (`queueMessages`) e li invia alla riconnessione. Si scarta solo se non c’è client Ably o lo stato è `failed` / `closed` / `suspended`.
 - In Monitor, con latch attivo e segnale perso, lo stato streaming mostra **«Connesso · segnale perso»**.
-- Su **360 / Loop**, nel buffer LF/HF accepted se `errorEstimate` ≤ 20 ms (`LF_HF_PPI_ERROR_ESTIMATE_MAX_MS`; in Estesa anche senza `blocker`); `hrvPreprocessing.errorEstimateMaxMs` riporta 20. Il RMSSD resta a ≤ 10 ms. Sopra 20 ms: `kind: "quality_rejected"` (resta in X, Y interpolato). Fuori 300–2000 ms: `out_of_physiological_range` (escluso da X). La card **Errore PPI** diventa rossa solo con `errorEstimate` > 30 ms.
-- Su **H10**, la sorgente è RR ECG (`rrSource: "ecg_rr"`); `ppisMs` / `ppiSamples` restano `null` e `rrsMs` è la serie ECG nativa.
-- `contactStatus` / `contactStatusSupported` preferiscono il skin contact dello stream **PPI**; se il PPI non lo supporta, usano la notifica BLE Heart Rate.
-- `errorEstimate` (ms) e `blocker` sull'ultimo tick arrivano dal campione PPI; per-beat restano in `ppiSamples`.
-- `ppgQuality` / `correctedHr` arrivano dalla notifica BLE Heart Rate (spesso `null` su 360/Loop). L'app **non** avvia `startHrStreaming` in parallelo al PPI.
+- Su **360 / Loop**, nel buffer LF/HF accepted se `errorEstimate` ≤ 20 ms; RMSSD ≤ 10 ms. Movimento (`blocker`) per beat è nella tupla. Vedi [docs/hrv/algorithm.md](./hrv/algorithm.md).
+- Su **H10**, la sorgente è RR ECG (`rrSource: "ecg_rr"`); il tick usa `rrsMs` nativi (nessun outbox PPI).
 - `appVersion` è la versione marketing dell'app (`v` + valore da `app.json` / Expo config).
 - In Monitor, sotto le card principali, compaiono card compatte **Contatto** / **Errore PPI** / **Movimento**. Senza contatto pelle (o con `errorEstimate` > 30 ms) compare l'alert rosso **«Sistema bene il bracciale»**; con `blocker` (movimento) compare un alert distinto ambra **«Resta fermo»**.
 
@@ -199,7 +150,7 @@ LF e HF diventano visibili/trasmessi **dopo che HRV (RMSSD) è pronta** (Live: ~
 |---|---|---|---|
 | — | `unavailable` | non c'è ancora uno spettro (pochissimi battiti) | — |
 | **Bassa** | `warming_up` | segnale ok ma meno di 2 minuti di dati | 1 impulso |
-| **Bassa** | `low_quality` | battiti buoni < 60% **oppure** buco più lungo > 10 s | 1 impulso |
+| **Bassa** | `low_quality` | battiti buoni < 60% **oppure** buco più lungo > 10 s **oppure** polso in movimento (`blocker` su ≥ 95% dei battiti degli ultimi 2 minuti, es. scrittura o gesti: lì LF/HF può scostarsi dall'ECG del 45–77%) | 1 impulso |
 | **Media** | `provisional` | almeno 2 minuti, battiti buoni ≥ 60%, buco ≤ 10 s | 2 impulsi |
 | **Ottima** | `valid` | standard 5 min: ≥ 5:00, battiti buoni ≥ 75%, buco ≤ 5 s, ≥ 150 battiti buoni | 3 impulsi |
 
@@ -307,7 +258,32 @@ Sulle sessioni 1–2 sono state provate 11 varianti; la migliore è stata poi ve
 
 Nessuna variante batte in modo consistente la regola attuale (errore ≤ 20 ms accettato, altrimenti sostituito), che resta in uso.
 
-Per ripetere la prova: H10 con Polar Sensor Logger (stream HR con RR) e 360 in questa app nello stesso momento; si confrontano i file RR della fascia con i PPI del 360 (`ppiSamples` su Ably) sulla stessa finestra di 5 minuti. Procedura in [lf-hf-validation-log.md](lf-hf-validation-log.md#come-ripetere-un-confronto-con-h10).
+Sessione del 22/10/2026 (dopo il contratto Ably v2): il calcolo live coincide con il replay offline (562 tick su 562), ma rispetto all'H10 lo scarto mediano è stato LF 34%, HF 76%, LF/HF 64% (LF sottostimato, HF sovrastimato). È più del ±35% indicato sopra: una sola sessione non basta per cambiare la nota, ma la rende meno affidabile come garanzia. Dettagli in [lf-hf-validation-log.md](lf-hf-validation-log.md).
+
+Per ripetere la prova ci sono due modi (procedura completa in [lf-hf-validation-log.md](lf-hf-validation-log.md#come-ripetere-un-confronto-con-h10)):
+
+- **Stesso telefono (Developer Mode):** card **Riferimento H10 (solo sviluppatore)** in Monitor, vedi [Riferimento H10 accanto al 360](#riferimento-h10-accanto-al-360-solo-sviluppatore).
+- **Due telefoni:** H10 con Polar Sensor Logger e 360 in questa app nello stesso momento; si confrontano i file RR con i `beats` Ably v2 sulla stessa finestra di 5 minuti.
+
+#### Riferimento H10 accanto al 360 (solo sviluppatore)
+
+Con **Developer Mode** attivo, Monitor mostra la card **Riferimento H10**: un Polar H10 si collega **in aggiunta** al 360/Loop sullo stesso telefono, per confrontare gli RR e LF/HF con lo stesso orologio.
+
+Passi:
+1. Collega il 360/Loop e avvia lo streaming come di consueto.
+2. Nella card tocca **Cerca H10**, poi **Connetti** sul dispositivo trovato.
+3. Con «H10 in registrazione» partono i conteggi (battiti 360 / RR H10 / durata). Esporta con **Esporta CSV** (genera un file `polar360-vs-h10_<data>.csv` e apre lo share sheet: salva su file, Drive o invia come documento) o azzera con **Azzera**. Richiede una build con `expo-sharing` (dopo l'aggiornamento: `make android` / rebuild nativo).
+
+Cosa garantisce:
+- L'H10 è di **sola lettura**: nessun dato va su Ably, nel calcolo LF/HF live o nella sessione del 360; la disconnessione dell'H10 non chiude la sessione del 360.
+- L'H10 non compare nell'elenco dei dispositivi principali: `DEVICE_AVAILABILITY.polar_h10` resta `false`.
+- Solo Android (come tutto lo stack Polar). La registrazione è in memoria (max 100 000 righe): esportare prima di chiudere l'app.
+
+Risoluzione problemi:
+- **«Cerca H10» non trova nulla:** indossare la fascia (elettrodi umidi) e che non sia già collegata a un altro telefono o app; riprovare la scansione.
+- **Stato «Errore» dopo la connessione:** disconnettere e ripetere; se persiste, riavviare il Bluetooth del telefono.
+- **Il 360 si disconnette quando collego l'H10:** non dovrebbe succedere (eventi separati nel modulo nativo); segnalare con il log di `PolarDeviceManager`.
+
 
 #### Consigli per salire di qualità
 
@@ -316,22 +292,22 @@ Per ripetere la prova: H10 con Polar Sensor Logger (stream HR con RR) e 360 in q
 - Dopo un movimento, aspetta: la % di battiti buoni risale man mano che il tratto rumoroso esce dalla finestra di ~5 minuti.
 - Se la barra "Battiti buoni" resta sotto il 60% anche da fermo, è il segnale ottico a essere debole (molti battiti con errore PPI oltre 20 ms), non un problema di tempo.
 
-#### Campi Ably collegati
+#### Campi Ably collegati (v2)
 
 | Campo | Significato |
 |---|---|
 | `lfHfStatus` | `unavailable` / `warming_up` / `low_quality` / `provisional` / `valid` |
-| `lfHfValid` | `true` solo con `valid` (standard 5 min) |
-| `lfHfAcceptedRatio` | quota battiti buoni nella finestra (0–1) |
-| `lfHfMaxArtifactGapSec` | buco più lungo in secondi |
-| `resampledDurationSec` | durata finestra usata per lo spettro (max ~309 s) |
-| `lfPower` / `hfPower` / `lfHfRatio` | potenze in ms² e rapporto; `null` se HRV non pronta o `unavailable` |
+| `lfPower` / `hfPower` | potenze in ms²; assenti se non pubblicabili |
+| `beats` | delta PPI `[seq, ppiMs, errorEstimate, kind, blocker, ep, frameId]` |
+| `windowFromSeq` / `windowCrc` | checkpoint per verifica ricalcolo |
+
+Dettaglio: [docs/hrv/ably-contract-v2.md](./hrv/ably-contract-v2.md).
 
 ### Verifica LF/HF (esterna)
 
-Per ricalcolare LF/HF da un payload Ably live **non** bastano `ppisMs` / `rrsMs`. Servono `ppiTimesSec` (X, timeline da PPI raw inclusi) e `correctedPpiSeries` (Y), oppure `tachogramSamples`.
+Per ricalcolare LF/HF dai messaggi Ably v2 servono i `beats` (raggruppati per `ep` / `frameId`) e i parametri in `sessionMeta`. Preferire il modulo TypeScript `features/hrv/recompute/` (stessa pipeline dell’app). Vedi [docs/hrv/recompute-and-correction.md](./hrv/recompute-and-correction.md).
 
-Esempio Python (stessa pipeline: interp lineare 4 Hz, mean detrend, Hann simmetrica, PSD densità one-sided, bande LF `[0.04, 0.15)` / HF `[0.15, 0.40]`):
+Esempio Python di riferimento (stessa pipeline: interp lineare 4 Hz, mean detrend, Hann simmetrica, PSD densità one-sided, bande LF `[0.04, 0.15)` / HF `[0.15, 0.40]`) — ricostruire `t` / `y` dai beat prima di chiamarla:
 
 ```python
 import numpy as np

@@ -204,6 +204,36 @@ class PolarBleModule @JvmOverloads constructor(
             })
         }
 
+        // Reference device (e.g. H10): own events, never stops primary streams or the FGS.
+        deviceManager.onReferenceDeviceConnected = { info ->
+            sendEvent("onReferenceDeviceConnected", Arguments.createMap().apply {
+                putString("deviceId", info.deviceId)
+                putString("name", info.name)
+            })
+        }
+
+        deviceManager.onReferenceDeviceDisconnected = { info ->
+            streamManager.stopReferenceHrStreaming()
+            sendEvent("onReferenceDeviceDisconnected", Arguments.createMap().apply {
+                putString("deviceId", info.deviceId)
+            })
+        }
+
+        streamManager.onReferenceHrDataReceived = { deviceId, hrData ->
+            val nativeAtMs = System.currentTimeMillis().toDouble()
+            hrData.samples.forEach { sample ->
+                sendEvent("onReferenceHrReceived", hrSampleToMap(deviceId, sample).apply {
+                    putDouble("nativeAtMs", nativeAtMs)
+                })
+            }
+        }
+
+        streamManager.onReferenceHrStreamError = { error ->
+            sendEvent("onReferenceHrStreamError", Arguments.createMap().apply {
+                putString("error", error.message ?: "Unknown error")
+            })
+        }
+
         deviceManager.onPairingLikelyFailed = { deviceId, connectedMs, features ->
             val removed = bluetoothManager.removePolarBonds(deviceId)
             Log.w(
@@ -384,6 +414,66 @@ class PolarBleModule @JvmOverloads constructor(
                 }
         } catch (e: Exception) {
             promise.reject("DISCONNECT_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun connectReferenceDevice(deviceId: String, promise: Promise) {
+        try {
+            deviceManager.connectReferenceDevice(deviceId)
+                .onSuccess { promise.resolve(null) }
+                .onFailure { error ->
+                    promise.reject("REFERENCE_CONNECTION_ERROR", error.message)
+                }
+        } catch (e: Exception) {
+            promise.reject("REFERENCE_CONNECTION_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun disconnectReferenceDevice(promise: Promise) {
+        try {
+            streamManager.stopReferenceHrStreaming()
+            deviceManager.disconnectReferenceDevice()
+                .onSuccess { promise.resolve(null) }
+                .onFailure { error ->
+                    promise.reject("REFERENCE_DISCONNECT_ERROR", error.message)
+                }
+        } catch (e: Exception) {
+            promise.reject("REFERENCE_DISCONNECT_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun startReferenceHrStreaming(deviceId: String, promise: Promise) {
+        try {
+            val disposable = streamManager.startReferenceHrStreaming(deviceId)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe({
+                    promise.resolve(null)
+                }, { error ->
+                    promise.reject(
+                        "REFERENCE_HR_STREAM_ERROR",
+                        "${error.javaClass.simpleName}: ${error.message}"
+                    )
+                })
+            disposables.add(disposable)
+        } catch (e: Exception) {
+            promise.reject("REFERENCE_HR_STREAM_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun stopReferenceHrStreaming(promise: Promise) {
+        try {
+            streamManager.stopReferenceHrStreaming()
+                .onSuccess { promise.resolve(null) }
+                .onFailure { error ->
+                    promise.reject("STOP_REFERENCE_HR_ERROR", error.message)
+                }
+        } catch (e: Exception) {
+            promise.reject("STOP_REFERENCE_HR_ERROR", e.message)
         }
     }
 
