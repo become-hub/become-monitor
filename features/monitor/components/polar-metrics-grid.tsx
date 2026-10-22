@@ -14,17 +14,30 @@ import {
   isPolarSkinContactPoor,
   type PolarSignalQualityUi,
 } from "@/features/monitor/hooks/polar-live-signal";
+import {
+  assessLfHfRatio,
+  lfHfQualityLevel,
+  type LfHfProgress,
+  type LfHfQualityLevel,
+  type LfHfStatus,
+} from "@/services/hrv-calculator";
+import {
+  LF_HF_PPI_ERROR_ESTIMATE_MAX_MS,
+  LF_HF_VS_ECG_TYPICAL_ERROR_PCT,
+} from "@/services/ppi-sample-window";
 import type { RrSource } from "@/services/rr-interval";
 import {
   Activity,
   Hand,
   Heart,
   PersonStanding,
+  Scale,
   ShieldAlert,
   Thermometer,
   Zap,
 } from "lucide-react-native";
 import { View } from "react-native";
+import { LfHfProgressCard } from "./lf-hf-progress-card";
 import { MetricCard } from "./metric-card";
 import { monitorStyles } from "./monitor-styles";
 
@@ -34,6 +47,9 @@ interface PolarMetricsGridProps {
   hrv: number;
   lfPower: number;
   hfPower: number;
+  lfHfStatus?: LfHfStatus;
+  lfHfProgress?: LfHfProgress | null;
+  lfHfRatio?: number | null;
   rrMs: number;
   rrSource: RrSource | null;
   ecgMicroVolts: number;
@@ -50,14 +66,18 @@ interface PolarMetricsGridProps {
   polarSignalQuality?: PolarSignalQualityUi | null;
 }
 
-function contactLabel(quality: PolarSignalQualityUi | null | undefined): string {
+function contactLabel(
+  quality: PolarSignalQualityUi | null | undefined,
+): string {
   if (!quality || quality.contactStatusSupported !== true) {
     return "—";
   }
   return quality.contactStatus === true ? "OK" : "No";
 }
 
-function qualityLabel(quality: PolarSignalQualityUi | null | undefined): string {
+function qualityLabel(
+  quality: PolarSignalQualityUi | null | undefined,
+): string {
   if (quality?.errorEstimate == null) {
     return "—";
   }
@@ -71,12 +91,22 @@ function motionLabel(quality: PolarSignalQualityUi | null | undefined): string {
   return quality.blocker ? "Sì" : "No";
 }
 
+const LF_HF_UNIT: Record<LfHfQualityLevel, string> = {
+  0: "ms²",
+  1: "ms² · bassa qualità",
+  2: "ms² · media qualità",
+  3: "ms² · ottima qualità",
+};
+
 export function PolarMetricsGrid({
   connectedDeviceId,
   heartRate,
   hrv,
   lfPower,
   hfPower,
+  lfHfStatus = "unavailable",
+  lfHfProgress = null,
+  lfHfRatio = null,
   rrMs,
   rrSource,
   ecgMicroVolts,
@@ -97,22 +127,28 @@ export function PolarMetricsGrid({
     !!connectedDeviceId && !isH10Connected && polarSignalQuality != null;
   const contactPoor =
     showQualityCards && isPolarSkinContactPoor(polarSignalQuality);
-  const motionPoor =
-    showQualityCards && isPolarMotionPoor(polarSignalQuality);
+  const motionPoor = showQualityCards && isPolarMotionPoor(polarSignalQuality);
   const qualityPoor =
     showQualityCards && isPolarPpiErrorPoor(polarSignalQuality);
   /** Loose fit / weak optical signal without an explicit no-contact flag. */
   const showContactWearAlert = contactPoor || (qualityPoor && !motionPoor);
+  const ratioAssessment = assessLfHfRatio(lfHfRatio);
+  const ratioValue =
+    connectedDeviceId && lfHfRatio != null && lfHfRatio > 0
+      ? Math.round(lfHfRatio * 100) / 100
+      : "—";
+  const ratioUnit = ratioAssessment?.label ?? "LF ÷ HF";
+  const ratioWarn = ratioAssessment?.severity === "warn";
+  const ratioDanger = ratioAssessment?.severity === "danger";
   const progressLabel =
-    hrvProgressLabel ??
-    (ppiWindowLength > 0 ? `${ppiWindowLength}/30` : "");
+    hrvProgressLabel ?? (ppiWindowLength > 0 ? `${ppiWindowLength}/30` : "");
   const hrvSourceBadge = isH10Connected
     ? "ECG RR"
     : rrSource === "ppi"
-      ? "PPI"
-      : rrSource === "hr_derived"
-        ? "HR"
-        : null;
+    ? "PPI"
+    : rrSource === "hr_derived"
+    ? "HR"
+    : null;
   const showHrvProgress =
     !!connectedDeviceId && hrv <= 0 && progressLabel.length > 0;
 
@@ -159,7 +195,9 @@ export function PolarMetricsGrid({
             />
             <MetricCard
               label="ECG"
-              value={connectedDeviceId && ecgMicroVolts !== 0 ? ecgMicroVolts : "—"}
+              value={
+                connectedDeviceId && ecgMicroVolts !== 0 ? ecgMicroVolts : "—"
+              }
               unit="µV"
               icon={Zap}
               highlighted
@@ -170,21 +208,19 @@ export function PolarMetricsGrid({
         <View style={monitorStyles.metricsRow}>
           <MetricCard
             label={
-              hrvSourceBadge
-                ? `HRV (RMSSD) · ${hrvSourceBadge}`
-                : "HRV (RMSSD)"
+              hrvSourceBadge ? `HRV (RMSSD) · ${hrvSourceBadge}` : "HRV (RMSSD)"
             }
             value={connectedDeviceId && hrv > 0 ? hrv : "—"}
             unit={
               connectedDeviceId && hrv > 0
                 ? "ms"
                 : connectedDeviceId &&
-                    hrvAnalysisMode === "clinical" &&
-                    hrvWallElapsedLabel
-                  ? `utile ${progressLabel || "00:00 / 05:00"}`
-                  : showHrvProgress
-                    ? progressLabel
-                    : "ms"
+                  hrvAnalysisMode === "clinical" &&
+                  hrvWallElapsedLabel
+                ? `utile ${progressLabel || "00:00 / 05:00"}`
+                : showHrvProgress
+                ? progressLabel
+                : "ms"
             }
             icon={Activity}
             fullWidth={showRawEcgCards}
@@ -211,11 +247,16 @@ export function PolarMetricsGrid({
             {hrvEpochInvalid
               ? "Acquisizione estesa non riuscita — ripartita. Resta fermo."
               : hrv > 0
-                ? `Estesa: ultimo risultato ok. Nuova acquisizione ${progressLabel || "00:00 / 05:00"} · trascorsi ${hrvWallElapsedLabel || "00:00"}`
-                : progressLabel &&
-                    !progressLabel.startsWith("00:00")
-                  ? `Estesa: segnale utile ${progressLabel} · trascorsi ${hrvWallElapsedLabel || "00:00"}`
-                  : `Estesa: in attesa di segnale stabile… trascorsi ${hrvWallElapsedLabel || "00:00"} (servono ~5 min utili)`}
+              ? `Estesa: ultimo risultato ok. Nuova acquisizione ${
+                  progressLabel || "00:00 / 05:00"
+                } · trascorsi ${hrvWallElapsedLabel || "00:00"}`
+              : progressLabel && !progressLabel.startsWith("00:00")
+              ? `Estesa: segnale utile ${progressLabel} · trascorsi ${
+                  hrvWallElapsedLabel || "00:00"
+                }`
+              : `Estesa: in attesa di segnale stabile… trascorsi ${
+                  hrvWallElapsedLabel || "00:00"
+                } (servono ~5 min utili)`}
           </ThemedText>
         )}
 
@@ -223,16 +264,39 @@ export function PolarMetricsGrid({
           <MetricCard
             label="HF Power"
             value={connectedDeviceId && hfPower > 0 ? hfPower : "—"}
-            unit="ms²"
+            unit={
+              connectedDeviceId
+                ? LF_HF_UNIT[lfHfQualityLevel(lfHfStatus)]
+                : "ms²"
+            }
             icon={Zap}
           />
           <MetricCard
             label="LF Power"
             value={connectedDeviceId && lfPower > 0 ? lfPower : "—"}
-            unit="ms²"
+            unit={
+              connectedDeviceId
+                ? LF_HF_UNIT[lfHfQualityLevel(lfHfStatus)]
+                : "ms²"
+            }
             icon={Zap}
           />
         </View>
+
+        {connectedDeviceId && !isH10Connected && lfHfProgress && (
+          <LfHfProgressCard status={lfHfStatus} progress={lfHfProgress} />
+        )}
+
+        {connectedDeviceId && !isH10Connected && (
+          <ThemedText style={monitorStyles.metricFootnote}>
+            LF e HF non arrivano dal bracciale: vengono interpretati come stima
+            dai battiti misurati al polso. Possono scostarsi di circa ±
+            {LF_HF_VS_ECG_TYPICAL_ERROR_PCT}% rispetto a una fascia al petto
+            (es. Polar H10). Servono soprattutto per vedere se salgono o
+            scendono nella stessa sessione, non come valori precisi al singolo
+            numero.
+          </ThemedText>
+        )}
 
         {connectedDeviceId && isSkinTemperatureSupported && (
           <View style={monitorStyles.metricsRow}>
@@ -266,30 +330,57 @@ export function PolarMetricsGrid({
         )}
 
         {showQualityCards && (
+          <>
+            <View style={monitorStyles.metricsRow}>
+              <MetricCard
+                label="LF/HF"
+                value={ratioValue}
+                unit={ratioUnit}
+                icon={Scale}
+                compact
+                warning={ratioWarn}
+                danger={ratioDanger}
+              />
+              <MetricCard
+                label="Errore PPI*"
+                value={qualityLabel(polarSignalQuality)}
+                unit="ms"
+                icon={Activity}
+                compact
+                danger={qualityPoor}
+              />
+            </View>
+            <View style={monitorStyles.metricsRow}>
+              <MetricCard
+                label="Contatto"
+                value={contactLabel(polarSignalQuality)}
+                unit="pelle"
+                icon={Hand}
+                compact
+                danger={contactPoor}
+              />
+              <MetricCard
+                label="Movimento"
+                value={motionLabel(polarSignalQuality)}
+                unit="blocker"
+                icon={PersonStanding}
+                compact
+                danger={motionPoor}
+              />
+            </View>
+          </>
+        )}
+
+        {connectedDeviceId && isH10Connected && (
           <View style={monitorStyles.metricsRow}>
             <MetricCard
-              label="Contatto"
-              value={contactLabel(polarSignalQuality)}
-              unit="pelle"
-              icon={Hand}
+              label="LF/HF"
+              value={ratioValue}
+              unit={ratioUnit}
+              icon={Scale}
               compact
-              danger={contactPoor}
-            />
-            <MetricCard
-              label="Errore PPI*"
-              value={qualityLabel(polarSignalQuality)}
-              unit="ms"
-              icon={Activity}
-              compact
-              danger={qualityPoor}
-            />
-            <MetricCard
-              label="Movimento"
-              value={motionLabel(polarSignalQuality)}
-              unit="blocker"
-              icon={PersonStanding}
-              compact
-              danger={motionPoor}
+              warning={ratioWarn}
+              danger={ratioDanger}
             />
           </View>
         )}
@@ -323,8 +414,8 @@ export function PolarMetricsGrid({
                     : ""}
                   . Indossa il Polar sul polso a contatto diretto con la pelle
                   (non sopra maniche o vestiti), a circa un dito dal polso.
-                  Stringilo abbastanza perché i LED verdi restino fermi contro la
-                  pelle, senza stringere fino a lasciarti un segno.
+                  Stringilo abbastanza perché i LED verdi restino fermi contro
+                  la pelle, senza stringere fino a lasciarti un segno.
                 </ThemedText>
               </View>
             )}
@@ -351,8 +442,9 @@ export function PolarMetricsGrid({
                 </View>
                 <ThemedText style={monitorStyles.wearWarningBody}>
                   Movimento rilevato: la misura PPI (intervallo battito-battito)
-                  è sensibile agli artefatti. Fermati, tieni il braccio rilassato
-                  e attendi qualche secondo senza camminare o gesticolare.
+                  è sensibile agli artefatti. Fermati, tieni il braccio
+                  rilassato e attendi qualche secondo senza camminare o
+                  gesticolare.
                 </ThemedText>
               </View>
             )}
@@ -361,12 +453,14 @@ export function PolarMetricsGrid({
 
         {showQualityCards && (
           <ThemedText style={monitorStyles.metricFootnote}>
-            * PPI: intervallo tra un battito e il successivo. Serve a determinare
-            HR e HRV. HRV, LF e HF usano solo Errore PPI ≤ 10 ms
+            LF/HF: 0,2–5 plausibile · 5–10 da controllare · oltre 10 insolito /
+            sospetto (spesso segnale debole). * PPI: intervallo tra un battito e
+            il successivo. HRV usa Errore PPI ≤ 10 ms, LF e HF ≤{" "}
+            {LF_HF_PPI_ERROR_ESTIMATE_MAX_MS} ms
             {hrvAnalysisMode === "clinical"
               ? " e senza movimento (blocker)."
               : "; con valori più alti restano all’ultimo sano."}{" "}
-            Card rossa oltre 30 ms.
+            Card Errore PPI rossa oltre 30 ms.
             {hrvAnalysisMode === "clinical"
               ? " Modalità estesa: epoch da 5 minuti di segnale pulito (non certificazione medicale)."
               : ""}

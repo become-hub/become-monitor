@@ -4,6 +4,8 @@
 
 import { APP_VERSION } from "@/constants/app-version";
 import { resolveRrInterval } from "../rr-interval";
+import { computeLfHf } from "../hrv-calculator";
+import { HRV_PREPROCESSING_EXPORT } from "../ppi-sample-window";
 import {
   buildPolarAblyHeartRatePayload,
   polarExtrasFromStash,
@@ -14,6 +16,34 @@ import {
 
 const expectedAppVersion = `v${APP_VERSION}`;
 
+const nullHrvMeta = {
+  lfHfRatio: null,
+  lfHfValid: null,
+  lfHfStatus: null,
+  lfHfAcceptedRatio: null,
+  lfHfMaxArtifactGapSec: null,
+  lfHfComputedAt: null,
+  ppisMs: null,
+  ppiSamples: null,
+  tachogramSamples: null,
+  ppiTimesSec: null,
+  rawIncludedPpiMs: null,
+  correctedPpiSeries: null,
+  resampledSeries: null,
+  includedIntervalDurationSec: null,
+  tachogramDomainSec: null,
+  resampledDurationSec: null,
+  hrvWindowSeconds: null,
+  hrvIntervalCount: null,
+  hrvMethod: null,
+  hrvSamplingHz: null,
+  livePublishHz: null,
+  peakFrequencyHz: null,
+  lfBandHz: null,
+  hfBandHz: null,
+  hrvPreprocessing: null,
+} as const;
+
 const nullExtras = {
   contactStatus: null,
   contactStatusSupported: null,
@@ -23,8 +53,56 @@ const nullExtras = {
   correctedHr: null,
   rrAvailable: null,
   rrsMs: null,
+  ...nullHrvMeta,
   appVersion: expectedAppVersion,
 } as const;
+
+const PAYLOAD_KEYS = [
+  "appVersion",
+  "blocker",
+  "contactStatus",
+  "contactStatusSupported",
+  "correctedHr",
+  "correctedPpiSeries",
+  "deviceId",
+  "deviceModel",
+  "errorEstimate",
+  "hfBandHz",
+  "hfPower",
+  "hr",
+  "hrv",
+  "hrvIntervalCount",
+  "hrvMethod",
+  "hrvPreprocessing",
+  "hrvSamplingHz",
+  "hrvWindowSeconds",
+  "includedIntervalDurationSec",
+  "lfBandHz",
+  "lfHfAcceptedRatio",
+  "lfHfComputedAt",
+  "lfHfMaxArtifactGapSec",
+  "lfHfRatio",
+  "lfHfStatus",
+  "lfHfValid",
+  "lfPower",
+  "livePublishHz",
+  "peakFrequencyHz",
+  "ppgQuality",
+  "ppiMs",
+  "ppiSamples",
+  "ppiTimesSec",
+  "ppisMs",
+  "rawIncludedPpiMs",
+  "resampledDurationSec",
+  "resampledSeries",
+  "rrAvailable",
+  "rrMs",
+  "rrSource",
+  "rrsMs",
+  "skinTemperatureC",
+  "tachogramDomainSec",
+  "tachogramSamples",
+];
 
 describe("buildPolarAblyHeartRatePayload", () => {
   describe("PPI path (Polar 360 / Loop)", () => {
@@ -57,9 +135,80 @@ describe("buildPolarAblyHeartRatePayload", () => {
         ppiMs: 812,
         skinTemperatureC: null,
         ...nullExtras,
+        rrAvailable: false,
+        livePublishHz: 1,
       });
       expect(payload).not.toHaveProperty("heartRate");
       expect(payload).not.toHaveProperty("date");
+    });
+
+    it("esporta ppisMs/rrsMs come sequenza reale (non ripete ppiMs)", () => {
+      const sequence = Array.from(
+        { length: 30 },
+        (_, i) => 800 + Math.sin(i / 5) * 20
+      ).map((v) => Math.round(v));
+      const last = sequence[sequence.length - 1];
+      const { lf, hf } = computeLfHf(sequence);
+      expect(lf).toBeGreaterThan(0);
+      expect(hf).toBeGreaterThan(0);
+      const payload = buildPolarAblyHeartRatePayload({
+        deviceId: "360",
+        deviceModel: "polar_360",
+        hr: 47,
+        rrMs: last,
+        rrSource: "ppi",
+        ppiMs: last,
+        ppisMs: sequence,
+        lfPower: Math.round(lf),
+        hfPower: Math.round(hf),
+        lfHfValid: true,
+        lfHfRatio: Math.round((lf / hf) * 1000) / 1000,
+        hrvWindowSeconds: sequence.reduce((a, b) => a + b, 0) / 1000,
+        hrvIntervalCount: sequence.length,
+        hrvMethod: "periodogram",
+        hrvSamplingHz: 4,
+        lfBandHz: HRV_PREPROCESSING_EXPORT.lfBandHz,
+        hfBandHz: HRV_PREPROCESSING_EXPORT.hfBandHz,
+        hrvPreprocessing: HRV_PREPROCESSING_EXPORT,
+        ppiSamples: sequence.map((ppiMs, i) => ({
+          ppiMs,
+          errorEstimate: 4,
+          timestamp: 1_000_000 + i * ppiMs,
+          rejectReason: null,
+        })),
+      });
+
+      expect(payload.ppiMs).toBe(last);
+      expect(payload.rrMs).toBe(last);
+      expect(payload.rrSource).toBe("ppi");
+      expect(payload.ppisMs).toEqual(sequence);
+      expect(payload.rrsMs).toEqual(sequence);
+      expect(payload.ppisMs).not.toBe(sequence);
+      expect(payload.rrsMs).not.toBe(payload.ppisMs);
+      expect(payload.rrAvailable).toBe(true);
+      expect(payload.lfHfValid).toBe(true);
+      expect(payload.lfPower).toBe(Math.round(lf));
+      expect(payload.hfPower).toBe(Math.round(hf));
+      // External recompute from exported rrsMs matches app rounding.
+      const recomputed = computeLfHf(payload.rrsMs!);
+      expect(Math.round(recomputed.lf)).toBe(payload.lfPower);
+      expect(Math.round(recomputed.hf)).toBe(payload.hfPower);
+    });
+
+    it("non fabbrica rrsMs da un solo ppiMs", () => {
+      const payload = buildPolarAblyHeartRatePayload({
+        deviceId: "360",
+        deviceModel: "polar_360",
+        hr: 47,
+        rrMs: 1274,
+        rrSource: "ppi",
+        ppiMs: 1274,
+        rrsMs: [900, 900], // HR stash must not win over empty PPI series
+      });
+      expect(payload.ppisMs).toBeNull();
+      expect(payload.rrsMs).toBeNull();
+      expect(payload.rrAvailable).toBe(false);
+      expect(payload.livePublishHz).toBe(1);
     });
 
     it("usa rrMs come fallback ppiMs se ppiMs non passato e source=ppi", () => {
@@ -169,11 +318,16 @@ describe("buildPolarAblyHeartRatePayload", () => {
         rrMs: 750,
         rrSource: "ecg_rr",
         ppiMs: 750,
+        ppisMs: [1280, 1274],
+        rrsMs: [750, 760],
       });
 
       expect(payload.rrSource).toBe("ecg_rr");
       expect(payload.rrMs).toBe(750);
       expect(payload.ppiMs).toBeNull();
+      expect(payload.ppisMs).toBeNull();
+      expect(payload.ppiSamples).toBeNull();
+      expect(payload.rrsMs).toEqual([750, 760]);
     });
 
     it("rrMs/rrSource null se intervallo assente", () => {
@@ -255,11 +409,85 @@ describe("buildPolarAblyHeartRatePayload", () => {
         hrv: 45,
         lfPower: 1500,
         hfPower: 900,
+        lfHfValid: true,
+        lfHfRatio: 1.667,
       });
 
       expect(payload.hrv).toBe(45);
       expect(payload.lfPower).toBe(1500);
       expect(payload.hfPower).toBe(900);
+      expect(payload.lfHfValid).toBe(true);
+      expect(payload.lfHfRatio).toBe(1.667);
+    });
+
+    it("con lfHfValid=false azzera LF/HF anche se passati", () => {
+      const payload = buildPolarAblyHeartRatePayload({
+        deviceId: "dev",
+        deviceModel: "polar_360",
+        hr: 74,
+        lfPower: 1500,
+        hfPower: 900,
+        lfHfRatio: 1.6,
+        lfHfValid: false,
+      });
+      expect(payload.lfHfValid).toBe(false);
+      expect(payload.lfPower).toBeNull();
+      expect(payload.hfPower).toBeNull();
+      expect(payload.lfHfRatio).toBeNull();
+    });
+
+    it("status provisional pubblica LF/HF anche con lfHfValid=false", () => {
+      const payload = buildPolarAblyHeartRatePayload({
+        deviceId: "dev",
+        deviceModel: "polar_360",
+        hr: 74,
+        lfPower: 1500,
+        hfPower: 900,
+        lfHfRatio: 1.6,
+        lfHfValid: false,
+        lfHfStatus: "provisional",
+      });
+      expect(payload.lfHfStatus).toBe("provisional");
+      expect(payload.lfPower).toBe(1500);
+      expect(payload.hfPower).toBe(900);
+      expect(payload.lfHfRatio).toBe(1.6);
+    });
+
+    it("status low_quality pubblica LF/HF con metriche di qualità", () => {
+      const payload = buildPolarAblyHeartRatePayload({
+        deviceId: "dev",
+        deviceModel: "polar_360",
+        hr: 74,
+        lfPower: 1500,
+        hfPower: 900,
+        lfHfRatio: 1.6,
+        lfHfValid: false,
+        lfHfStatus: "low_quality",
+        lfHfAcceptedRatio: 0.541,
+        lfHfMaxArtifactGapSec: 17.55,
+      });
+      expect(payload.lfHfStatus).toBe("low_quality");
+      expect(payload.lfPower).toBe(1500);
+      expect(payload.hfPower).toBe(900);
+      expect(payload.lfHfRatio).toBe(1.6);
+      expect(payload.lfHfAcceptedRatio).toBe(0.541);
+      expect(payload.lfHfMaxArtifactGapSec).toBe(17.55);
+    });
+
+    it("status unavailable azzera LF/HF", () => {
+      const payload = buildPolarAblyHeartRatePayload({
+        deviceId: "dev",
+        deviceModel: "polar_360",
+        hr: 74,
+        lfPower: 1500,
+        hfPower: 900,
+        lfHfRatio: 1.6,
+        lfHfValid: false,
+        lfHfStatus: "unavailable",
+      });
+      expect(payload.lfPower).toBeNull();
+      expect(payload.hfPower).toBeNull();
+      expect(payload.lfHfRatio).toBeNull();
     });
   });
 
@@ -331,21 +559,24 @@ describe("buildPolarAblyHeartRatePayload", () => {
       ).toBe(0);
     });
 
-    it("copia rrsMs senza mutare l'input", () => {
+    it("copia rrsMs ECG senza mutare l'input (ecg_rr)", () => {
       const rrsMs = [820, 810];
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "h10",
         deviceModel: "polar_h10",
         hr: 72,
+        rrSource: "ecg_rr",
         rrsMs,
       });
       expect(payload.rrsMs).toEqual([820, 810]);
       expect(payload.rrsMs).not.toBe(rrsMs);
+      expect(payload.ppisMs).toBeNull();
     });
   });
 
   describe("contratto live completo Loop", () => {
     it("produce il shape documentato per Hub (Loop + PPI + skin + extras, senza date)", () => {
+      const sequence = [800, 810, 805, 812];
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "loop-1",
         deviceModel: "polar_loop",
@@ -353,9 +584,25 @@ describe("buildPolarAblyHeartRatePayload", () => {
         hrv: 42,
         lfPower: 1200,
         hfPower: 800,
+        lfHfRatio: 1.5,
+        lfHfValid: true,
         rrMs: 812,
         rrSource: "ppi",
         ppiMs: 812,
+        ppisMs: sequence,
+        ppiSamples: sequence.map((ppiMs, i) => ({
+          ppiMs,
+          errorEstimate: 5,
+          timestamp: 1_700_000_000_000 + i * ppiMs,
+          rejectReason: null,
+        })),
+        hrvWindowSeconds: 300,
+        hrvIntervalCount: sequence.length,
+        hrvMethod: "periodogram",
+        hrvSamplingHz: 4,
+        lfBandHz: [0.04, 0.15],
+        hfBandHz: [0.15, 0.4],
+        hrvPreprocessing: HRV_PREPROCESSING_EXPORT,
         skinTemperatureC: 33.4,
         contactStatus: true,
         contactStatusSupported: true,
@@ -363,33 +610,9 @@ describe("buildPolarAblyHeartRatePayload", () => {
         blocker: false,
         ppgQuality: null,
         correctedHr: null,
-        rrAvailable: false,
-        rrsMs: null,
       });
 
-      expect(Object.keys(payload).sort()).toEqual(
-        [
-          "appVersion",
-          "blocker",
-          "contactStatus",
-          "contactStatusSupported",
-          "correctedHr",
-          "deviceId",
-          "deviceModel",
-          "errorEstimate",
-          "hfPower",
-          "hr",
-          "hrv",
-          "lfPower",
-          "ppgQuality",
-          "ppiMs",
-          "rrAvailable",
-          "rrMs",
-          "rrSource",
-          "rrsMs",
-          "skinTemperatureC",
-        ].sort()
-      );
+      expect(Object.keys(payload).sort()).toEqual([...PAYLOAD_KEYS].sort());
 
       expect(payload).toMatchObject({
         deviceId: "loop-1",
@@ -398,9 +621,16 @@ describe("buildPolarAblyHeartRatePayload", () => {
         hrv: 42,
         lfPower: 1200,
         hfPower: 800,
+        lfHfRatio: 1.5,
+        lfHfValid: true,
         rrMs: 812,
         rrSource: "ppi",
         ppiMs: 812,
+        ppisMs: sequence,
+        rrsMs: sequence,
+        rrAvailable: true,
+        hrvMethod: "periodogram",
+        hrvSamplingHz: 4,
         skinTemperatureC: 33.4,
         contactStatus: true,
         contactStatusSupported: true,
@@ -408,8 +638,6 @@ describe("buildPolarAblyHeartRatePayload", () => {
         blocker: false,
         ppgQuality: null,
         correctedHr: null,
-        rrAvailable: false,
-        rrsMs: null,
         appVersion: expectedAppVersion,
       });
       expect(payload).not.toHaveProperty("date");

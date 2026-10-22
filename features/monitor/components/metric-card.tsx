@@ -96,12 +96,15 @@ interface MetricCardProps {
   compact?: boolean;
   /** Red border / icon when wear or signal quality is poor. */
   danger?: boolean;
+  /** Amber border when a value needs attention but is not critical. */
+  warning?: boolean;
   /** Heartbeat pulse on the icon every second while live. */
   pulse?: boolean;
   style?: ViewStyle;
 }
 
 const DANGER_RED = "#EF4444";
+const WARNING_AMBER = "#D97706";
 
 function useSmoothNumber(value: string | number, durationMs = 420): string | number {
   const [display, setDisplay] = useState<string | number>(value);
@@ -170,18 +173,20 @@ export function MetricCard({
   fullWidth = false,
   compact = false,
   danger = false,
+  warning = false,
   pulse = false,
   style,
 }: MetricCardProps) {
   const { theme } = useTheme();
   const isLive = pulse && typeof value === "number" && value > 0;
-  const iconColor = danger
-    ? DANGER_RED
+  const accent = danger ? DANGER_RED : warning ? WARNING_AMBER : null;
+  const iconColor = accent
+    ? accent
     : isLive
       ? LIVE_HEART
       : Colors[theme].tint;
-  const borderColor = danger
-    ? DANGER_RED
+  const borderColor = accent
+    ? accent
     : highlighted
       ? Colors[theme].tint
       : Colors[theme].border;
@@ -256,6 +261,7 @@ export function MetricCard({
         fullWidth && monitorStyles.metricCardFull,
         highlighted && monitorStyles.metricCardHighlight,
         danger && monitorStyles.metricCardDanger,
+        warning && !danger && monitorStyles.metricCardWarning,
         { borderColor },
         style,
       ]}
@@ -281,7 +287,7 @@ export function MetricCard({
             <Icon
               size={compact ? 18 : 24}
               color={iconColor}
-              fill={isLive && !danger ? LIVE_HEART : "transparent"}
+              fill={isLive && !accent ? LIVE_HEART : "transparent"}
             />
           </Animated.View>
         </View>
@@ -290,7 +296,7 @@ export function MetricCard({
         style={[
           monitorStyles.metricLabel,
           compact && monitorStyles.metricLabelCompact,
-          danger && { color: DANGER_RED, opacity: 1 },
+          accent && { color: accent, opacity: 1 },
         ]}
       >
         {label}
@@ -299,7 +305,7 @@ export function MetricCard({
         style={[
           monitorStyles.metricValue,
           compact && monitorStyles.metricValueCompact,
-          danger && { color: DANGER_RED },
+          accent && { color: accent },
         ]}
       >
         {displayValue}

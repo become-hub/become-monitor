@@ -69,14 +69,16 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Augm
 
 ### Live vs flush a fine sessione (spike)
 
-- **Live**: le card Monitor (HR / RR / HRV / LF / HF, skin temp su Loop) si aggiornano a **1 Hz** appena parte lo streaming locale, anche **prima** del login Become. Ably (`heartRate`) parte solo dopo auth **e** quando HRV è pronta (Live: finestra da 30 campioni; finché è in caricamento non si pubblica). I campioni PPI grezzi restano sul device/track; Contatto / Errore PPI / Movimento restano live.
+- **Live**: le card Monitor HR / RR / HRV (e skin temp su Loop) si aggiornano a **1 Hz** appena parte lo streaming locale, anche **prima** del login Become. **LF/HF** (UI + Ably) partono solo quando **HRV è pronta** (Live: 30 battiti; Estesa: epoch), così si evita lo spettro instabile dei primi secondi. Ably (`heartRate`) parte solo dopo auth **e** quando HRV è pronta. I campioni PPI grezzi restano sul device/track; Contatto / Errore PPI / Movimento restano live.
 - **Analisi HRV (Settings)**: **Live** (unica modalità selezionabile oggi) e **Estesa** (disabilitata: compatibile solo con Polar H10, non selezionabile). Estesa resta nel codice per epoch da 5 min / H10; non è certificazione medicale.
 
 | | Live | Estesa |
 |---|---|---|
-| Finestra | 30 intervalli RR/PPI (rolling) | epoch **5 minuti** di intervalli accettati |
-| Pubblicazione HRV/LF/HF | a finestra piena, continua | solo a epoch valida; poi riparte una nuova epoch |
-| 360 / Loop (PPI) | `errorEstimate` ≤ 10 ms | come Live **e** senza `blocker` (movimento) |
+| Finestra RMSSD (`hrv`) | 30 intervalli RR/PPI (rolling) | epoch **5 minuti** di intervalli accettati |
+| Finestra LF/HF (360/Loop) | buffer PPI SDK (retention 310–360 s); PSD su `resampledDurationSec`; LF/HF in UI/Ably solo dopo HRV pronta, poi con `lfHfStatus`; `lfHfValid` solo se dominio ricampionato ≥ 300 s + qualità stretta | stessa finestra; gate `blocker` |
+| Pubblicazione HRV | a finestra 30 piena, continua | solo a epoch valida; poi riparte una nuova epoch |
+| Pubblicazione LF/HF | Live **1 Hz** ripubblica l’ultimo spettro (`lfHfComputedAt`); calcolo solo su frame PPI | idem |
+| 360 / Loop (PPI) | RMSSD: `errorEstimate` ≤ 10 ms; LF/HF: ≤ 20 ms | come Live **e** senza `blocker` (movimento) |
 | H10 (RR ECG) | tutti gli RR in 300–2000 ms | stessa accettazione, epoch 5 min |
 | Fallback `hr_derived` (60000/HR) | solo se lo stream PPI è morto | **mai** |
 | Timeout | — | se in **8 min** wall-clock non si completa l’epoch pulita → epoch non valida e ripartenza |
@@ -98,9 +100,39 @@ Esempio payload Ably live `heartRate` (360 / Loop):
   "hrv": 42,
   "lfPower": 1200,
   "hfPower": 800,
+  "lfHfRatio": 1.5,
+  "lfHfValid": true,
+  "lfHfStatus": "valid",
+  "lfHfAcceptedRatio": 0.93,
+  "lfHfMaxArtifactGapSec": 1.8,
+  "lfHfComputedAt": 1700000300000,
   "rrMs": 812,
   "rrSource": "ppi",
   "ppiMs": 812,
+  "ppisMs": [800, 810, 805, 812],
+  "rrsMs": [800, 810, 805, 812],
+  "rrAvailable": true,
+  "ppiTimesSec": [0.8, 1.61, 2.415, 3.227],
+  "rawIncludedPpiMs": [800, 810, 805, 812],
+  "correctedPpiSeries": [800, 810, 805, 812],
+  "tachogramSamples": [
+    { "timeSec": 0.8, "rawPpiMs": 800, "correctedPpiMs": 800, "kind": "accepted", "jumpCorrected": false }
+  ],
+  "ppiSamples": [
+    { "ppiMs": 800, "errorEstimate": 5, "timestamp": 1700000000000, "rejectReason": null, "kind": "accepted" },
+    { "ppiMs": 810, "errorEstimate": 4, "timestamp": 1700000000800, "rejectReason": null, "kind": "accepted" }
+  ],
+  "includedIntervalDurationSec": 300.5,
+  "tachogramDomainSec": 299.7,
+  "resampledDurationSec": 299.7,
+  "hrvWindowSeconds": 300.5,
+  "hrvIntervalCount": 4,
+  "hrvMethod": "periodogram",
+  "hrvSamplingHz": 4,
+  "livePublishHz": 1,
+  "lfBandHz": [0.04, 0.15],
+  "hfBandHz": [0.15, 0.4],
+  "hrvPreprocessing": { "unit": "ms2", "method": "periodogram", "samplingHz": 4, "livePublishHz": 1 },
   "skinTemperatureC": 33.4,
   "contactStatus": true,
   "contactStatusSupported": true,
@@ -108,8 +140,6 @@ Esempio payload Ably live `heartRate` (360 / Loop):
   "blocker": false,
   "ppgQuality": null,
   "correctedHr": null,
-  "rrAvailable": false,
-  "rrsMs": null,
   "appVersion": "v1.2.2",
   "type": "heartRate",
   "code": "deviceCode",
@@ -120,19 +150,201 @@ Esempio payload Ably live `heartRate` (360 / Loop):
 Note:
 
 - `deviceModel` è un `PolarProductId` (`polar_360` | `polar_loop` | `polar_h10`), o `null` se il nome BLE non risolve; Hub può mapparlo a `POLAR_PRODUCTS[id].displayName`.
-- `timestamp` è aggiunto da `AblyService.sendMessage` (non c’è un campo `date` duplicato).
+- `timestamp` è aggiunto da `AblyService.sendMessage` (non c'è un campo `date` duplicato).
 - `rrSource` è `"ppi"` (preferito), `"hr_derived"` in fallback, o `"ecg_rr"` su dispositivi ECG.
-- `ppiMs` è valorizzato solo quando `rrSource === "ppi"`, altrimenti `null`.
+- `ppiMs` / `rrMs` sono l'ultimo intervallo usabile; con `rrSource === "ppi"` **non** si fabbrica una serie ripetendo quel valore.
+- `ppisMs` / `rrsMs` (quando `rrSource === "ppi"`) sono la serie **Y corretta** (compat Hub). **Da soli non bastano** per ricalcolare LF/HF: serve anche `ppiTimesSec` (X da PPI raw inclusi) o `tachogramSamples`. `rrAvailable` è `true` se la serie ha ≥ 2 intervalli. Non sono RR ECG.
+- Live publish è a **1 Hz** (`livePublishHz: 1`): ripubblica l’ultimo LF/HF senza aggiungere PPI al buffer. `lfHfComputedAt` è quando è stato calcolato lo spettro (frame PPI), distinto dal `timestamp` Ably del tick Live.
+- `ppiSamples` elenca ogni PPI del buffer con `errorEstimate`, `timestamp` wall, `rejectReason` / `kind` (`accepted` | `quality_rejected` | `out_of_physiological_range`).
+- Pipeline: X = timeline cumulativa dei PPI **inclusi** (accepted + quality_rejected); Y = valori corretti/interpolati; out_of_physiological_range **esclusi** (non avanzano X). Resample lineare **4 Hz** solo su `[ppiTimesSec[0], ppiTimesSec[last]]` (no extrapolazione). Periodogramma Hann one-sided; LF `f ≥ 0.04 && f < 0.15`, HF `f ≥ 0.15 && f ≤ 0.40` (0.15 solo HF). Unità **ms²**.
+- Tre durate: `includedIntervalDurationSec` = sum(included)/1000; `tachogramDomainSec` = last−first X; `resampledDurationSec` = dominio PSD. `lfHfValid` richiede `resampledDurationSec ≥ 300` più accepted ≥ 150, ratio ≥ 0.75, `maxArtifactGapSec ≤ 5`, timeline monotona. Retention raw 310–360 s: 310 s **non garantisce** validità se molti out_of_range.
+- LF/HF live (UI + Ably) partono **solo dopo HRV pronta**; prima restano "—" / `null` e `lfHfStatus: "unavailable"`. Poi restano pubblicati con uno spettro e `lfHfStatus` (anche se `lfHfValid` è false). Vedi [Qualità LF/HF](#qualità-lfhf-monitor). I consumer che vogliono solo valori standard Task Force (5 min) filtrano su `lfHfStatus === "valid"`.
+- RMSSD (`hrv`) resta sulla finestra Live da 30 battiti; LF/HF sul buffer PPI SDK (ma non esposti finché RMSSD non è pronto).
 - `skinTemperatureC` è valorizzato **solo su Loop Gen 2** (stream SDK); su Polar 360 è sempre `null`.
-- Finché HRV non è pronta non parte alcun `heartRate` su Ably. Quando pubbica, `hrv` / `lfPower` / `hfPower` sono valorizzati (Live: dopo 30 campioni; Estesa: dopo epoch da 5 min).
-- Salti successivi ≥ 200 ms tra intervalli RR/PPI non entrano in LF/HF (stesso limite dell’RMSSD): il posto in finestra viene interpolato, altrimenti lo spettro salirebbe a migliaia di ms² con un HRV ancora normale.
-- Su **360 / Loop**, HRV / `lfPower` / `hfPower` usano solo PPI con `errorEstimate` ≤ 10 ms (in Estesa anche senza `blocker`). Sopra 10 ms il campione non entra e restano all’ultimo valore sano (Live) o l’epoch non avanza (Estesa). La card **Errore PPI** diventa rossa solo con `errorEstimate` > 30 ms.
-- Su **H10**, la sorgente è RR ECG (`rrSource: "ecg_rr"`); non c’è gate `errorEstimate` / `blocker`.
+- Finché HRV (RMSSD) non è pronta non parte alcun `heartRate` su Ably e LF/HF restano `null`.
+- Salti successivi ≥ 200 ms: Y interpolato (stesso limite RMSSD).
+- Su **360 / Loop**, nel buffer LF/HF accepted se `errorEstimate` ≤ 20 ms (`LF_HF_PPI_ERROR_ESTIMATE_MAX_MS`; in Estesa anche senza `blocker`); `hrvPreprocessing.errorEstimateMaxMs` riporta 20. Il RMSSD resta a ≤ 10 ms. Sopra 20 ms: `kind: "quality_rejected"` (resta in X, Y interpolato). Fuori 300–2000 ms: `out_of_physiological_range` (escluso da X). La card **Errore PPI** diventa rossa solo con `errorEstimate` > 30 ms.
+- Su **H10**, la sorgente è RR ECG (`rrSource: "ecg_rr"`); `ppisMs` / `ppiSamples` restano `null` e `rrsMs` è la serie ECG nativa.
 - `contactStatus` / `contactStatusSupported` preferiscono il skin contact dello stream **PPI**; se il PPI non lo supporta, usano la notifica BLE Heart Rate.
-- `errorEstimate` (ms) e `blocker` arrivano dal campione PPI (qualità ottica utile su 360/Loop).
-- `ppgQuality`, `correctedHr`, `rrAvailable`, `rrsMs` arrivano dalla notifica BLE Heart Rate. Su 360/Loop con PPI attivo sono spesso `null` / `false` / vuoti: il servizio HR standard non porta qualità PPG né HR corretto, e gli RR nativi restano sul canale PPI. L’app **non** avvia `startHrStreaming` in parallelo al PPI.
-- `appVersion` è la versione marketing dell’app (`v` + valore da `app.json` / Expo config).
-- In Monitor, sotto le card principali, compaiono card compatte **Contatto** / **Errore PPI** / **Movimento**. Senza contatto pelle (o con `errorEstimate` > 30 ms) compare l’alert rosso **«Sistema bene il bracciale»**; con `blocker` (movimento) compare un alert distinto ambra **«Resta fermo»**.
+- `errorEstimate` (ms) e `blocker` sull'ultimo tick arrivano dal campione PPI; per-beat restano in `ppiSamples`.
+- `ppgQuality` / `correctedHr` arrivano dalla notifica BLE Heart Rate (spesso `null` su 360/Loop). L'app **non** avvia `startHrStreaming` in parallelo al PPI.
+- `appVersion` è la versione marketing dell'app (`v` + valore da `app.json` / Expo config).
+- In Monitor, sotto le card principali, compaiono card compatte **Contatto** / **Errore PPI** / **Movimento**. Senza contatto pelle (o con `errorEstimate` > 30 ms) compare l'alert rosso **«Sistema bene il bracciale»**; con `blocker` (movimento) compare un alert distinto ambra **«Resta fermo»**.
+
+### Qualità LF/HF (Monitor)
+
+LF e HF non arrivano dalla SDK Polar: la SDK (`polar-ble-sdk` 5.16) in live espone solo dati grezzi (HR, PPI, PPG, ACC, ECG, temperatura…). L'unico dato HRV già elaborato è il Nightly Recharge (RMSSD medio notturno), che arriva a fine notte e non contiene LF/HF. L'app quindi **stima** LF/HF dai **PPI della SDK** (intervalli battito-battito), come fanno Polar Flow e Kubios.
+
+In Monitor, sotto le card LF/HF su 360/Loop, compare questa nota (percentuale da `LF_HF_VS_ECG_TYPICAL_ERROR_PCT`): «LF e HF non arrivano dal bracciale: vengono interpretati come stima dai battiti misurati al polso. Possono scostarsi di circa ±35% rispetto a una fascia al petto (es. Polar H10). Servono soprattutto per vedere se salgono o scendono nella stessa sessione, non come valori precisi al singolo numero.» Dettaglio tecnico: [lf-hf-validation-log.md](lf-hf-validation-log.md).
+
+LF e HF diventano visibili/trasmessi **dopo che HRV (RMSSD) è pronta** (Live: ~30 battiti). Prima restano "—": le prime finestre di spettro sono troppo corte e gonfiano i valori. Dopo, la qualità dice quanto fidarsi del numero.
+
+#### Livelli di qualità
+
+| Qualità in app | `lfHfStatus` (Ably) | Quando | Vibrazione alla salita |
+|---|---|---|---|
+| — | `unavailable` | non c'è ancora uno spettro (pochissimi battiti) | — |
+| **Bassa** | `warming_up` | segnale ok ma meno di 2 minuti di dati | 1 impulso |
+| **Bassa** | `low_quality` | battiti buoni < 60% **oppure** buco più lungo > 10 s | 1 impulso |
+| **Media** | `provisional` | almeno 2 minuti, battiti buoni ≥ 60%, buco ≤ 10 s | 2 impulsi |
+| **Ottima** | `valid` | standard 5 min: ≥ 5:00, battiti buoni ≥ 75%, buco ≤ 5 s, ≥ 150 battiti buoni | 3 impulsi |
+
+- Le card mostrano l'unità con la qualità: "ms² · bassa qualità", "ms² · media qualità", "ms² · ottima qualità".
+- Su 360/Loop le card compatte sono in griglia 2×2: **LF/HF** | **Errore PPI**, poi **Contatto** | **Movimento**. Il rapporto numerico va anche su Ably come `lfHfRatio`; le etichette di plausibilità (0,2–5 plausibile · 5–10 da controllare · 10–20 molto insolito · 20–50 sospetto · >50 probabile artefatto) restano **solo UI**.
+- Il telefono **vibra solo quando il livello sale** (anche dopo una ricaduta); le discese sono silenziose. Se i battiti buoni oscillano intorno al 60% il passaggio Bassa ↔ Media può vibrare più volte.
+- Il nome tecnico su Ably resta `lfHfStatus`; i nomi Bassa/Media/Ottima esistono solo in app.
+
+#### I tre requisiti e la barra di progresso
+
+Sotto le card LF/HF c'è la card **"Qualità LF/HF · Bassa/Media/Ottima"**. La percentuale grande è il progresso verso il livello successivo ed è data dal **requisito messo peggio**. Sotto, una riga per requisito:
+
+| Requisito | Cosa misura | Verso Media | Verso Ottima |
+|---|---|---|---|
+| **Battiti buoni** | % di battiti della finestra con errore PPI ≤ 20 ms | ≥ 60% | ≥ 75% |
+| **Buco più lungo** | tratto più lungo di battiti consecutivi sostituiti (scartati o saltati) | ≤ 10 s | ≤ 5 s |
+| **Durata finestra** | secondi di segnale su cui è calcolato lo spettro | 2:00 | 5:00 |
+
+Colori: verde con ✓ = requisito soddisfatto; arancione = manca solo tempo; rosso = blocca la qualità del segnale (compare anche un consiglio su come indossare il bracciale).
+
+#### Durata finestra: perché si ferma a ~5:09
+
+LF/HF sono calcolati su una **finestra mobile** degli ultimi ~5 minuti di battiti. Quando ne arrivano di nuovi, i più vecchi escono. La finestra è trattenuta tra 310 e 360 s di battiti (minimo 300 s per lo standard dei 5 minuti più un piccolo margine), quindi la "Durata finestra" sale fino a **circa 5:09–5:10 e poi resta lì**: non è un blocco.
+
+- Dopo ~5 minuti la durata è soddisfatta in modo permanente (5:09 > 5:00); da lì conta **solo la qualità**.
+- La finestra scorre: un tratto rumoroso esce dal calcolo dopo ~5 minuti. Per lo stesso motivo la % di battiti buoni **risale lentamente** dopo un tratto rumoroso: deve aspettare che quei battiti escano.
+
+#### Come vengono trattati i battiti con errore PPI alto
+
+Ogni PPI della SDK porta `errorEstimate` (errore stimato in ms) e `blocker` (flag movimento/contatto).
+
+| Battito | Classificazione | Effetto sul calcolo |
+|---|---|---|
+| `errorEstimate` ≤ 20 ms, 300–2000 ms | `accepted` | usato così com'è |
+| `errorEstimate` > 20 ms | `quality_rejected` | il suo valore **non** entra nello spettro: viene sostituito da una retta tra i battiti buoni vicini; la sua durata resta sulla linea del tempo, così i battiti successivi restano agli istanti giusti |
+| fuori 300–2000 ms | `out_of_physiological_range` | eliminato del tutto (non avanza la linea del tempo) |
+| salto ≥ 200 ms rispetto al battito buono precedente | corretto | valore interpolato come sopra |
+
+- In modalità **client** `blocker` non scarta nulla. In modalità **Estesa** scarta anche i battiti con `blocker=true`.
+- Il valore di `blocker` è quello grezzo della SDK (`PolarPpiSample.getBlockerBit()`). Su Polar 360 può risultare acceso su quasi tutti i battiti in una sessione e quasi mai in un'altra.
+- La card **Errore PPI** diventa rossa solo oltre 30 ms. Soglie di calcolo: **20 ms per LF/HF**, **10 ms per RMSSD** (non ancora validato contro ECG).
+
+**Attenzione a LF/HF con qualità Bassa.** Una retta tra due battiti buoni appiattisce le oscillazioni, soprattutto quelle veloci di HF. Più battiti vengono sostituiti, più LF e HF sono **sottostimati** (HF di più, quindi LF/HF tende a essere sovrastimato). Con qualità Bassa il numero non è solo meno preciso: è sbilanciato verso il basso.
+
+#### Validazione contro H10 (ECG)
+
+Registro completo di tutti i test (motivi, metodo, risultati, decisioni): [lf-hf-validation-log.md](lf-hf-validation-log.md).
+
+Sessione del 21/10/2026: Polar 360 (questa app) e Polar H10 (Polar Sensor Logger, RR ECG) indossati insieme, seduti e fermi, ~9 minuti. Stessi ultimi 300 s, stesso calcolo LF/HF dell'app per entrambe le serie:
+
+| Sorgente | LF (ms²) | HF (ms²) | LF/HF | Battiti buoni |
+|---|---|---|---|---|
+| **H10 ECG (riferimento)** | **2994** | **689** | **4.35** | 100% |
+| 360, soglia ≤ 10 ms (precedente) | 251 (−92%) | 29 (−96%) | 8.68 | 28% |
+| 360, soglia ≤ 15 ms | 956 (−68%) | 198 (−71%) | 4.83 | 55% |
+| **360, soglia ≤ 20 ms (attuale)** | **3530 (+18%)** | **696 (+1%)** | **5.08** | 79% |
+| 360, soglia ≤ 25–30 ms | 4559 (+52%) | 783 (+14%) | 5.82 | 86% |
+
+Errore del singolo battito 360 rispetto all'ECG (abbinamento per orario ±300 ms, 442/561 battiti):
+
+| `errorEstimate` 360 | Differenza media | Mediana |
+|---|---|---|
+| 0–10 ms | 36–44 ms | 21–30 ms |
+| 11–15 ms | 60 ms | 40 ms |
+| 16–20 ms | 98 ms | 81 ms |
+| 21–30 ms | 168 ms | 156 ms |
+| > 30 ms | 351 ms | 342 ms |
+
+Conclusioni:
+- Con 10 ms il 72% dei battiti veniva sostituito da rette e LF/HF risultavano ~10 volte più bassi del vero. Da qui la soglia LF/HF a **20 ms**.
+- Con 20 ms, sulla stessa finestra, HF coincide con l'ECG (+1%) e LF è +18%. Oltre 20 ms i battiti errati gonfiano LF.
+- Limiti: tre sessioni, un solo soggetto. L'abbinamento battito per battito è approssimativo (il 360 consegna i PPI a gruppi, orari ricostruiti), quindi le differenze per battito sono un limite superiore. Il RMSSD non è stato confrontato.
+
+Seconda sessione (21/10/2026, soglia 20 ms già attiva, HR medio 62 bpm): valori **mostrati live dall'app** confrontati con l'H10 calcolato sulla stessa finestra temporale. Battiti buoni 80–93%, qualità Media da 2:00.
+
+| Momento | Finestra | 360 LF / HF / LF/HF | H10 LF / HF / LF/HF | Differenza |
+|---|---|---|---|---|
+| 18:21:19 | 2:06 | 2215 / 725 / 3.05 | 3728 / 551 / 6.77 | LF −41%, HF +32%, LF/HF −55% |
+| 18:22:52 | 3:39 | 3134 / 610 / 5.14 | 2708 / 406 / 6.67 | LF +16%, HF +50%, LF/HF −23% |
+| 18:24:30 | 5:09 | 3813 / 525 / 7.26 | 2653 / 343 / 7.74 | LF +44%, HF +53%, LF/HF −6% |
+| 18:25:31 | 5:10 | 3504 / 544 / 6.44 | 2585 / 465 / 5.56 | LF +36%, HF +17%, LF/HF +16% |
+| 18:26:04 | 5:09 | 3309 / 612 / 5.40 | 2643 / 548 / 4.82 | LF +25%, HF +12%, LF/HF +12% |
+
+- Con finestra piena (~5 min) il **rapporto LF/HF** del 360 è entro ±16% dall'ECG; **LF e HF assoluti** sono più alti di circa +25–45% e +12–53% (mediana dalle 2:00 in poi: ×1.35 entrambi).
+- La sovrastima è attesa: i battiti accettati con errore 11–20 ms aggiungono rumore battito-battito, che si somma alla potenza in tutte le bande. Il rapporto LF/HF ne risente meno perché il rumore cresce in entrambe.
+- Prima dei 5 minuti (qualità Media) LF e HF oscillano molto (fino a −41% / +103%): con finestre corte basta un piccolo sfasamento o un tratto rumoroso per spostarli.
+Terza sessione (21/10/2026, 18:34–18:43, segnale buono: 94% dei battiti con errore ≤ 20 ms) e riepilogo su finestre di 5 minuti ogni 30 s, regola attuale (≤ 20 ms):
+
+| Sessione | Scarto tipico LF | Scarto tipico HF | Scarto tipico LF/HF |
+|---|---|---|---|
+| 1 (17:57) | −17% | +35% | −19% |
+| 2 (18:19) | +41% | +26% | +12% |
+| 3 (18:34) | −32% | +3% | −37% |
+
+- Lo scarto dall'ECG è di circa **±30–40%** su LF e LF/HF e fino a +35% su HF, ma **cambia segno da una sessione all'altra**: non è una sovrastima fissa correggibile con un fattore.
+- In pratica: con qualità Media usare LF/HF come indicazione di tendenza; anche con qualità Ottima i valori assoluti del 360 vanno letti con un margine di circa ±35% rispetto a un ECG.
+
+#### Metodi alternativi provati (non adottati)
+
+Sulle sessioni 1–2 sono state provate 11 varianti; la migliore è stata poi verificata sulla sessione 3, registrata dopo la scelta:
+
+- **Pesare i battiti in base all'errore PPI** (spostarli verso la retta tra i battiti buoni vicini): peggiora, perché la retta appiattisce le oscillazioni veloci e HF viene sottostimato fino a −48%.
+- **Sottrarre un rumore stimato** dall'errore PPI: con fattore 1 quasi neutro, con fattori maggiori HF crolla.
+- **Togliere i picchi** (battito con errore > 10 ms scartato se dista più di 150 ms dalla mediana dei battiti buoni vicini, soglia 25 ms): migliore sulle sessioni 1–2 (punteggio 0.59 contro 0.67), ma **pari sulla sessione 3** (0.94 contro 0.95).
+
+Nessuna variante batte in modo consistente la regola attuale (errore ≤ 20 ms accettato, altrimenti sostituito), che resta in uso.
+
+Per ripetere la prova: H10 con Polar Sensor Logger (stream HR con RR) e 360 in questa app nello stesso momento; si confrontano i file RR della fascia con i PPI del 360 (`ppiSamples` su Ably) sulla stessa finestra di 5 minuti. Procedura in [lf-hf-validation-log.md](lf-hf-validation-log.md#come-ripetere-un-confronto-con-h10).
+
+#### Consigli per salire di qualità
+
+- Bracciale **stretto** sopra l'osso del polso, sensore a pieno contatto con la pelle (non sopra maniche).
+- Seduto, braccio appoggiato e **fermo**, senza gesticolare né usare il telefono con quella mano.
+- Dopo un movimento, aspetta: la % di battiti buoni risale man mano che il tratto rumoroso esce dalla finestra di ~5 minuti.
+- Se la barra "Battiti buoni" resta sotto il 60% anche da fermo, è il segnale ottico a essere debole (molti battiti con errore PPI oltre 20 ms), non un problema di tempo.
+
+#### Campi Ably collegati
+
+| Campo | Significato |
+|---|---|
+| `lfHfStatus` | `unavailable` / `warming_up` / `low_quality` / `provisional` / `valid` |
+| `lfHfValid` | `true` solo con `valid` (standard 5 min) |
+| `lfHfAcceptedRatio` | quota battiti buoni nella finestra (0–1) |
+| `lfHfMaxArtifactGapSec` | buco più lungo in secondi |
+| `resampledDurationSec` | durata finestra usata per lo spettro (max ~309 s) |
+| `lfPower` / `hfPower` / `lfHfRatio` | potenze in ms² e rapporto; `null` se HRV non pronta o `unavailable` |
+
+### Verifica LF/HF (esterna)
+
+Per ricalcolare LF/HF da un payload Ably live **non** bastano `ppisMs` / `rrsMs`. Servono `ppiTimesSec` (X, timeline da PPI raw inclusi) e `correctedPpiSeries` (Y), oppure `tachogramSamples`.
+
+Esempio Python (stessa pipeline: interp lineare 4 Hz, mean detrend, Hann simmetrica, PSD densità one-sided, bande LF `[0.04, 0.15)` / HF `[0.15, 0.40]`):
+
+```python
+import numpy as np
+from scipy.signal import periodogram, get_window
+
+def lf_hf(t, y, fs=4.0):
+    t, y = np.asarray(t, float), np.asarray(y, float)
+    dur = t[-1] - t[0]
+    n = int(np.floor(dur * fs)) + 1
+    grid = t[0] + np.arange(n) / fs
+    x = np.interp(grid, t, y)
+    nfft = 1 << (n - 1).bit_length()
+    w = get_window("hann", n, fftbins=False)  # simmetrica, come l'app
+    f, p = periodogram(
+        x, fs=fs, window=w, nfft=nfft, detrend="constant", scaling="density"
+    )
+    df = f[1] - f[0]
+    lf = p[(f >= 0.04) & (f < 0.15)].sum() * df
+    hf = p[(f >= 0.15) & (f <= 0.40)].sum() * df
+    return lf, hf
+```
+
+Note di confronto:
+
+- Il payload arrotonda `lfPower` / `hfPower` all’**intero** (ms²); confrontare con `round(lf)` / `round(hf)`.
+- L’interpolazione **lineare** attenua le sinusoidi ad alta frequenza: a FC bassa l’HF è sottostimato rispetto a una sinusoide continua (bias di metodo, non un bug di FFT).
+- **Non** attendersi parità con Kubios (spline cubica 4 Hz, smoothness priors, Welch).
 
 Esempio payload POST:
 
@@ -238,6 +450,17 @@ Se il Polar non si collega correttamente:
 3. Se resta invisibile o il First Time Use fallisce: factory reset + forget device + riprova entro 1 m.
 
 L'app Augmented Monitor non può riavviare il Bluetooth automaticamente per motivi di sicurezza imposti da Android.
+
+Se LF/HF restano a qualità **Bassa**:
+
+| Sintomo | Causa | Cosa fare |
+|---|---|---|
+| "Battiti buoni" rossa sotto 60% | troppi PPI con errore > 20 ms (segnale ottico debole o movimento) | stringi il bracciale sopra l'osso del polso, braccio fermo; attendi che il tratto rumoroso esca dalla finestra (~5 min) |
+| "Buco più lungo" rossa oltre 10 s | una serie di battiti consecutivi scartati (movimento, bracciale spostato) | resta fermo; il buco sparisce quando esce dalla finestra |
+| "Durata finestra" ferma a ~5:09 | comportamento previsto: finestra mobile di ~5 min | nessuna azione; conta solo la qualità |
+| LF/HF molto bassi con qualità Bassa | molti battiti sostituiti → LF e HF sottostimati | non usare quel valore come riferimento; attendi qualità Media/Ottima |
+
+Dettagli in [Qualità LF/HF](#qualità-lfhf-monitor).
 
 ## Collegamento completato
 

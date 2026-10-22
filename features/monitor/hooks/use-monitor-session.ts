@@ -4,10 +4,19 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Alert, PermissionsAndroid, Platform } from "react-native";
+import { Alert, PermissionsAndroid, Platform, Vibration } from "react-native";
 import { AblyService, ConnectionStatus } from "@/services/ably-service";
 import { AuthService } from "@/services/auth-service";
-import { calculateRMSSD, computeLfHf } from "@/services/hrv-calculator";
+import {
+  calculateRMSSD,
+  computeLfHf,
+  computeLfHfProgress,
+  isLfHfPublishable,
+  lfHfQualityLevel,
+  type LfHfProgress,
+  type LfHfResult,
+  type LfHfStatus,
+} from "@/services/hrv-calculator";
 import {
   buildPolarAblyHeartRatePayload,
   EMPTY_POLAR_HR_EXTRAS,
@@ -18,6 +27,14 @@ import {
   type PolarHrExtrasStash,
   type PolarPpiExtrasStash,
 } from "@/services/polar-ably-payload";
+import {
+  appendPpiSample,
+  computeLfHfForPpiWindow,
+  createEmptyPpiSampleWindow,
+  HRV_PREPROCESSING_EXPORT,
+  ppiSamplesForExport,
+  type PpiSampleWindow,
+} from "@/services/ppi-sample-window";
 import {
   buildPolarSignalQualityUi,
   EMPTY_POLAR_SIGNAL_QUALITY,
@@ -97,6 +114,19 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useUserStore } from "@/stores/user-store";
 
 const SCAN_TIMEOUT = 30000;
+const QUALITY_PULSE_MS = 180;
+const QUALITY_PULSE_GAP_MS = 140;
+
+/** One pulse per quality level (1 low, 2 medium, 3 high). */
+function vibrateQualityLevel(level: number) {
+  if (level <= 0) return;
+  const pattern = [0];
+  for (let i = 0; i < level; i++) {
+    if (i > 0) pattern.push(QUALITY_PULSE_GAP_MS);
+    pattern.push(QUALITY_PULSE_MS);
+  }
+  Vibration.vibrate(pattern);
+}
 
 export type NotificationType = {
   type: "success" | "error";
@@ -161,6 +191,9 @@ export function useMonitorSession() {
   const [hrv, setHrv] = useState(0);
   const [lfPower, setLfPower] = useState(0);
   const [hfPower, setHfPower] = useState(0);
+  const [lfHfStatus, setLfHfStatus] = useState<LfHfStatus>("unavailable");
+  const [lfHfProgress, setLfHfProgress] = useState<LfHfProgress | null>(null);
+  const [lfHfRatio, setLfHfRatio] = useState<number | null>(null);
   const [rrMs, setRrMs] = useState(0);
   const [rrSource, setRrSource] = useState<RrSource | null>(null);
   const [ecgMicroVolts, setEcgMicroVolts] = useState(0);
@@ -223,8 +256,15 @@ export function useMonitorSession() {
   // Notification state
   const [notification, setNotification] = useState<NotificationType>(null);
 
-  // HRV interval accumulator (client rolling window / clinical 5 min epoch)
+  // HRV interval accumulator (client rolling window / clinical 5 min epoch) — RMSSD
   const hrvEpochRef = useRef<HrvEpochAccumulator>(createEmptyHrvEpochAccumulator());
+  /** Rolling 5 min PPI window for LF/HF export (SDK samples only). */
+  const ppiSampleWindowRef = useRef<PpiSampleWindow>(createEmptyPpiSampleWindow());
+  /** Last LF/HF pipeline result (corrected + resampled series for Ably export). */
+  const lastLfHfResultRef = useRef<LfHfResult | null>(null);
+  const lfHfValidRef = useRef(false);
+  const lfHfStatusRef = useRef<LfHfStatus>("unavailable");
+  const lfHfRatioRef = useRef<number | null>(null);
   const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const biometricInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const authStreamInFlightRef = useRef(false);
@@ -385,10 +425,29 @@ export function useMonitorSession() {
     lfPowerRef.current = 0;
     setHfPower(0);
     hfPowerRef.current = 0;
+    lfHfValidRef.current = false;
+    lfHfStatusRef.current = "unavailable";
+    setLfHfStatus("unavailable");
+    setLfHfProgress(null);
+    lfHfRatioRef.current = null;
+    setLfHfRatio(null);
+    lastLfHfResultRef.current = null;
+  };
+
+  const resetPpiSampleWindow = () => {
+    ppiSampleWindowRef.current = createEmptyPpiSampleWindow();
+    lastLfHfResultRef.current = null;
+    lfHfValidRef.current = false;
+    lfHfStatusRef.current = "unavailable";
+    setLfHfStatus("unavailable");
+    setLfHfProgress(null);
+    lfHfRatioRef.current = null;
+    setLfHfRatio(null);
   };
 
   const resetHrvEpochAccumulator = (clearMetrics: boolean) => {
     hrvEpochRef.current = createEmptyHrvEpochAccumulator();
+    resetPpiSampleWindow();
     setHrvEpochInvalid(false);
     if (clearMetrics) {
       clearHrvComputedMetrics();
@@ -401,6 +460,7 @@ export function useMonitorSession() {
       "Monitor: ⏱️ Epoch estesa non valida (timeout acquisizione) — riparto"
     );
     hrvEpochRef.current = createEmptyHrvEpochAccumulator();
+    resetPpiSampleWindow();
     setHrvEpochInvalid(true);
     clearHrvComputedMetrics();
     syncHrvEpochProgressUi();
@@ -410,6 +470,81 @@ export function useMonitorSession() {
         "Acquisizione estesa non riuscita: resta fermo e riprova (servono ~5 minuti di segnale stabile).",
     });
     setTimeout(() => setNotification(null), 6000);
+  };
+
+  /**
+   * Recompute LF/HF from the rolling PPI window (SDK samples only).
+   * Live 1 Hz only republishes this stash — it never appends PPI.
+   */
+  const recomputeLfHfFromPpiWindow = () => {
+    const window = ppiSampleWindowRef.current;
+    const result = {
+      ...computeLfHfForPpiWindow(window),
+      lfHfComputedAt: Date.now(),
+    };
+    lastLfHfResultRef.current = result;
+
+    // Same gate as Ably heartRate: no LF/HF until RMSSD (Live 30 beats / clinical epoch).
+    // Short windows at start inflate LF/HF; wait for a stable beat buffer.
+    const hrvReady = hrvRef.current > 0;
+    const status = hrvReady ? result.status : "unavailable";
+    const shown = hrvReady && isLfHfPublishable(result.status);
+    const roundedLf = shown ? Math.round(result.lf) : 0;
+    const roundedHf = shown ? Math.round(result.hf) : 0;
+    const ratio =
+      shown && result.lfHfRatio != null
+        ? Math.round(result.lfHfRatio * 1000) / 1000
+        : null;
+
+    if (hrvReady) {
+      const previousLevel = lfHfQualityLevel(lfHfStatusRef.current);
+      const nextLevel = lfHfQualityLevel(status);
+      if (nextLevel > previousLevel) {
+        vibrateQualityLevel(nextLevel);
+      }
+    }
+
+    lfHfValidRef.current = shown && result.valid;
+    lfHfStatusRef.current = status;
+    lfHfRatioRef.current = ratio;
+    lfPowerRef.current = roundedLf;
+    hfPowerRef.current = roundedHf;
+    setLfPower(roundedLf);
+    setHfPower(roundedHf);
+    setLfHfRatio(ratio);
+    setLfHfStatus(status);
+    setLfHfProgress(
+      shown
+        ? computeLfHfProgress({
+            status: result.status,
+            acceptedRatio: result.acceptedRatio,
+            maxArtifactGapSec: result.maxArtifactGapSec,
+            resampledDurationSec: result.resampledDurationSec,
+          })
+        : null
+    );
+    if (shown && result.valid) {
+      setHrvEpochInvalid(false);
+    }
+
+    console.log(
+      `HRV_PSD hrvReady=${hrvReady} rawPpiCount=${result.rawPpiCount} acceptedPpiCount=${result.acceptedPpiCount} ` +
+        `rejectedPpiCount=${result.rejectedPpiCount} correctedPpiCount=${result.correctedPpiCount} ` +
+        `timelineExcludedCount=${result.timelineExcludedCount} ` +
+        `acceptedRatio=${result.acceptedRatio.toFixed(3)} ` +
+        `maxArtifactGapSec=${result.maxArtifactGapSec.toFixed(2)} ` +
+        `includedIntervalDurationSec=${result.includedIntervalDurationSec.toFixed(1)} ` +
+        `tachogramDomainSec=${result.tachogramDomainSec.toFixed(1)} ` +
+        `resampledDurationSec=${result.resampledDurationSec.toFixed(1)} ` +
+        `resampledPointCount=${result.resampledPointCount} samplingHz=4 livePublishHz=1 ` +
+        `method=periodogram ` +
+        `lf=${shown ? result.lf.toFixed(1) : "0"} hf=${shown ? result.hf.toFixed(1) : "0"} ` +
+        `lfHf=${ratio ?? "null"} peakFrequencyHz=${
+          shown && result.peakFrequencyHz != null
+            ? result.peakFrequencyHz.toFixed(3)
+            : "null"
+        } lfHfStatus=${status} lfHfValid=${shown && result.valid} lfHfComputedAt=${result.lfHfComputedAt}`
+    );
   };
 
   /**
@@ -491,21 +626,39 @@ export function useMonitorSession() {
       return;
     }
 
+    // RMSSD stays on the Live 30-beat / clinical epoch window.
+    // For PPI (360/Loop), LF/HF use the rolling 5 min window (recomputeLfHfFromPpiWindow).
+    // For ECG RR / HR-derived, LF/HF still use this same epoch series.
     const series = result.accumulator.intervals;
     const rmssd = calculateRMSSD(series);
     const roundedRmsdd = Math.round(rmssd);
     hrvRef.current = roundedRmsdd;
-
-    const { lf, hf } = computeLfHf(series);
-    const roundedLf = Math.round(lf);
-    const roundedHf = Math.round(hf);
-    lfPowerRef.current = roundedLf;
-    hfPowerRef.current = roundedHf;
+    setHrv(roundedRmsdd);
     setHrvEpochInvalid(false);
 
-    console.log(
-      `Monitor: 📊 HRV (${logTag})=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`
-    );
+    if (source !== "ppi") {
+      // H10 / HR-derived: same physiological-timeline computeLfHf on epoch series.
+      const { lf, hf } = computeLfHf(series);
+      const roundedLf = Math.round(lf);
+      const roundedHf = Math.round(hf);
+      lfPowerRef.current = roundedLf;
+      hfPowerRef.current = roundedHf;
+      lfHfValidRef.current = roundedLf > 0 || roundedHf > 0;
+      lfHfStatusRef.current = lfHfValidRef.current ? "valid" : "unavailable";
+      lfHfRatioRef.current =
+        hf > 0 ? Math.round((lf / hf) * 1000) / 1000 : null;
+      lastLfHfResultRef.current = null;
+      setLfPower(roundedLf);
+      setHfPower(roundedHf);
+      setLfHfRatio(lfHfRatioRef.current);
+      setLfHfStatus(lfHfStatusRef.current);
+      setLfHfProgress(null);
+      console.log(
+        `Monitor: 📊 HRV (${logTag})=${roundedRmsdd}ms, LF=${roundedLf}, HF=${roundedHf}`
+      );
+    } else {
+      console.log(`Monitor: 📊 HRV (${logTag})=${roundedRmsdd}ms`);
+    }
 
     if (mode === "clinical") {
       hrvEpochRef.current = beginNextClinicalEpoch();
@@ -522,12 +675,25 @@ export function useMonitorSession() {
 
   const handlePpiData = (data: PolarPpiData) => {
     console.log(`Monitor: 🔬 Elaborazione ${data.samples.length} campioni PPI`);
-    lastPpiEventAtRef.current = Date.now();
+    const frameNowMs = Date.now();
+    lastPpiEventAtRef.current = frameNowMs;
+    const mode = useSettingsStore.getState().hrvAnalysisMode;
+    let appendedAny = false;
 
     data.samples.forEach((sample) => {
       const ppiMs = sample.ppi;
       polarPpiExtrasRef.current = stashPolarPpiExtras(sample);
       syncPolarSignalQualityUi();
+
+      // Every SDK sample enters the LF/HF window (accepted or rejected with reason).
+      ppiSampleWindowRef.current = appendPpiSample(ppiSampleWindowRef.current, {
+        ppiMs,
+        errorEstimate: sample.errorEstimate,
+        blocker: sample.blocker,
+        frameNowMs,
+        mode,
+      });
+      appendedAny = true;
 
       if (!isUsablePpiMs(ppiMs)) {
         console.log(
@@ -573,6 +739,10 @@ export function useMonitorSession() {
         "PPI"
       );
     });
+
+    if (appendedAny) {
+      recomputeLfHfFromPpiWindow();
+    }
   };
 
   const beginOfflineTrack = async (
@@ -913,16 +1083,25 @@ export function useMonitorSession() {
     const currentHrv = hrvRef.current;
     const lf = lfPowerRef.current;
     const hf = hfPowerRef.current;
+    const lfHfValid = lfHfValidRef.current;
+    const currentLfHfStatus = lfHfStatusRef.current;
+    // LF/HF only with HRV ready (same gate as starting Ably heartRate).
+    const lfHfShown =
+      currentHrv > 0 && isLfHfPublishable(currentLfHfStatus);
+    const lfHfRatio = lfHfRatioRef.current;
     const currentRrMs = rrMsRef.current;
     const currentRrSource = rrSourceRef.current;
+    const lfHfResult = lastLfHfResultRef.current;
+    const lfHfSeries = lfHfResult?.correctedPpiSeries ?? [];
+    const ppiWindow = ppiSampleWindowRef.current;
 
     if (currentHrv > 0) {
       setHrv(currentHrv);
     }
-    if (lf > 0) {
+    if (lfHfShown && lf > 0) {
       setLfPower(lf);
     }
-    if (hf > 0) {
+    if (lfHfShown && hf > 0) {
       setHfPower(hf);
     }
     if (currentRrMs > 0) {
@@ -980,11 +1159,96 @@ export function useMonitorSession() {
               deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
               hr,
               hrv: currentHrv > 0 ? currentHrv : null,
-              lfPower: lf > 0 ? lf : null,
-              hfPower: hf > 0 ? hf : null,
+              lfPower: lfHfShown ? lf : null,
+              hfPower: lfHfShown ? hf : null,
+              lfHfRatio: lfHfShown ? lfHfRatio : null,
+              lfHfValid,
+              lfHfStatus: currentLfHfStatus,
+              lfHfAcceptedRatio: lfHfResult?.acceptedRatio ?? null,
+              lfHfMaxArtifactGapSec: lfHfResult?.maxArtifactGapSec ?? null,
+              lfHfComputedAt: lfHfResult?.lfHfComputedAt ?? null,
               rrMs: currentRrMs > 0 ? currentRrMs : null,
               rrSource: currentRrSource,
               ppiMs: currentRrSource === "ppi" ? currentRrMs : null,
+              // ppisMs/rrsMs = corrected Y (compat); recompute needs tachogramSamples / ppiTimesSec.
+              ppisMs:
+                currentRrSource === "ppi" && lfHfSeries.length > 0
+                  ? lfHfSeries
+                  : null,
+              ppiSamples:
+                currentRrSource === "ppi" && ppiWindow.samples.length > 0
+                  ? ppiSamplesForExport(ppiWindow)
+                  : null,
+              tachogramSamples:
+                currentRrSource === "ppi" &&
+                lfHfResult != null &&
+                lfHfResult.tachogramSamples.length > 0
+                  ? lfHfResult.tachogramSamples
+                  : null,
+              ppiTimesSec:
+                currentRrSource === "ppi" &&
+                lfHfResult != null &&
+                lfHfResult.ppiTimesSec.length > 0
+                  ? [...lfHfResult.ppiTimesSec]
+                  : null,
+              rawIncludedPpiMs:
+                currentRrSource === "ppi" &&
+                lfHfResult != null &&
+                lfHfResult.rawIncludedPpiMs.length > 0
+                  ? [...lfHfResult.rawIncludedPpiMs]
+                  : null,
+              correctedPpiSeries:
+                currentRrSource === "ppi" && lfHfSeries.length > 0
+                  ? lfHfSeries
+                  : null,
+              resampledSeries:
+                currentRrSource === "ppi" &&
+                lfHfResult != null &&
+                lfHfResult.resampledSeries.length > 0
+                  ? [...lfHfResult.resampledSeries]
+                  : null,
+              includedIntervalDurationSec:
+                currentRrSource === "ppi"
+                  ? lfHfResult?.includedIntervalDurationSec ?? null
+                  : null,
+              tachogramDomainSec:
+                currentRrSource === "ppi"
+                  ? lfHfResult?.tachogramDomainSec ?? null
+                  : null,
+              resampledDurationSec:
+                currentRrSource === "ppi"
+                  ? lfHfResult?.resampledDurationSec ?? null
+                  : null,
+              hrvWindowSeconds:
+                currentRrSource === "ppi"
+                  ? lfHfResult?.includedIntervalDurationSec ?? null
+                  : null,
+              hrvIntervalCount:
+                currentRrSource === "ppi" ? lfHfSeries.length : null,
+              hrvMethod:
+                currentRrSource === "ppi" ? HRV_PREPROCESSING_EXPORT.method : null,
+              hrvSamplingHz:
+                currentRrSource === "ppi"
+                  ? HRV_PREPROCESSING_EXPORT.samplingHz
+                  : null,
+              livePublishHz:
+                currentRrSource === "ppi"
+                  ? HRV_PREPROCESSING_EXPORT.livePublishHz
+                  : null,
+              peakFrequencyHz:
+                currentRrSource === "ppi" && lfHfShown
+                  ? lfHfResult?.peakFrequencyHz ?? null
+                  : null,
+              lfBandHz:
+                currentRrSource === "ppi"
+                  ? HRV_PREPROCESSING_EXPORT.lfBandHz
+                  : null,
+              hfBandHz:
+                currentRrSource === "ppi"
+                  ? HRV_PREPROCESSING_EXPORT.hfBandHz
+                  : null,
+              hrvPreprocessing:
+                currentRrSource === "ppi" ? HRV_PREPROCESSING_EXPORT : null,
               skinTemperatureC: skinTemperatureCRef.current,
               ...polarExtrasFromStash(
                 polarPpiExtrasRef.current,
@@ -1053,6 +1317,11 @@ export function useMonitorSession() {
     lfPowerRef.current = 0;
     setHfPower(0);
     hfPowerRef.current = 0;
+    lfHfStatusRef.current = "unavailable";
+    setLfHfStatus("unavailable");
+    setLfHfProgress(null);
+    lfHfRatioRef.current = null;
+    setLfHfRatio(null);
     setRrMs(0);
     rrMsRef.current = 0;
     setRrSource(null);
@@ -1065,6 +1334,7 @@ export function useMonitorSession() {
     setPolarSignalQuality({ ...EMPTY_POLAR_SIGNAL_QUALITY });
     setMuseHr(0);
     resetHrvEpochAccumulator(false);
+    resetPpiSampleWindow();
     lastValidPpiAtRef.current = 0;
     lastPpiEventAtRef.current = 0;
     hrSumBucketRef.current = 0;
@@ -1129,6 +1399,11 @@ export function useMonitorSession() {
     lfPowerRef.current = 0;
     setHfPower(0);
     hfPowerRef.current = 0;
+    lfHfStatusRef.current = "unavailable";
+    setLfHfStatus("unavailable");
+    setLfHfProgress(null);
+    lfHfRatioRef.current = null;
+    setLfHfRatio(null);
     setRrMs(0);
     rrMsRef.current = 0;
     hrSumBucketRef.current = 0;
@@ -1141,6 +1416,7 @@ export function useMonitorSession() {
     polarPpiExtrasRef.current = { ...EMPTY_POLAR_PPI_EXTRAS };
     polarHrExtrasRef.current = { ...EMPTY_POLAR_HR_EXTRAS };
     setPolarSignalQuality({ ...EMPTY_POLAR_SIGNAL_QUALITY });
+    resetPpiSampleWindow();
     setIsSignalLost(false);
     setConnectedFamily(null);
     setEegTp9(0);
@@ -1960,6 +2236,9 @@ export function useMonitorSession() {
     hrv,
     lfPower,
     hfPower,
+    lfHfStatus,
+    lfHfProgress,
+    lfHfRatio,
     rrMs,
     rrSource,
     ecgMicroVolts,
