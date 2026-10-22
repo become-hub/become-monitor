@@ -41,6 +41,7 @@ export default function MonitorScreen() {
           }
           subtitle={subtitle}
           connectedDeviceId={session.connectedDeviceId}
+          developerMode={session.developerMode}
           deviceMenuOpen={session.deviceMenuOpen}
           setDeviceMenuOpen={session.setDeviceMenuOpen}
           onResetAuthSession={session.resetAuthSessionForDevice}
@@ -54,6 +55,7 @@ export default function MonitorScreen() {
           streamingStatusText={session.getStreamingStatusText()}
           isStreamingLive={session.isStreamingLive}
           ablyPulseTick={session.ablyPulseTick}
+          ablySendStats={session.ablySendStats}
           deviceCode={session.deviceCode}
           userId={session.userId}
           appId={session.appId}

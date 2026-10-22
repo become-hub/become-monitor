@@ -15,6 +15,8 @@ interface MonitorHeaderProps {
   titleDisplayName: string;
   subtitle: string;
   connectedDeviceId: string | null;
+  /** Developer Mode: show ⋮ to invalidate Become auth token. */
+  developerMode: boolean;
   deviceMenuOpen: boolean;
   setDeviceMenuOpen: (open: boolean) => void;
   onResetAuthSession: () => void;
@@ -24,11 +26,13 @@ export function MonitorHeader({
   titleDisplayName,
   subtitle,
   connectedDeviceId,
+  developerMode,
   deviceMenuOpen,
   setDeviceMenuOpen,
   onResetAuthSession,
 }: MonitorHeaderProps) {
   const { theme } = useTheme();
+  const showDevAuthMenu = developerMode && !!connectedDeviceId;
 
   return (
     <ThemedView style={monitorStyles.header}>
@@ -36,7 +40,7 @@ export function MonitorHeader({
         <ThemedText type="title" style={monitorStyles.title}>
           {titleDisplayName}
         </ThemedText>
-        {connectedDeviceId ? (
+        {showDevAuthMenu ? (
           <View style={monitorStyles.deviceMenuWrap}>
             <TouchableOpacity
               onPress={() => setDeviceMenuOpen(!deviceMenuOpen)}
@@ -63,7 +67,7 @@ export function MonitorHeader({
                 >
                   <Trash2 size={16} color="#EF4444" />
                   <ThemedText style={monitorStyles.deviceMenuItemTextDanger}>
-                    Reset auth token
+                    Invalida token Become
                   </ThemedText>
                 </TouchableOpacity>
               </View>

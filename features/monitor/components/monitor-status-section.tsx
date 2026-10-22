@@ -8,6 +8,8 @@ import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
 import type { HrvAnalysisMode } from "@/features/monitor/hooks/hrv-analysis-mode";
 import { hrvProgressPercent } from "@/features/monitor/hooks/hrv-analysis-mode";
+import type { AblySendStats } from "@/services/ably-service";
+import { AblyLastEventModal } from "./ably-last-event-modal";
 import {
   Activity,
   AppWindow,
@@ -31,6 +33,8 @@ interface MonitorStatusSectionProps {
   streamingStatusText: string;
   isStreamingLive: boolean;
   ablyPulseTick: number;
+  /** Events acked by Ably this session + the last one (tap the count to inspect). */
+  ablySendStats: AblySendStats;
   deviceCode: string;
   userId: number;
   appId: string;
@@ -69,6 +73,7 @@ export function MonitorStatusSection({
   streamingStatusText,
   isStreamingLive,
   ablyPulseTick,
+  ablySendStats,
   deviceCode,
   userId,
   appId,
@@ -89,6 +94,7 @@ export function MonitorStatusSection({
   const tint = Colors[theme].tint;
   const border = Colors[theme].border;
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [lastEventOpen, setLastEventOpen] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const progressPct = hrvProgressPercent(
     hrvAnalysisMode,
@@ -169,7 +175,37 @@ export function MonitorStatusSection({
           <ThemedText style={monitorStyles.statusCompactValue} numberOfLines={1}>
             {streamingStatusText}
           </ThemedText>
+          {ablySendStats.sent > 0 || ablySendStats.failed > 0 ? (
+            <TouchableOpacity
+              onPress={() => setLastEventOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={`${ablySendStats.sent} eventi inviati, mostra l'ultimo`}
+              hitSlop={8}
+              style={[
+                monitorStyles.statusEventBadge,
+                {
+                  backgroundColor:
+                    (ablySendStats.failed > 0 ? "#EF4444" : tint) + "22",
+                },
+              ]}
+            >
+              <ThemedText
+                style={[
+                  monitorStyles.statusEventBadgeText,
+                  { color: ablySendStats.failed > 0 ? "#EF4444" : tint },
+                ]}
+              >
+                {ablySendStats.sent}
+                {ablySendStats.failed > 0 ? ` · ${ablySendStats.failed}✕` : ""}
+              </ThemedText>
+            </TouchableOpacity>
+          ) : null}
         </View>
+        <AblyLastEventModal
+          visible={lastEventOpen}
+          stats={ablySendStats}
+          onClose={() => setLastEventOpen(false)}
+        />
 
         {showHrvLoading && (
           <View
@@ -269,7 +305,7 @@ export function MonitorStatusSection({
         )}
       </ThemedView>
 
-      {!authToken && connectedDeviceId && authCode && (
+      {!authToken && connectedDeviceId && (
         <View
           style={[
             monitorStyles.authCodeContainer,
@@ -290,30 +326,41 @@ export function MonitorStatusSection({
                 Pairing Become Hub
               </ThemedText>
               <ThemedText style={monitorStyles.authCodeLabel}>
-                Inserisci questo codice sul PC
+                {authCode
+                  ? "Inserisci questo codice sul PC"
+                  : "Generazione codice…"}
               </ThemedText>
             </View>
           </View>
 
-          <View style={monitorStyles.authCodeDigits}>
-            {authCode.split("").map((digit, index) => (
-              <View
-                key={`${digit}-${index}`}
-                style={[
-                  monitorStyles.authCodeDigit,
-                  { borderColor: border },
-                ]}
-              >
-                <ThemedText style={[monitorStyles.authCodeDigitText, { color: tint }]}>
-                  {digit}
-                </ThemedText>
-              </View>
-            ))}
-          </View>
+          {authCode ? (
+            <View style={monitorStyles.authCodeDigits}>
+              {authCode.split("").map((digit, index) => (
+                <View
+                  key={`${digit}-${index}`}
+                  style={[
+                    monitorStyles.authCodeDigit,
+                    { borderColor: border },
+                  ]}
+                >
+                  <ThemedText
+                    style={[monitorStyles.authCodeDigitText, { color: tint }]}
+                  >
+                    {digit}
+                  </ThemedText>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={{ paddingVertical: 16, alignItems: "center" }}>
+              <ActivityIndicator color={tint} />
+            </View>
+          )}
 
           <ThemedText style={monitorStyles.authCodeHint}>
-            Apri Become Hub → Devices e digita il codice per collegare questo
-            dispositivo.
+            {authCode
+              ? "Apri Become Hub → Devices e digita il codice per collegare questo dispositivo."
+              : "Attendi il codice a 4 cifre. Se non compare, in Developer Mode usa «Invalida token Become»."}
           </ThemedText>
         </View>
       )}

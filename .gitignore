@@ -52,3 +52,6 @@ android/.cxx/
 android/app/.cxx/
 android/**/.cxx/
 **/.cxx/
+
+# Cursor agent debug logs
+.cursor/debug-*.log

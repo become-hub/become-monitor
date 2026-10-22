@@ -4,8 +4,8 @@
 
 import {
   beatClosureTimesSec,
-  calculateRMSSD,
-  computeLfHf,
+    calculateRMSSD,
+    computeLfHf,
   computeLfHfDetailed,
   computeLfHfFromIntervals,
   computeLfHfFromTachogram,
@@ -19,7 +19,7 @@ import {
   lfHfQualityLevel,
   MAX_ARTIFACT_GAP_SEC,
   physiologicalDurationSec,
-  replaceSuccessiveJumpArtifacts,
+    replaceSuccessiveJumpArtifacts,
 } from "../hrv-calculator";
 
 /**
@@ -52,8 +52,8 @@ function independentLfHf(
   sampleRateHz: number = DEFAULT_HRV_SAMPLING_HZ
 ): { lf: number; hf: number } {
   if (tSec.length < 2 || y.length !== tSec.length || sampleRateHz <= 0) {
-    return { lf: 0, hf: 0 };
-  }
+        return { lf: 0, hf: 0 };
+    }
   for (let i = 1; i < tSec.length; i++) {
     if (!(tSec[i] > tSec[i - 1])) return { lf: 0, hf: 0 };
   }
@@ -105,8 +105,8 @@ function independentLfHf(
   const df = sampleRateHz / nfft;
   const half = Math.floor(nfft / 2);
 
-  let lf = 0;
-  let hf = 0;
+    let lf = 0;
+    let hf = 0;
   // Direct DFT — no fft.js
   for (let k = 0; k <= half; k++) {
     let re = 0;
@@ -124,7 +124,7 @@ function independentLfHf(
     if (freq >= 0.15 && freq <= 0.4) hf += power * df;
   }
 
-  return { lf, hf };
+    return { lf, hf };
 }
 
 /**
@@ -196,9 +196,9 @@ describe("HRV Calculator", () => {
 
     it("calcola RMSSD per valori variabili", () => {
       const rmssd = calculateRMSSD([800, 820, 810, 830, 805]);
-      expect(rmssd).toBeGreaterThan(0);
-      expect(rmssd).toBeLessThan(50);
-    });
+            expect(rmssd).toBeGreaterThan(0);
+            expect(rmssd).toBeLessThan(50);
+        });
 
     it("filtra artefatti grandi (>200ms)", () => {
       expect(calculateRMSSD([800, 1100, 820, 810])).toBeDefined();
@@ -676,7 +676,7 @@ describe("HRV Calculator", () => {
       expect(freqs[0]).toBe(0);
       expect(psd.some((p) => p > 0)).toBe(true);
     });
-  });
+});
 
   describe("regressione API computeLfHf", () => {
     it("produce LF/HF ≥ 0 su serie corta (valid=false)", () => {

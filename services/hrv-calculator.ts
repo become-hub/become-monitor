@@ -155,6 +155,75 @@ export type LfHfRatioAssessment = {
   severity: LfHfRatioSeverity;
 };
 
+/** One plausibility band for the LF/HF ratio (UI guidance, not clinical cutoffs). */
+export type LfHfRatioBand = {
+  /** Inclusive lower bound; `null` = open below. */
+  min: number | null;
+  /** Inclusive upper bound; `null` = open above. */
+  max: number | null;
+  /** Range shown in the thresholds modal, e.g. "0,2 – 5". */
+  rangeLabel: string;
+  label: string;
+  severity: LfHfRatioSeverity;
+  /** Short tip for the user. */
+  hint: string;
+};
+
+/**
+ * Plausibility bands for LF/HF (user guidance for optical PPI datasets).
+ * Keep in sync with `assessLfHfRatio` edges: <0.2 · ≤5 · ≤10 · ≤20 · ≤50 · >50.
+ */
+export const LF_HF_RATIO_BANDS: readonly LfHfRatioBand[] = [
+  {
+    min: null,
+    max: 0.2,
+    rangeLabel: "< 0,2",
+    label: "insolito",
+    severity: "warn",
+    hint: "Valore molto basso: spesso HF dominante o finestra ancora instabile.",
+  },
+  {
+    min: 0.2,
+    max: 5,
+    rangeLabel: "0,2 – 5",
+    label: "plausibile",
+    severity: "ok",
+    hint: "Fascia tipica a riposo o con carico moderato su misure short-term.",
+  },
+  {
+    min: 5,
+    max: 10,
+    rangeLabel: "5 – 10",
+    label: "da controllare",
+    severity: "warn",
+    hint: "Possibile stress / simpatia alta, oppure segnale ottico ancora debole.",
+  },
+  {
+    min: 10,
+    max: 20,
+    rangeLabel: "10 – 20",
+    label: "molto insolito",
+    severity: "danger",
+    hint: "Raro in condizioni normali: verifica contatto, movimento e qualità LF/HF.",
+  },
+  {
+    min: 20,
+    max: 50,
+    rangeLabel: "20 – 50",
+    label: "sospetto",
+    severity: "danger",
+    hint: "Spesso artefatto da polso: riposiziona il bracciale e resta fermo.",
+  },
+  {
+    min: 50,
+    max: null,
+    rangeLabel: "> 50",
+    label: "probabile artefatto",
+    severity: "danger",
+    hint: "Quasi certamente rumore o gap interpolati: non usare questo numero.",
+  },
+];
+
 /**
  * Plausibility bands for LF/HF (user guidance for optical PPI datasets).
  * 0.2–5 ok · 5–10 check · 10–20 unusual · 20–50 suspect · >50 artifact.
@@ -166,21 +235,21 @@ export function assessLfHfRatio(
     return null;
   }
   if (ratio < 0.2) {
-    return { label: "insolito", severity: "warn" };
+    return { label: LF_HF_RATIO_BANDS[0].label, severity: LF_HF_RATIO_BANDS[0].severity };
   }
   if (ratio <= 5) {
-    return { label: "plausibile", severity: "ok" };
+    return { label: LF_HF_RATIO_BANDS[1].label, severity: LF_HF_RATIO_BANDS[1].severity };
   }
   if (ratio <= 10) {
-    return { label: "da controllare", severity: "warn" };
+    return { label: LF_HF_RATIO_BANDS[2].label, severity: LF_HF_RATIO_BANDS[2].severity };
   }
   if (ratio <= 20) {
-    return { label: "molto insolito", severity: "danger" };
+    return { label: LF_HF_RATIO_BANDS[3].label, severity: LF_HF_RATIO_BANDS[3].severity };
   }
   if (ratio <= 50) {
-    return { label: "sospetto", severity: "danger" };
+    return { label: LF_HF_RATIO_BANDS[4].label, severity: LF_HF_RATIO_BANDS[4].severity };
   }
-  return { label: "probabile artefatto", severity: "danger" };
+  return { label: LF_HF_RATIO_BANDS[5].label, severity: LF_HF_RATIO_BANDS[5].severity };
 }
 
 export type LfHfRequirementKey = "acceptedRatio" | "maxArtifactGapSec" | "duration";

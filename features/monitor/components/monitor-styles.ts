@@ -101,6 +101,18 @@ export const monitorStyles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "right",
   },
+  statusEventBadge: {
+    minWidth: 28,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  statusEventBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
   statusAccordionHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -422,14 +434,27 @@ export const monitorStyles = StyleSheet.create({
     borderWidth: 1,
     gap: 10,
   },
+  lfHfProgressAccordionHeader: {
+    gap: 10,
+  },
+  lfHfProgressAccordionBody: {
+    gap: 10,
+  },
   lfHfProgressHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: 8,
+  },
+  lfHfProgressHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   lfHfProgressTitle: {
     fontSize: 14,
     fontWeight: "600",
+    flex: 1,
   },
   lfHfProgressPercent: {
     fontSize: 14,

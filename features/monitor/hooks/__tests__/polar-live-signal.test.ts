@@ -13,6 +13,7 @@ import {
   PPI_STALE_MS,
   PPI_STREAM_ALIVE_MS,
   polarLiveIntervalMs,
+  shouldPublishLiveHeartRate,
   shouldUpdateLfHfFromPpiSample,
 } from "../polar-live-signal";
 
@@ -210,6 +211,65 @@ describe("polar-live-signal", () => {
         blocker: false,
         ppgQuality: 90,
       });
+    });
+  });
+
+  describe("shouldPublishLiveHeartRate", () => {
+    it("non pubblica senza auth", () => {
+      expect(
+        shouldPublishLiveHeartRate({
+          latched: false,
+          hasAuth: false,
+          hr: 70,
+          hrvReady: true,
+        })
+      ).toBe(false);
+      expect(
+        shouldPublishLiveHeartRate({
+          latched: true,
+          hasAuth: false,
+          hr: 0,
+          hrvReady: false,
+        })
+      ).toBe(false);
+    });
+
+    it("prima del latch richiede hr > 0 e HRV pronta", () => {
+      expect(
+        shouldPublishLiveHeartRate({
+          latched: false,
+          hasAuth: true,
+          hr: 70,
+          hrvReady: false,
+        })
+      ).toBe(false);
+      expect(
+        shouldPublishLiveHeartRate({
+          latched: false,
+          hasAuth: true,
+          hr: 0,
+          hrvReady: true,
+        })
+      ).toBe(false);
+      expect(
+        shouldPublishLiveHeartRate({
+          latched: false,
+          hasAuth: true,
+          hr: 70,
+          hrvReady: true,
+        })
+      ).toBe(true);
+    });
+
+    it("dopo il latch pubblica anche con hr 0 / HRV non pronta", () => {
+      expect(
+        shouldPublishLiveHeartRate({
+          latched: true,
+          hasAuth: true,
+          hr: 0,
+          hrvReady: false,
+        })
+      ).toBe(true);
     });
   });
 });

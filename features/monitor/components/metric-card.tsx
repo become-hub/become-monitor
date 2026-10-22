@@ -7,7 +7,13 @@ import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
 import type { LucideIcon } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, View, type ViewStyle } from "react-native";
+import {
+  Animated,
+  Easing,
+  Pressable,
+  View,
+  type ViewStyle,
+} from "react-native";
 import { monitorStyles } from "./monitor-styles";
 
 const LIVE_HEART = "#EF4444";
@@ -100,6 +106,9 @@ interface MetricCardProps {
   warning?: boolean;
   /** Heartbeat pulse on the icon every second while live. */
   pulse?: boolean;
+  /** Makes the card tappable (e.g. open an explanation modal). */
+  onPress?: () => void;
+  accessibilityLabel?: string;
   style?: ViewStyle;
 }
 
@@ -175,6 +184,8 @@ export function MetricCard({
   danger = false,
   warning = false,
   pulse = false,
+  onPress,
+  accessibilityLabel,
   style,
 }: MetricCardProps) {
   const { theme } = useTheme();
@@ -253,19 +264,8 @@ export function MetricCard({
     };
   }, [isLive, scale, glow]);
 
-  return (
-    <View
-      style={[
-        monitorStyles.metricCard,
-        compact && monitorStyles.metricCardCompact,
-        fullWidth && monitorStyles.metricCardFull,
-        highlighted && monitorStyles.metricCardHighlight,
-        danger && monitorStyles.metricCardDanger,
-        warning && !danger && monitorStyles.metricCardWarning,
-        { borderColor },
-        style,
-      ]}
-    >
+  const content = (
+    <>
       {Icon && (
         <View
           style={[
@@ -318,6 +318,32 @@ export function MetricCard({
       >
         {unit}
       </ThemedText>
-    </View>
+    </>
   );
+
+  const cardStyle = [
+    monitorStyles.metricCard,
+    compact && monitorStyles.metricCardCompact,
+    fullWidth && monitorStyles.metricCardFull,
+    highlighted && monitorStyles.metricCardHighlight,
+    danger && monitorStyles.metricCardDanger,
+    warning && !danger && monitorStyles.metricCardWarning,
+    { borderColor },
+    style,
+  ];
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? label}
+        style={({ pressed }) => [...cardStyle, pressed && { opacity: 0.85 }]}
+      >
+        {content}
+      </Pressable>
+    );
+  }
+
+  return <View style={cardStyle}>{content}</View>;
 }

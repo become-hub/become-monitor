@@ -69,7 +69,7 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Augm
 
 ### Live vs flush a fine sessione (spike)
 
-- **Live**: le card Monitor HR / RR / HRV (e skin temp su Loop) si aggiornano a **1 Hz** appena parte lo streaming locale, anche **prima** del login Become. **LF/HF** (UI + Ably) partono solo quando **HRV è pronta** (Live: 30 battiti; Estesa: epoch), così si evita lo spettro instabile dei primi secondi. Ably (`heartRate`) parte solo dopo auth **e** quando HRV è pronta. I campioni PPI grezzi restano sul device/track; Contatto / Errore PPI / Movimento restano live.
+- **Live**: le card Monitor HR / RR / HRV (e skin temp su Loop) si aggiornano a **1 Hz** appena parte lo streaming locale, anche **prima** del login Become. **LF/HF** (UI + Ably) partono solo quando **HRV è pronta** (Live: 30 battiti; Estesa: epoch), così si evita lo spettro instabile dei primi secondi. Ably (`heartRate`) **parte** solo dopo auth **e** quando HRV è pronta; **dopo il primo invio** resta a 1 Hz per tutta la sessione BLE (vedi [Continuità heartRate](#continuità-heartrate-ably)). I campioni PPI grezzi restano sul device/track; Contatto / Errore PPI / Movimento restano live.
 - **Analisi HRV (Settings)**: **Live** (unica modalità selezionabile oggi) e **Estesa** (disabilitata: compatibile solo con Polar H10, non selezionabile). Estesa resta nel codice per epoch da 5 min / H10; non è certificazione medicale.
 
 | | Live | Estesa |
@@ -97,6 +97,8 @@ Esempio payload Ably live `heartRate` (360 / Loop):
   "deviceId": "...",
   "deviceModel": "polar_loop",
   "hr": 74,
+  "signalStale": false,
+  "staleSinceMs": null,
   "hrv": 42,
   "lfPower": 1200,
   "hfPower": 800,
@@ -161,8 +163,20 @@ Note:
 - LF/HF live (UI + Ably) partono **solo dopo HRV pronta**; prima restano "—" / `null` e `lfHfStatus: "unavailable"`. Poi restano pubblicati con uno spettro e `lfHfStatus` (anche se `lfHfValid` è false). Vedi [Qualità LF/HF](#qualità-lfhf-monitor). I consumer che vogliono solo valori standard Task Force (5 min) filtrano su `lfHfStatus === "valid"`.
 - RMSSD (`hrv`) resta sulla finestra Live da 30 battiti; LF/HF sul buffer PPI SDK (ma non esposti finché RMSSD non è pronto).
 - `skinTemperatureC` è valorizzato **solo su Loop Gen 2** (stream SDK); su Polar 360 è sempre `null`.
-- Finché HRV (RMSSD) non è pronta non parte alcun `heartRate` su Ably e LF/HF restano `null`.
+- Finché HRV (RMSSD) non è pronta non parte alcun `heartRate` su Ably e LF/HF restano `null`. Dopo il primo tick valido, vedi [Continuità heartRate](#continuità-heartrate-ably).
 - Salti successivi ≥ 200 ms: Y interpolato (stesso limite RMSSD).
+
+### Continuità heartRate (Ably)
+
+- **Gate di partenza** (invariato): auth Become (`authToken` + `userId` + `deviceCode`), `hr > 0`, HRV pronta (Live ≈ 30 battiti; Muse senza gate HRV).
+- **Latch**: al primo `heartRate` inviato con successo la sessione si “blocca” sul publish a **1 Hz**. Da quel momento il gate non si riapplica: ogni tick manda un evento finché la sessione BLE è attiva.
+- **Segnale perso** (bracciale tolto, contatto perso, `hr = 0` dopo grace): le metriche UI si azzerano, ma Ably continua con `hr: 0`, `hrv` / LF/HF / serie PPI a `null`, `signalStale: true`, `staleSinceMs` (ms dall’inizio del periodo stale). Quando il segnale torna, `hr` riprende subito; `hrv` resta `null` finché la finestra non è di nuovo piena.
+- **Stop definitivo** solo su: disconnect BLE, disconnect manuale, logout / reset auth, o evento Hub `endSession` (il latch si azzera; un nuovo warm-up riparte se il device resta collegato).
+- **Presence** (`private:<userId>`, azione `enter`): `data` è `{ "deviceCode": "...", "deviceName": "Polar 360 E5BEEB29" }`; `deviceName` è `null` se il nome non è ancora noto.
+- **Contatore eventi (Monitor → Streaming)**: accanto allo stato compare il numero di `heartRate` **confermati da Ably** nella sessione BLE (azzerato a disconnect / logout / `endSession`); se Ably ne rifiuta qualcuno compare anche `N✕`. Toccando il badge si apre l’ultimo evento inviato (JSON formattato; le serie lunghe sono riassunte, il payload reale non cambia).
+- **Limite dimensione messaggio**: Ably rifiuta i publish sopra **65 536 byte** (errore `40009`, lato server: l’app non se ne accorge). Con la finestra PPI piena (310–360 s) il payload completo supera il limite, quindi `buildPolarAblyHeartRatePayload` lo porta sotto **60 000 byte** togliendo (→ `null`) una serie alla volta, in quest’ordine: `resampledSeries`, `ppiSamples`, `rawIncludedPpiMs`, `rrsMs`, `tachogramSamples`, `correctedPpiSeries`, `ppiTimesSec`, `ppisMs`. `hr`, `hrv`, LF/HF e metadati restano sempre. `payloadTrimmed` elenca le serie tolte (`null` se il payload è completo): i consumer che ricalcolano LF/HF devono controllarlo (per il ricalcolo bastano `ppiTimesSec` + `correctedPpiSeries`, oppure `tachogramSamples`).
+- **Disconnect Ably transitorio** (`connecting` / `disconnected`): l’app continua a chiamare `channel.publish`; l’SDK Ably accoda i messaggi (`queueMessages`) e li invia alla riconnessione. Si scarta solo se non c’è client Ably o lo stato è `failed` / `closed` / `suspended`.
+- In Monitor, con latch attivo e segnale perso, lo stato streaming mostra **«Connesso · segnale perso»**.
 - Su **360 / Loop**, nel buffer LF/HF accepted se `errorEstimate` ≤ 20 ms (`LF_HF_PPI_ERROR_ESTIMATE_MAX_MS`; in Estesa anche senza `blocker`); `hrvPreprocessing.errorEstimateMaxMs` riporta 20. Il RMSSD resta a ≤ 10 ms. Sopra 20 ms: `kind: "quality_rejected"` (resta in X, Y interpolato). Fuori 300–2000 ms: `out_of_physiological_range` (escluso da X). La card **Errore PPI** diventa rossa solo con `errorEstimate` > 30 ms.
 - Su **H10**, la sorgente è RR ECG (`rrSource: "ecg_rr"`); `ppisMs` / `ppiSamples` restano `null` e `rrsMs` è la serie ECG nativa.
 - `contactStatus` / `contactStatusSupported` preferiscono il skin contact dello stream **PPI**; se il PPI non lo supporta, usano la notifica BLE Heart Rate.
@@ -175,7 +189,7 @@ Note:
 
 LF e HF non arrivano dalla SDK Polar: la SDK (`polar-ble-sdk` 5.16) in live espone solo dati grezzi (HR, PPI, PPG, ACC, ECG, temperatura…). L'unico dato HRV già elaborato è il Nightly Recharge (RMSSD medio notturno), che arriva a fine notte e non contiene LF/HF. L'app quindi **stima** LF/HF dai **PPI della SDK** (intervalli battito-battito), come fanno Polar Flow e Kubios.
 
-In Monitor, sotto le card LF/HF su 360/Loop, compare questa nota (percentuale da `LF_HF_VS_ECG_TYPICAL_ERROR_PCT`): «LF e HF non arrivano dal bracciale: vengono interpretati come stima dai battiti misurati al polso. Possono scostarsi di circa ±35% rispetto a una fascia al petto (es. Polar H10). Servono soprattutto per vedere se salgono o scendono nella stessa sessione, non come valori precisi al singolo numero.» Dettaglio tecnico: [lf-hf-validation-log.md](lf-hf-validation-log.md).
+In Monitor, tocca le card **LF Power** o **HF Power** (360/Loop) per aprire una modale con questa nota (percentuale da `LF_HF_VS_ECG_TYPICAL_ERROR_PCT`): «LF e HF non arrivano dal bracciale: vengono interpretati come stima dai battiti misurati al polso. Possono scostarsi di circa ±35% rispetto a una fascia al petto (es. Polar H10). Servono soprattutto per vedere se salgono o scendono nella stessa sessione, non come valori precisi al singolo numero.» Dettaglio tecnico: [lf-hf-validation-log.md](lf-hf-validation-log.md).
 
 LF e HF diventano visibili/trasmessi **dopo che HRV (RMSSD) è pronta** (Live: ~30 battiti). Prima restano "—": le prime finestre di spettro sono troppo corte e gonfiano i valori. Dopo, la qualità dice quanto fidarsi del numero.
 
@@ -190,13 +204,13 @@ LF e HF diventano visibili/trasmessi **dopo che HRV (RMSSD) è pronta** (Live: ~
 | **Ottima** | `valid` | standard 5 min: ≥ 5:00, battiti buoni ≥ 75%, buco ≤ 5 s, ≥ 150 battiti buoni | 3 impulsi |
 
 - Le card mostrano l'unità con la qualità: "ms² · bassa qualità", "ms² · media qualità", "ms² · ottima qualità".
-- Su 360/Loop le card compatte sono in griglia 2×2: **LF/HF** | **Errore PPI**, poi **Contatto** | **Movimento**. Il rapporto numerico va anche su Ably come `lfHfRatio`; le etichette di plausibilità (0,2–5 plausibile · 5–10 da controllare · 10–20 molto insolito · 20–50 sospetto · >50 probabile artefatto) restano **solo UI**.
+- Su 360/Loop le card compatte sono in griglia 2×2: **LF/HF** | **Errore PPI**, poi **Contatto** | **Movimento**. Il rapporto numerico va anche su Ably come `lfHfRatio`; le etichette di plausibilità (0,2–5 plausibile · 5–10 da controllare · 10–20 molto insolito · 20–50 sospetto · >50 probabile artefatto) restano **solo UI**. Tocca la card **LF/HF** per aprire la modale con le soglie e un breve hint per fascia (evidenzia quella del valore attuale).
 - Il telefono **vibra solo quando il livello sale** (anche dopo una ricaduta); le discese sono silenziose. Se i battiti buoni oscillano intorno al 60% il passaggio Bassa ↔ Media può vibrare più volte.
 - Il nome tecnico su Ably resta `lfHfStatus`; i nomi Bassa/Media/Ottima esistono solo in app.
 
 #### I tre requisiti e la barra di progresso
 
-Sotto le card LF/HF c'è la card **"Qualità LF/HF · Bassa/Media/Ottima"**. La percentuale grande è il progresso verso il livello successivo ed è data dal **requisito messo peggio**. Sotto, una riga per requisito:
+Sotto le card LF/HF c'è l'accordion **"Qualità LF/HF · Bassa/Media/Ottima"**: chiuso mostra solo titolo, percentuale e barra complessiva (anche a 100% quando la qualità è Ottima); espanso mostra i requisiti e l'hint. La percentuale grande è il progresso verso il livello successivo ed è data dal **requisito messo peggio**. Aperti, una riga per requisito:
 
 | Requisito | Cosa misura | Verso Media | Verso Ottima |
 |---|---|---|---|

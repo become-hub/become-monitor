@@ -33,8 +33,18 @@ export type PolarAblyHeartRateInput = {
   deviceId: string | null;
   /** Catalog product id (`PolarProductId`); null if unresolved. */
   deviceModel: PolarProductId | null;
-  /** Heart rate bpm (> 0 expected by callers before send). */
+  /**
+   * Heart rate bpm. Normally > 0; may be 0 when `signalStale` is true
+   * (latched Ably stream with lost sensor signal).
+   */
   hr: number;
+  /**
+   * True when the Ably stream is latched but the live sensor signal is lost.
+   * Forces HRV / LF/HF / PPI series to null regardless of other inputs.
+   */
+  signalStale?: boolean;
+  /** Wall-clock ms since the current stale period started; null when not stale. */
+  staleSinceMs?: number | null;
   hrv?: number | null;
   lfPower?: number | null;
   hfPower?: number | null;
@@ -120,6 +130,8 @@ export type PolarAblyHeartRatePayload = {
   deviceId: string | null;
   deviceModel: PolarProductId | null;
   hr: number;
+  signalStale: boolean;
+  staleSinceMs: number | null;
   hrv: number | null;
   lfPower: number | null;
   hfPower: number | null;
@@ -160,9 +172,59 @@ export type PolarAblyHeartRatePayload = {
   correctedHr: number | null;
   rrAvailable: boolean | null;
   rrsMs: number[] | null;
+  /**
+   * Series dropped to fit the Ably per-message limit (65 536 B). Null when the
+   * full payload fit. Dropped keys are sent as null.
+   */
+  payloadTrimmed: string[] | null;
   /** Marketing version, e.g. `v1.2.2`. */
   appVersion: string;
 };
+
+/**
+ * Soft budget for the serialized heartRate payload. Ably rejects publishes
+ * above 65 536 B (code 40009); sendMessage adds ~150 B of envelope fields.
+ */
+export const ABLY_HEART_RATE_MAX_PAYLOAD_BYTES = 60_000;
+
+/**
+ * Series dropped first (heaviest / most redundant), one at a time, until the
+ * payload fits. Core fields (hr, hrv, LF/HF, ppisMs) are only dropped last.
+ */
+const PAYLOAD_TRIM_ORDER = [
+  "resampledSeries", // 4 Hz FFT input — derivable from the tachogram
+  "ppiSamples", // per-beat diagnostics
+  "rawIncludedPpiMs",
+  "rrsMs", // duplicate of ppisMs
+  "tachogramSamples", // duplicate of ppiTimesSec + correctedPpiSeries
+  "correctedPpiSeries", // duplicate of ppisMs
+  "ppiTimesSec",
+  "ppisMs",
+] as const satisfies ReadonlyArray<keyof PolarAblyHeartRatePayload>;
+
+/** Drops series in `PAYLOAD_TRIM_ORDER` until the JSON fits `maxBytes`. */
+export function fitPolarAblyPayloadToLimit(
+  payload: PolarAblyHeartRatePayload,
+  maxBytes: number = ABLY_HEART_RATE_MAX_PAYLOAD_BYTES
+): PolarAblyHeartRatePayload {
+  if (JSON.stringify(payload).length <= maxBytes) {
+    return payload;
+  }
+  const trimmed: string[] = [];
+  const result: PolarAblyHeartRatePayload = { ...payload };
+  for (const key of PAYLOAD_TRIM_ORDER) {
+    if (result[key] == null) {
+      continue;
+    }
+    (result as Record<string, unknown>)[key] = null;
+    trimmed.push(key);
+    result.payloadTrimmed = [...trimmed];
+    if (JSON.stringify(result).length <= maxBytes) {
+      break;
+    }
+  }
+  return result;
+}
 
 /** Latest PPI quality / contact fields kept for periodic Ably ticks. */
 export type PolarPpiExtrasStash = {
@@ -314,6 +376,63 @@ export function polarExtrasFromStash(
 export function buildPolarAblyHeartRatePayload(
   input: PolarAblyHeartRateInput
 ): PolarAblyHeartRatePayload {
+  const signalStale = input.signalStale === true;
+  const staleSinceMs = signalStale
+    ? nonNegativeOrNull(input.staleSinceMs)
+    : null;
+
+  if (signalStale) {
+    return {
+      deviceId: input.deviceId,
+      deviceModel: input.deviceModel,
+      hr: 0,
+      signalStale: true,
+      staleSinceMs,
+      hrv: null,
+      lfPower: null,
+      hfPower: null,
+      lfHfRatio: null,
+      lfHfValid: null,
+      lfHfStatus: "unavailable",
+      lfHfAcceptedRatio: null,
+      lfHfMaxArtifactGapSec: null,
+      lfHfComputedAt: null,
+      rrMs: null,
+      rrSource: null,
+      ppiMs: null,
+      ppisMs: null,
+      ppiSamples: null,
+      tachogramSamples: null,
+      ppiTimesSec: null,
+      rawIncludedPpiMs: null,
+      correctedPpiSeries: null,
+      resampledSeries: null,
+      includedIntervalDurationSec: null,
+      tachogramDomainSec: null,
+      resampledDurationSec: null,
+      hrvWindowSeconds: null,
+      hrvIntervalCount: null,
+      hrvMethod: null,
+      hrvSamplingHz: null,
+      livePublishHz: 1,
+      peakFrequencyHz: null,
+      lfBandHz: null,
+      hfBandHz: null,
+      hrvPreprocessing: null,
+      skinTemperatureC: null,
+      contactStatus: boolOrNull(input.contactStatus),
+      contactStatusSupported: boolOrNull(input.contactStatusSupported),
+      errorEstimate: nonNegativeOrNull(input.errorEstimate),
+      blocker: boolOrNull(input.blocker),
+      ppgQuality: positiveOrNull(input.ppgQuality),
+      correctedHr: null,
+      rrAvailable: null,
+      rrsMs: null,
+      payloadTrimmed: null,
+      appVersion: `v${APP_VERSION}`,
+    };
+  }
+
   const rrSource = input.rrSource ?? null;
   const rrMs = positiveOrNull(input.rrMs);
   const ppiMs =
@@ -408,10 +527,12 @@ export function buildPolarAblyHeartRatePayload(
   const hfPower = powerOrNull(input.hfPower);
   const lfHfRatio = hidden ? null : positiveOrNull(input.lfHfRatio);
 
-  return {
+  return fitPolarAblyPayloadToLimit({
     deviceId: input.deviceId,
     deviceModel: input.deviceModel,
     hr: input.hr,
+    signalStale: false,
+    staleSinceMs: null,
     hrv: positiveOrNull(input.hrv),
     lfPower,
     hfPower,
@@ -454,6 +575,7 @@ export function buildPolarAblyHeartRatePayload(
     correctedHr: positiveOrNull(input.correctedHr),
     rrAvailable,
     rrsMs,
+    payloadTrimmed: null,
     appVersion: `v${APP_VERSION}`,
-  };
+  });
 }

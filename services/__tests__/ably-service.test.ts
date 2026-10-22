@@ -31,6 +31,7 @@ describe('AblyService', () => {
         mockAbly = {
             connection: {
                 on: jest.fn(),
+                state: 'initialized',
             },
             channels: {
                 get: jest.fn().mockReturnValue(mockChannel),
@@ -147,11 +148,102 @@ describe('AblyService', () => {
         });
     });
 
+    describe('send stats (eventi inviati)', () => {
+        const connect = () => {
+            ablyService.connectWithToken('test-token', 456, 'dev-123');
+            const onCallback = mockAbly.connection.on.mock.calls[0][0];
+            onCallback({ current: 'connected' });
+        };
+        const flushMicrotasks = () => new Promise((resolve) => setImmediate(resolve));
+
+        it('conta solo i publish confermati e conserva l’ultimo messaggio', async () => {
+            connect();
+            const listener = jest.fn();
+            ablyService.setSendStatsListener(listener);
+
+            ablyService.sendMessage(456, 'heartRate', { hr: 70 }, 'dev-123');
+            ablyService.sendMessage(456, 'heartRate', { hr: 71 }, 'dev-123');
+            await flushMicrotasks();
+
+            const stats = ablyService.getSendStats();
+            expect(stats.sent).toBe(2);
+            expect(stats.failed).toBe(0);
+            expect(stats.lastMessage).toMatchObject({ type: 'heartRate', hr: 71, code: 'dev-123' });
+            expect(stats.lastSentAt).not.toBeNull();
+            expect(listener).toHaveBeenCalledTimes(2);
+        });
+
+        it('conta i publish rifiutati da Ably come failed, non come inviati', async () => {
+            connect();
+            mockChannel.publish = jest.fn(() =>
+                Promise.reject(new Error('Maximum size of messages exceeded'))
+            );
+
+            ablyService.sendMessage(456, 'heartRate', { hr: 70 }, 'dev-123');
+            await flushMicrotasks();
+
+            const stats = ablyService.getSendStats();
+            expect(stats.sent).toBe(0);
+            expect(stats.failed).toBe(1);
+            expect(stats.lastError).toContain('Maximum size');
+            expect(stats.lastMessage).toBeNull();
+        });
+
+        it('resetSendStats azzera i contatori e notifica il listener', async () => {
+            connect();
+            ablyService.sendMessage(456, 'heartRate', { hr: 70 }, 'dev-123');
+            await flushMicrotasks();
+            const listener = jest.fn();
+            ablyService.setSendStatsListener(listener);
+
+            ablyService.resetSendStats();
+
+            expect(ablyService.getSendStats().sent).toBe(0);
+            expect(ablyService.getSendStats().lastMessage).toBeNull();
+            expect(listener).toHaveBeenCalledWith(
+                expect.objectContaining({ sent: 0, failed: 0 })
+            );
+        });
+    });
+
     describe('sendMessage', () => {
-        it('non invia se non connesso', () => {
+        it('non invia se Ably non è stato creato', () => {
             ablyService.sendMessage(123, 'heartRate', { deviceId: 'dev-123', hr: 75, hrv: 45, lfPower: 1200, hfPower: 800 }, 'dev-123');
 
             expect(mockChannel.publish).not.toHaveBeenCalled();
+        });
+
+        it('non invia se lo stato connessione è failed/closed/suspended', () => {
+            ablyService.connectWithToken('test-token', 456, 'dev-123');
+            const onCallback = mockAbly.connection.on.mock.calls[0][0];
+            onCallback({ current: 'connected' });
+            mockAbly.connection.state = 'failed';
+
+            ablyService.sendMessage(456, 'heartRate', { hr: 75 }, 'dev-123');
+            expect(mockChannel.publish).not.toHaveBeenCalled();
+
+            mockAbly.connection.state = 'closed';
+            ablyService.sendMessage(456, 'heartRate', { hr: 75 }, 'dev-123');
+            expect(mockChannel.publish).not.toHaveBeenCalled();
+
+            mockAbly.connection.state = 'suspended';
+            ablyService.sendMessage(456, 'heartRate', { hr: 75 }, 'dev-123');
+            expect(mockChannel.publish).not.toHaveBeenCalled();
+        });
+
+        it('accoda publish anche in disconnected/connecting (queue SDK)', () => {
+            ablyService.connectWithToken('test-token', 456, 'dev-123');
+            const onCallback = mockAbly.connection.on.mock.calls[0][0];
+            onCallback({ current: 'connected' });
+            onCallback({ current: 'disconnected', reason: { message: 'blip' } });
+            mockAbly.connection.state = 'disconnected';
+
+            ablyService.sendMessage(456, 'heartRate', { hr: 70 }, 'dev-123');
+            expect(mockChannel.publish).toHaveBeenCalledTimes(1);
+
+            mockAbly.connection.state = 'connecting';
+            ablyService.sendMessage(456, 'heartRate', { hr: 71 }, 'dev-123');
+            expect(mockChannel.publish).toHaveBeenCalledTimes(2);
         });
 
         it('invia messaggio corretto quando connesso', () => {
@@ -159,6 +251,7 @@ describe('AblyService', () => {
 
             const onCallback = mockAbly.connection.on.mock.calls[0][0];
             onCallback({ current: 'connected' });
+            mockAbly.connection.state = 'connected';
 
             const timestamp = '2024-01-01T00:00:00Z';
             ablyService.sendMessage(
@@ -417,7 +510,20 @@ describe('AblyService', () => {
             onCallback({ current: 'connected' });
 
             const presenceData = mockChannel.presence.enter.mock.calls[0][0];
-            expect(JSON.parse(presenceData)).toEqual({ deviceCode: 'my-device' });
+            expect(JSON.parse(presenceData)).toEqual({ deviceCode: 'my-device', deviceName: null });
+        });
+
+        it('include deviceName in presence quando noto', () => {
+            ablyService.connectWithToken('test-token', 123, 'my-device', 'Polar 360 E5BEEB29');
+
+            const onCallback = mockAbly.connection.on.mock.calls[0][0];
+            onCallback({ current: 'connected' });
+
+            const presenceData = mockChannel.presence.enter.mock.calls[0][0];
+            expect(JSON.parse(presenceData)).toEqual({
+                deviceCode: 'my-device',
+                deviceName: 'Polar 360 E5BEEB29',
+            });
         });
 
         it('gestisce errore di presence e resetta lo stato', async () => {

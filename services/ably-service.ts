@@ -18,12 +18,34 @@ export type EndSessionPayload = {
 
 export type EndSessionHandler = (payload: EndSessionPayload) => void;
 
+export type AblySendStats = {
+    /** Publishes acked by Ably. */
+    sent: number;
+    /** Publishes rejected by Ably (e.g. 40009 message too large). */
+    failed: number;
+    /** Last acked message, as published (including `type`, `code`, `timestamp`). */
+    lastMessage: Record<string, unknown> | null;
+    lastSentAt: number | null;
+    lastError: string | null;
+};
+
+export const EMPTY_ABLY_SEND_STATS: AblySendStats = {
+    sent: 0,
+    failed: 0,
+    lastMessage: null,
+    lastSentAt: null,
+    lastError: null,
+};
+
 export class AblyService {
     private ably: Ably.Realtime | null = null;
     private isConnected = false;
     private presenceEntered = false;
     private connectedUserId: number | null = null;
     private connectedDeviceCode: string | null = null;
+    private connectedDeviceName: string | null = null;
+    private sendStats: AblySendStats = { ...EMPTY_ABLY_SEND_STATS };
+    private sendStatsListener: ((stats: AblySendStats) => void) | null = null;
     private ablyTokenEndpoint: string;
     private connectionStatusCallback: (status: ConnectionStatus) => void;
     private endSessionHandler: EndSessionHandler | null = null;
@@ -44,7 +66,12 @@ export class AblyService {
         }
     }
 
-    connectWithToken(authToken: string, userId: number, deviceCode: string) {
+    connectWithToken(
+        authToken: string,
+        userId: number,
+        deviceCode: string,
+        deviceName?: string | null
+    ) {
         console.log(`AblyService: 🚀 Connecting to Ably with token - userId: ${userId} (type: ${typeof userId}), deviceCode: ${deviceCode}`);
 
         // Idempotent: avoid spawning orphan Realtime instances (presence / lock thrash).
@@ -66,10 +93,12 @@ export class AblyService {
             this.endSessionSubscribedUserId = null;
             this.connectedUserId = null;
             this.connectedDeviceCode = null;
+            this.connectedDeviceName = null;
         }
 
         this.connectedUserId = userId;
         this.connectedDeviceCode = deviceCode;
+        this.connectedDeviceName = deviceName?.trim() || null;
         this.ably = new Ably.Realtime({
             authUrl: this.ablyTokenEndpoint,
             authHeaders: {
@@ -105,7 +134,10 @@ export class AblyService {
                         if (shouldEnter) {
                             const channel = this.ably.channels.get(`private:${userId}`);
                             channel.presence.enter(
-                                JSON.stringify({ deviceCode })
+                                JSON.stringify({
+                                    deviceCode,
+                                    deviceName: this.connectedDeviceName,
+                                })
                             ).then(() => {
                                 console.log(
                                     "AblyService: 🤝 Presence entered once:",
@@ -138,12 +170,19 @@ export class AblyService {
                     this.connectionStatusCallback(ConnectionStatus.CONNECTING);
                     break;
 
-                case "failed":
                 case "closed":
+                    // Intentional: only reached via ably.close() (logout, re-pair, end session).
+                    this.isConnected = false;
+                    this.presenceEntered = false;
+                    console.log("AblyService: 🔒 Connection closed (intentional)");
+                    this.connectionStatusCallback(ConnectionStatus.DISCONNECTED);
+                    break;
+
+                case "failed":
                     this.isConnected = false;
                     this.presenceEntered = false;
                     console.error(
-                        "AblyService: 🚫 Connection issue:",
+                        "AblyService: 🚫 Connection failed:",
                         stateChange.reason?.message
                     );
                     this.connectionStatusCallback(ConnectionStatus.DISCONNECTED);
@@ -156,7 +195,21 @@ export class AblyService {
     }
 
     /**
-     * Metodo generico per inviare messaggi ad Ably
+     * True when publish should be dropped (no client, or terminal connection state).
+     * Transient `connecting` / `disconnected` still publish — Ably SDK queues them.
+     */
+    private shouldDropPublish(): boolean {
+        if (!this.ably) {
+            return true;
+        }
+        const state = this.ably.connection?.state;
+        return state === "failed" || state === "closed" || state === "suspended";
+    }
+
+    /**
+     * Metodo generico per inviare messaggi ad Ably.
+     * During transient disconnect/reconnect, publish is still called so the SDK
+     * can queue (`queueMessages` default) and flush when connected again.
      */
     sendMessage(
         userId: number,
@@ -167,14 +220,18 @@ export class AblyService {
         // Debug ridotto - solo per errori
         console.log(`AblyService: 📤 Sending ${eventType} to user ${userId}`);
 
-        if (!this.ably || !this.isConnected) {
-            console.warn("AblyService: ⚠️ Cannot send message, not connected");
-            console.warn(`AblyService: 🔍 Details - ably exists: ${!!this.ably}, isConnected: ${this.isConnected}`);
+        if (this.shouldDropPublish()) {
+            console.warn("AblyService: ⚠️ Cannot send message, Ably unavailable");
+            console.warn(
+                `AblyService: 🔍 Details - ably exists: ${!!this.ably}, state: ${
+                    this.ably?.connection?.state ?? "n/a"
+                }, isConnected: ${this.isConnected}`
+            );
             return;
         }
 
         try {
-            const channel = this.ably.channels.get(`private:${userId}`);
+            const channel = this.ably!.channels.get(`private:${userId}`);
             const message = {
                 ...data,
                 type: eventType,
@@ -182,11 +239,56 @@ export class AblyService {
                 timestamp: new Date().toISOString(),
             };
 
-            channel.publish(eventType, JSON.stringify(message));
+            const serialized = JSON.stringify(message);
+            const publishResult: Promise<unknown> = Promise.resolve(
+                channel.publish(eventType, serialized)
+            );
+            this.trackPublish(publishResult, message);
             console.log(`AblyService: ✅ Sent ${eventType} to private:${userId}`);
         } catch (error: any) {
             console.error(`AblyService: ❌ Failed to send ${eventType}:`, error.message);
         }
+    }
+
+    /** Snapshot of publishes acked (or rejected) by Ably since the last reset. */
+    getSendStats(): AblySendStats {
+        return this.sendStats;
+    }
+
+    /** Notified on every acked / rejected publish and on `resetSendStats`. */
+    setSendStatsListener(listener: ((stats: AblySendStats) => void) | null) {
+        this.sendStatsListener = listener;
+    }
+
+    resetSendStats() {
+        this.sendStats = { ...EMPTY_ABLY_SEND_STATS };
+        this.sendStatsListener?.(this.sendStats);
+    }
+
+    /** Counts a publish only once Ably acks it (a rejected publish is `failed`). */
+    private trackPublish(
+        result: Promise<unknown>,
+        message: Record<string, unknown>
+    ) {
+        result.then(
+            () => {
+                this.sendStats = {
+                    ...this.sendStats,
+                    sent: this.sendStats.sent + 1,
+                    lastMessage: message,
+                    lastSentAt: Date.now(),
+                };
+                this.sendStatsListener?.(this.sendStats);
+            },
+            (err: any) => {
+                this.sendStats = {
+                    ...this.sendStats,
+                    failed: this.sendStats.failed + 1,
+                    lastError: String(err?.message ?? err).slice(0, 200),
+                };
+                this.sendStatsListener?.(this.sendStats);
+            }
+        );
     }
 
     private subscribeEndSession(userId: number) {

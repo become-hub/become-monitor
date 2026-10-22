@@ -1,6 +1,6 @@
 /**
- * LF/HF quality (low / medium / high) and progress toward the next level,
- * driven by the weakest of accepted ratio, artifact gap and window length.
+ * LF/HF quality accordion: collapsed = title + overall progress;
+ * expanded = requirement rows + hint.
  */
 
 import { ThemedText } from "@/components/themed-text";
@@ -14,7 +14,9 @@ import {
   type LfHfStatus,
 } from "@/services/hrv-calculator";
 import { LF_HF_PPI_ERROR_ESTIMATE_MAX_MS } from "@/services/ppi-sample-window";
-import { View } from "react-native";
+import { ChevronDown, ChevronUp } from "lucide-react-native";
+import { useState } from "react";
+import { TouchableOpacity, View } from "react-native";
 import { monitorStyles } from "./monitor-styles";
 
 const MET_COLOR = "#10B981";
@@ -110,34 +112,23 @@ export function LfHfProgressCard({
   progress: LfHfProgress;
 }) {
   const { theme } = useTheme();
+  const tint = Colors[theme].tint;
+  const [expanded, setExpanded] = useState(false);
+  const complete = progress.nextStatus == null;
   const title = `Qualità LF/HF · ${QUALITY_LABEL[lfHfQualityLevel(status)]}`;
-
-  if (progress.nextStatus == null) {
-    return (
-      <View
-        style={[
-          monitorStyles.lfHfProgressCard,
-          { borderColor: Colors[theme].border },
-        ]}
-      >
-        <View style={monitorStyles.lfHfProgressHeader}>
-          <ThemedText style={monitorStyles.lfHfProgressTitle}>{title}</ThemedText>
-          <ThemedText
-            style={[monitorStyles.lfHfProgressPercent, { color: MET_COLOR }]}
-          >
-            100%
-          </ThemedText>
-        </View>
-        <Bar progress={1} color={MET_COLOR} />
-      </View>
-    );
-  }
-
-  const qualityBlocked = progress.requirements.some(
-    (r) => !r.met && r.key !== "duration"
-  );
-  const overallColor = qualityBlocked ? BLOCKED_COLOR : PENDING_COLOR;
-  const hint = hintFor(progress);
+  const qualityBlocked =
+    !complete &&
+    progress.requirements.some((r) => !r.met && r.key !== "duration");
+  const overallColor = complete
+    ? MET_COLOR
+    : qualityBlocked
+      ? BLOCKED_COLOR
+      : PENDING_COLOR;
+  const percentLabel = complete
+    ? "100%"
+    : `${Math.round(progress.overall * 100)}%`;
+  const barProgress = complete ? 1 : progress.overall;
+  const hint = complete ? null : hintFor(progress);
 
   return (
     <View
@@ -146,45 +137,77 @@ export function LfHfProgressCard({
         { borderColor: Colors[theme].border },
       ]}
     >
-      <View style={monitorStyles.lfHfProgressHeader}>
-        <ThemedText style={monitorStyles.lfHfProgressTitle}>{title}</ThemedText>
-        <ThemedText
-          style={[monitorStyles.lfHfProgressPercent, { color: overallColor }]}
-        >
-          {Math.round(progress.overall * 100)}%
-        </ThemedText>
-      </View>
-      <Bar progress={progress.overall} color={overallColor} />
-
-      {progress.requirements.map((r) => {
-        const text = requirementText(r);
-        return (
-          <View key={r.key} style={monitorStyles.lfHfRequirementRow}>
-            <View style={monitorStyles.lfHfRequirementLabelRow}>
-              <ThemedText style={monitorStyles.lfHfRequirementLabel}>
-                {r.met ? "✓ " : ""}
-                {text.label}
-              </ThemedText>
-              <ThemedText style={monitorStyles.lfHfRequirementLabel}>
-                {text.value}
-              </ThemedText>
-            </View>
-            <Bar
-              progress={r.progress}
-              color={
-                r.met
-                  ? MET_COLOR
-                  : r.key === "duration"
-                    ? PENDING_COLOR
-                    : BLOCKED_COLOR
-              }
-              small
-            />
+      <TouchableOpacity
+        onPress={() => setExpanded((open) => !open)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        accessibilityLabel={`${title}, ${percentLabel}. ${
+          expanded ? "Comprimi dettagli" : "Espandi dettagli"
+        }`}
+        style={monitorStyles.lfHfProgressAccordionHeader}
+      >
+        <View style={monitorStyles.lfHfProgressHeader}>
+          <ThemedText style={monitorStyles.lfHfProgressTitle}>{title}</ThemedText>
+          <View style={monitorStyles.lfHfProgressHeaderRight}>
+            <ThemedText
+              style={[monitorStyles.lfHfProgressPercent, { color: overallColor }]}
+            >
+              {percentLabel}
+            </ThemedText>
+            {expanded ? (
+              <ChevronUp size={16} color={tint} />
+            ) : (
+              <ChevronDown size={16} color={tint} />
+            )}
           </View>
-        );
-      })}
+        </View>
+        <Bar progress={barProgress} color={overallColor} />
+      </TouchableOpacity>
 
-      {hint && <ThemedText style={monitorStyles.lfHfHint}>{hint}</ThemedText>}
+      {expanded && (
+        <View style={monitorStyles.lfHfProgressAccordionBody}>
+          {complete ? (
+            <ThemedText style={monitorStyles.lfHfHint}>
+              Qualità ottima: finestra di 5 minuti, battiti buoni e buchi entro
+              le soglie strette. Puoi fidarti di più del rapporto LF/HF in questa
+              sessione.
+            </ThemedText>
+          ) : (
+            <>
+              {progress.requirements.map((r) => {
+                const text = requirementText(r);
+                return (
+                  <View key={r.key} style={monitorStyles.lfHfRequirementRow}>
+                    <View style={monitorStyles.lfHfRequirementLabelRow}>
+                      <ThemedText style={monitorStyles.lfHfRequirementLabel}>
+                        {r.met ? "✓ " : ""}
+                        {text.label}
+                      </ThemedText>
+                      <ThemedText style={monitorStyles.lfHfRequirementLabel}>
+                        {text.value}
+                      </ThemedText>
+                    </View>
+                    <Bar
+                      progress={r.progress}
+                      color={
+                        r.met
+                          ? MET_COLOR
+                          : r.key === "duration"
+                            ? PENDING_COLOR
+                            : BLOCKED_COLOR
+                      }
+                      small
+                    />
+                  </View>
+                );
+              })}
+              {hint && (
+                <ThemedText style={monitorStyles.lfHfHint}>{hint}</ThemedText>
+              )}
+            </>
+          )}
+        </View>
+      )}
     </View>
   );
 }

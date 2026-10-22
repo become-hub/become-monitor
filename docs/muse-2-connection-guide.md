@@ -48,7 +48,7 @@ Fuori scope MVP: accelerometro / giroscopio, offline recording Muse, iOS.
    - avvia streaming **EEG + bande** e **PPG → HR** (`startMuseStreaming`)
    - **non** esegue FTU Polar né offline PPI
 5. In Monitor compaiono le card Muse: canali EEG, bande, HR (PPG), batteria.
-6. Se Ably è connesso, l’hub riceve messaggi `heartRate` con `deviceFamily: "muse"`, `hr` e bande (`alpha`…`gamma`).
+6. Se Ably è connesso, l’hub riceve messaggi `heartRate` con `deviceFamily: "muse"`, `hr` e bande (`alpha`…`gamma`). Muse non ha gate HRV: al primo `hr > 0` con auth il publish si **agganza** a 1 Hz. Se il segnale PPG si perde, i tick continuano con `hr: 0`, bande `null`, `signalStale: true` (stesso latch Polar; stop solo su disconnect BLE / logout / `endSession`).
 
 ### Auth e reset token
 

@@ -147,3 +147,30 @@ export function isSustainedHrZero(
 ): boolean {
   return hrZeroSince > 0 && nowMs - hrZeroSince >= graceMs;
 }
+
+export type ShouldPublishLiveHeartRateArgs = {
+  /** True after the first valid Ably heartRate publish in this BLE session. */
+  latched: boolean;
+  /** Become auth present (token + userId + deviceCode). */
+  hasAuth: boolean;
+  hr: number;
+  /** Polar: RMSSD ready; Muse: always true. */
+  hrvReady: boolean;
+};
+
+/**
+ * Whether this 1 Hz tick should publish Ably `heartRate`.
+ * Start gate: auth + hr > 0 + HRV ready. Once latched, keep publishing until
+ * the BLE session ends (even with hr = 0 / signal lost).
+ */
+export function shouldPublishLiveHeartRate(
+  args: ShouldPublishLiveHeartRateArgs
+): boolean {
+  if (!args.hasAuth) {
+    return false;
+  }
+  if (args.latched) {
+    return true;
+  }
+  return args.hr > 0 && args.hrvReady;
+}

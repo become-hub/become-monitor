@@ -7,7 +7,9 @@ import { resolveRrInterval } from "../rr-interval";
 import { computeLfHf } from "../hrv-calculator";
 import { HRV_PREPROCESSING_EXPORT } from "../ppi-sample-window";
 import {
+  ABLY_HEART_RATE_MAX_PAYLOAD_BYTES,
   buildPolarAblyHeartRatePayload,
+  fitPolarAblyPayloadToLimit,
   polarExtrasFromStash,
   resolvePolarContact,
   stashPolarHrExtras,
@@ -45,6 +47,8 @@ const nullHrvMeta = {
 } as const;
 
 const nullExtras = {
+  signalStale: false,
+  staleSinceMs: null,
   contactStatus: null,
   contactStatusSupported: null,
   errorEstimate: null,
@@ -53,6 +57,7 @@ const nullExtras = {
   correctedHr: null,
   rrAvailable: null,
   rrsMs: null,
+  payloadTrimmed: null,
   ...nullHrvMeta,
   appVersion: expectedAppVersion,
 } as const;
@@ -87,6 +92,7 @@ const PAYLOAD_KEYS = [
   "lfPower",
   "livePublishHz",
   "peakFrequencyHz",
+  "payloadTrimmed",
   "ppgQuality",
   "ppiMs",
   "ppiSamples",
@@ -99,7 +105,9 @@ const PAYLOAD_KEYS = [
   "rrMs",
   "rrSource",
   "rrsMs",
+  "signalStale",
   "skinTemperatureC",
+  "staleSinceMs",
   "tachogramDomainSec",
   "tachogramSamples",
 ];
@@ -499,7 +507,72 @@ describe("buildPolarAblyHeartRatePayload", () => {
         hr: 68,
       });
       expect(payload.hr).toBe(68);
+      expect(payload.signalStale).toBe(false);
+      expect(payload.staleSinceMs).toBeNull();
       expect(payload).not.toHaveProperty("heartRate");
+    });
+  });
+
+  describe("signalStale", () => {
+    it("forza hr 0 e azzera HRV/LF/HF/serie PPI", () => {
+      const payload = buildPolarAblyHeartRatePayload({
+        deviceId: "AA:BB",
+        deviceModel: "polar_360",
+        hr: 74,
+        hrv: 42,
+        lfPower: 1200,
+        hfPower: 800,
+        lfHfRatio: 1.5,
+        lfHfStatus: "valid",
+        rrMs: 812,
+        rrSource: "ppi",
+        ppiMs: 812,
+        ppisMs: [800, 810, 820],
+        signalStale: true,
+        staleSinceMs: 3500,
+        contactStatus: false,
+        contactStatusSupported: true,
+        errorEstimate: 40,
+        blocker: true,
+      });
+
+      expect(payload).toMatchObject({
+        deviceId: "AA:BB",
+        deviceModel: "polar_360",
+        hr: 0,
+        signalStale: true,
+        staleSinceMs: 3500,
+        hrv: null,
+        lfPower: null,
+        hfPower: null,
+        lfHfRatio: null,
+        lfHfStatus: "unavailable",
+        rrMs: null,
+        rrSource: null,
+        ppiMs: null,
+        ppisMs: null,
+        ppiSamples: null,
+        livePublishHz: 1,
+        contactStatus: false,
+        contactStatusSupported: true,
+        errorEstimate: 40,
+        blocker: true,
+      });
+    });
+
+    it("con signalStale false lascia i valori live", () => {
+      const payload = buildPolarAblyHeartRatePayload({
+        deviceId: "dev",
+        deviceModel: "polar_360",
+        hr: 70,
+        hrv: 40,
+        signalStale: false,
+        staleSinceMs: 999,
+      });
+      expect(payload.hr).toBe(70);
+      expect(payload.hrv).toBe(40);
+      expect(payload.signalStale).toBe(false);
+      expect(payload.staleSinceMs).toBeNull();
     });
   });
 
@@ -734,5 +807,104 @@ describe("stash + polarExtrasFromStash", () => {
       rrAvailable: false,
       rrsMs: null,
     });
+  });
+});
+
+describe("fitPolarAblyPayloadToLimit (Ably 64 KiB message limit)", () => {
+  const BEATS = 420; // ~6 min raw retention window at ~70 bpm
+
+  const heavyInput = () => {
+    const ppis = Array.from({ length: BEATS }, (_, i) => 800 + (i % 40));
+    return {
+      deviceId: "AA:BB",
+      deviceModel: "polar_360" as const,
+      hr: 72,
+      hrv: 40,
+      lfPower: 1000,
+      hfPower: 900,
+      lfHfStatus: "valid" as const,
+      rrMs: 812,
+      rrSource: "ppi" as const,
+      ppiMs: 812,
+      ppisMs: ppis,
+      correctedPpiSeries: ppis,
+      rawIncludedPpiMs: ppis,
+      ppiTimesSec: ppis.map((_, i) => i * 0.8123456789),
+      resampledSeries: Array.from(
+        { length: 1200 },
+        (_, i) => 800 + Math.sin(i / 7) * 33.123456789012
+      ),
+      tachogramSamples: ppis.map((ppi, i) => ({
+        timeSec: i * 0.8123456789,
+        rawPpiMs: ppi,
+        correctedPpiMs: ppi,
+        kind: "accepted" as const,
+        jumpCorrected: false,
+      })),
+      ppiSamples: ppis.map((ppiMs, i) => ({
+        ppiMs,
+        errorEstimate: 12,
+        timestamp: 1_792_000_000_000 + i * 812,
+        rejectReason: null,
+        accepted: true,
+        kind: "accepted" as const,
+        includedInTimeline: true,
+        includedInTachogram: true,
+        correctedPpiMs: ppiMs,
+      })),
+    };
+  };
+
+  it("un payload con finestra piena supera il limite Ably senza il guard", () => {
+    const full = JSON.stringify({ ...heavyInput() });
+    expect(full.length).toBeGreaterThan(65_536);
+  });
+
+  it("il payload costruito resta sotto il budget e mantiene i campi core", () => {
+    const payload = buildPolarAblyHeartRatePayload(heavyInput());
+    expect(JSON.stringify(payload).length).toBeLessThanOrEqual(
+      ABLY_HEART_RATE_MAX_PAYLOAD_BYTES
+    );
+    expect(payload.hr).toBe(72);
+    expect(payload.hrv).toBe(40);
+    expect(payload.lfPower).toBe(1000);
+    expect(payload.hfPower).toBe(900);
+    expect(payload.ppisMs).toHaveLength(BEATS);
+    expect(payload.payloadTrimmed).not.toBeNull();
+    expect(payload.payloadTrimmed![0]).toBe("resampledSeries");
+  });
+
+  it("taglia solo il necessario, nell'ordine previsto", () => {
+    const payload = buildPolarAblyHeartRatePayload(heavyInput());
+    for (const key of payload.payloadTrimmed ?? []) {
+      expect(payload[key as keyof typeof payload]).toBeNull();
+    }
+    expect(payload.payloadTrimmed).toEqual(
+      ["resampledSeries", "ppiSamples", "rawIncludedPpiMs", "rrsMs", "tachogramSamples"].slice(
+        0,
+        payload.payloadTrimmed!.length
+      )
+    );
+  });
+
+  it("non taglia nulla quando il payload entra nel budget", () => {
+    const small = buildPolarAblyHeartRatePayload({
+      deviceId: "AA:BB",
+      deviceModel: "polar_360",
+      hr: 70,
+      hrv: 30,
+    });
+    expect(small.payloadTrimmed).toBeNull();
+    expect(fitPolarAblyPayloadToLimit(small)).toBe(small);
+  });
+
+  it("con budget minimo resta comunque un payload valido con hr", () => {
+    const payload = fitPolarAblyPayloadToLimit(
+      buildPolarAblyHeartRatePayload(heavyInput()),
+      2_000
+    );
+    expect(payload.hr).toBe(72);
+    expect(payload.ppisMs).toBeNull();
+    expect(payload.payloadTrimmed).toContain("ppisMs");
   });
 });

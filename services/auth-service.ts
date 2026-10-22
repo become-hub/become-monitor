@@ -31,7 +31,6 @@ export class AuthService {
     async startDeviceAuth(): Promise<DeviceStartResponse | null> {
         try {
             const response = await fetch(`${this.serverUrl}/auth/device/start`);
-
             if (!response.ok) {
                 console.error("AuthService: startDeviceAuth failed", response.status);
                 return null;

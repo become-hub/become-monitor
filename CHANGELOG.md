@@ -4,6 +4,20 @@ Tutte le modifiche rilevanti a Augmented Monitor.
 
 Il formato si ispira a [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- Presence Ably: `data` include `deviceName` oltre a `deviceCode`
+- Monitor → Streaming: badge con il numero di `heartRate` confermati da Ably (e rifiutati); al tocco mostra l’ultimo evento inviato formattato
+
+### Changed
+- Ably `heartRate`: dopo il primo tick valido (auth + `hr > 0` + HRV pronta) resta a 1 Hz per tutta la sessione BLE; con segnale perso invia `hr: 0`, `signalStale: true`, `staleSinceMs`
+- Ably `heartRate`: il payload non supera più il limite Ably di 64 KiB (errore `40009`, publish scartati dal server con finestra PPI piena): serie pesanti/ridondanti tolte in ordine fisso, elencate in `payloadTrimmed`
+- Ably `heartRate`: il flush a 1 Hz parte anche dagli eventi HR del Polar, non solo dal timer; con schermo bloccato o app in background il timer JS viene rallentato dal sistema e il publish andava a scatti (buchi di 10–18 s)
+- Ably `closed` (chiusura voluta) non è più loggato come errore
+- Disconnect Ably transitorio: i publish vengono comunque accodati dall’SDK (niente drop silenzioso in `connecting` / `disconnected`)
+- Stato Monitor: «Connesso · segnale perso» quando lo stream è latched ma senza HR
+
 ## [1.2.4] — LF/HF live da PPI (360/Loop)
 
 ### Added

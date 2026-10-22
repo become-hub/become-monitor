@@ -29,6 +29,8 @@ import {
   View,
 } from "react-native";
 import { APP_VERSION } from "@/constants/app-version";
+import { AuthService } from "@/services/auth-service";
+import { useUserStore } from "@/stores/user-store";
 
 export default function SettingsScreen() {
   const { theme, themePreference, updateThemePreference } = useTheme();
@@ -38,7 +40,9 @@ export default function SettingsScreen() {
     setDebugMode,
     developerMode,
     setDeveloperMode,
+    bumpAuthInvalidate,
   } = useSettingsStore();
+  const resetUserState = useUserStore((s) => s.resetUserState);
   const [autoConnect, setAutoConnect] = useState(true);
   const [dataSync, setDataSync] = useState(true);
   const [localDebugMode, setLocalDebugMode] = useState(debugMode);
@@ -612,6 +616,67 @@ export default function SettingsScreen() {
               thumbColor={localDeveloperMode ? "#fff" : "#f4f3f4"}
             />
           </ThemedView>
+
+          {localDeveloperMode && (
+            <ThemedView style={styles.settingItem}>
+              <View style={styles.settingContent}>
+                <ThemedText style={styles.settingLabel}>
+                  Invalida token Become
+                </ThemedText>
+                <ThemedText style={styles.settingDescription}>
+                  Cancella i token salvati. Al prossimo device vedrai di nuovo il
+                  codice a 4 cifre.
+                </ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  Alert.alert(
+                    "Invalida token Become",
+                    "Cancellare tutti i token Become salvati su questo telefono?",
+                    [
+                      { text: "Annulla", style: "cancel" },
+                      {
+                        text: "Invalida",
+                        style: "destructive",
+                        onPress: async () => {
+                          try {
+                            await new AuthService().clearAuthData();
+                            resetUserState();
+                            // Monitor (if a device is connected) will request a new 4-digit code.
+                            bumpAuthInvalidate();
+                            setNotification({
+                              type: "success",
+                              message:
+                                "Token invalidati — torna a Monitor per il codice a 4 cifre",
+                            });
+                          } catch (error: any) {
+                            setNotification({
+                              type: "error",
+                              message:
+                                error?.message ||
+                                "Impossibile invalidare i token",
+                            });
+                          }
+                        },
+                      },
+                    ]
+                  );
+                }}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  borderRadius: 8,
+                  backgroundColor: "#EF4444",
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Invalida token Become"
+              >
+                <ThemedText style={{ color: "#fff", fontWeight: "600" }}>
+                  Invalida
+                </ThemedText>
+              </TouchableOpacity>
+            </ThemedView>
+          )}
 
           {/* Password Input per Debug Mode */}
           {showPasswordInput && (

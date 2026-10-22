@@ -21,10 +21,7 @@ import {
   type LfHfQualityLevel,
   type LfHfStatus,
 } from "@/services/hrv-calculator";
-import {
-  LF_HF_PPI_ERROR_ESTIMATE_MAX_MS,
-  LF_HF_VS_ECG_TYPICAL_ERROR_PCT,
-} from "@/services/ppi-sample-window";
+import { LF_HF_PPI_ERROR_ESTIMATE_MAX_MS } from "@/services/ppi-sample-window";
 import type { RrSource } from "@/services/rr-interval";
 import {
   Activity,
@@ -36,8 +33,11 @@ import {
   Thermometer,
   Zap,
 } from "lucide-react-native";
+import { useState } from "react";
 import { View } from "react-native";
+import { LfHfEstimateModal } from "./lf-hf-estimate-modal";
 import { LfHfProgressCard } from "./lf-hf-progress-card";
+import { LfHfRatioThresholdsModal } from "./lf-hf-ratio-thresholds-modal";
 import { MetricCard } from "./metric-card";
 import { monitorStyles } from "./monitor-styles";
 
@@ -123,6 +123,8 @@ export function PolarMetricsGrid({
   polarSignalQuality = null,
 }: PolarMetricsGridProps) {
   const { theme } = useTheme();
+  const [lfHfThresholdsOpen, setLfHfThresholdsOpen] = useState(false);
+  const [lfHfEstimateOpen, setLfHfEstimateOpen] = useState(false);
   const showQualityCards =
     !!connectedDeviceId && !isH10Connected && polarSignalQuality != null;
   const contactPoor =
@@ -270,6 +272,12 @@ export function PolarMetricsGrid({
                 : "ms²"
             }
             icon={Zap}
+            onPress={
+              connectedDeviceId && !isH10Connected
+                ? () => setLfHfEstimateOpen(true)
+                : undefined
+            }
+            accessibilityLabel="HF Power, tocca per info sulla stima"
           />
           <MetricCard
             label="LF Power"
@@ -280,6 +288,12 @@ export function PolarMetricsGrid({
                 : "ms²"
             }
             icon={Zap}
+            onPress={
+              connectedDeviceId && !isH10Connected
+                ? () => setLfHfEstimateOpen(true)
+                : undefined
+            }
+            accessibilityLabel="LF Power, tocca per info sulla stima"
           />
         </View>
 
@@ -287,16 +301,10 @@ export function PolarMetricsGrid({
           <LfHfProgressCard status={lfHfStatus} progress={lfHfProgress} />
         )}
 
-        {connectedDeviceId && !isH10Connected && (
-          <ThemedText style={monitorStyles.metricFootnote}>
-            LF e HF non arrivano dal bracciale: vengono interpretati come stima
-            dai battiti misurati al polso. Possono scostarsi di circa ±
-            {LF_HF_VS_ECG_TYPICAL_ERROR_PCT}% rispetto a una fascia al petto
-            (es. Polar H10). Servono soprattutto per vedere se salgono o
-            scendono nella stessa sessione, non come valori precisi al singolo
-            numero.
-          </ThemedText>
-        )}
+        <LfHfEstimateModal
+          visible={lfHfEstimateOpen}
+          onClose={() => setLfHfEstimateOpen(false)}
+        />
 
         {connectedDeviceId && isSkinTemperatureSupported && (
           <View style={monitorStyles.metricsRow}>
@@ -340,6 +348,8 @@ export function PolarMetricsGrid({
                 compact
                 warning={ratioWarn}
                 danger={ratioDanger}
+                onPress={() => setLfHfThresholdsOpen(true)}
+                accessibilityLabel="LF/HF, tocca per le soglie di plausibilità"
               />
               <MetricCard
                 label="Errore PPI*"
@@ -381,9 +391,19 @@ export function PolarMetricsGrid({
               compact
               warning={ratioWarn}
               danger={ratioDanger}
+              onPress={() => setLfHfThresholdsOpen(true)}
+              accessibilityLabel="LF/HF, tocca per le soglie di plausibilità"
             />
           </View>
         )}
+
+        <LfHfRatioThresholdsModal
+          visible={lfHfThresholdsOpen}
+          onClose={() => setLfHfThresholdsOpen(false)}
+          currentRatio={
+            typeof ratioValue === "number" ? ratioValue : lfHfRatio
+          }
+        />
 
         {(showContactWearAlert || motionPoor) && (
           <View style={monitorStyles.wearWarningStack}>
@@ -453,9 +473,8 @@ export function PolarMetricsGrid({
 
         {showQualityCards && (
           <ThemedText style={monitorStyles.metricFootnote}>
-            LF/HF: 0,2–5 plausibile · 5–10 da controllare · oltre 10 insolito /
-            sospetto (spesso segnale debole). * PPI: intervallo tra un battito e
-            il successivo. HRV usa Errore PPI ≤ 10 ms, LF e HF ≤{" "}
+            Tocca LF/HF per le soglie di plausibilità. * PPI: intervallo tra un
+            battito e il successivo. HRV usa Errore PPI ≤ 10 ms, LF e HF ≤{" "}
             {LF_HF_PPI_ERROR_ESTIMATE_MAX_MS} ms
             {hrvAnalysisMode === "clinical"
               ? " e senza movimento (blocker)."

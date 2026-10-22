@@ -5,7 +5,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Alert, PermissionsAndroid, Platform, Vibration } from "react-native";
-import { AblyService, ConnectionStatus } from "@/services/ably-service";
+import {
+  AblyService,
+  type AblySendStats,
+  ConnectionStatus,
+  EMPTY_ABLY_SEND_STATS,
+} from "@/services/ably-service";
 import { AuthService } from "@/services/auth-service";
 import {
   calculateRMSSD,
@@ -90,6 +95,7 @@ import {
   polarLiveIntervalMs,
   PPI_STALE_MS,
   PPI_STREAM_ALIVE_MS,
+  shouldPublishLiveHeartRate,
 } from "./polar-live-signal";
 import {
   acceptHrvIntervalSample,
@@ -161,7 +167,7 @@ export function useMonitorSession() {
     resetUserState,
   } = useUserStore();
 
-  const { debugMode, developerMode } = useSettingsStore();
+  const { debugMode, developerMode, authInvalidateNonce } = useSettingsStore();
 
   // Bluetooth & Device State
   const [bluetoothPowered, setBluetoothPowered] = useState(false);
@@ -179,6 +185,10 @@ export function useMonitorSession() {
     ConnectionStatus.DISCONNECTED
   );
   const [ablyPulseTick, setAblyPulseTick] = useState(0);
+  /** Heart-rate events acked by Ably in this BLE session (+ last one for the Monitor popup). */
+  const [ablySendStats, setAblySendStats] = useState<AblySendStats>(
+    EMPTY_ABLY_SEND_STATS
+  );
 
   const bumpAblyPulse = () => {
     setAblyPulseTick((tick) => tick + 1);
@@ -200,6 +210,11 @@ export function useMonitorSession() {
   const [skinTemperatureC, setSkinTemperatureC] = useState(0);
   /** True after we had live metrics and then lost contact / HR while still connected. */
   const [isSignalLost, setIsSignalLost] = useState(false);
+  /**
+   * True after the first valid Ably heartRate in this BLE session.
+   * Once set, publish continues at 1 Hz until disconnect / logout / endSession.
+   */
+  const [ablyHeartRateLatched, setAblyHeartRateLatched] = useState(false);
   /** Live PPI/HR quality for compact Monitor cards + wear warning. */
   const [polarSignalQuality, setPolarSignalQuality] =
     useState<PolarSignalQualityUi>({ ...EMPTY_POLAR_SIGNAL_QUALITY });
@@ -287,6 +302,10 @@ export function useMonitorSession() {
   const hrCountBucketRef = useRef(0);
   const lastPolarLiveFlushAtRef = useRef(0);
   const lastPpiEventAtRef = useRef(0);
+  /** Mirrors ablyHeartRateLatched for flush without waiting for render. */
+  const ablyHeartRateLatchedRef = useRef(false);
+  /** Wall-clock ms when the current stale (hr=0) Ably period started; 0 if not stale. */
+  const signalStaleSinceRef = useRef(0);
 
   // Derived state
   const connectedProduct: PolarProduct | null = resolvePolarProduct(connectedDeviceName);
@@ -881,7 +900,6 @@ export function useMonitorSession() {
         const pollResponse = await authService.current.pollDeviceAuth(
           storedAuthData.deviceToken
         );
-
         if (pollResponse && pollResponse.authenticated === true) {
           console.log("Monitor: ✅ Token valido, utilizzo dati salvati");
           console.log("Monitor: 🔍 Stored data:", JSON.stringify(storedAuthData, null, 2));
@@ -898,7 +916,8 @@ export function useMonitorSession() {
           ablyService.current?.connectWithToken(
             storedAuthData.authToken,
             storedAuthData.userId,
-            storedAuthData.deviceCode
+            storedAuthData.deviceCode,
+            connectedDeviceNameRef.current || storedAuthData.deviceName
           );
 
           // Streaming locale già avviato post-FTU; qui solo Ably / track.
@@ -922,7 +941,6 @@ export function useMonitorSession() {
       }
 
       const authFlow = await authService.current.startAuthFlow(deviceId);
-
       if (!authFlow.needsAuth && authFlow.storedData) {
         console.log("Monitor: ⚠️ Unexpected: needsAuth=false dopo validazione");
         return;
@@ -999,7 +1017,8 @@ export function useMonitorSession() {
               ablyService.current?.connectWithToken(
                 pollResponse.session,
                 parseInt(pollResponse.userId),
-                pollResponse.deviceCode
+                pollResponse.deviceCode,
+                connectedDeviceNameRef.current
               );
 
               await startDeviceStreaming();
@@ -1120,7 +1139,10 @@ export function useMonitorSession() {
       now - lastPositiveSignalAtRef.current >= SIGNAL_LOSS_MS
     ) {
       clearLiveBiometricMetrics();
-      return;
+      // When Ably is latched, continue to publish a stale heartRate tick below.
+      if (!ablyHeartRateLatchedRef.current) {
+        return;
+      }
     }
 
     if (debugMode) {
@@ -1130,16 +1152,50 @@ export function useMonitorSession() {
     const isMuseFamily = connectedFamilyRef.current === "muse";
     // Polar: wait until HRV window/epoch is ready (Live: 30 beats). Muse has no HRV gate.
     const hrvReadyForAbly = isMuseFamily || currentHrv > 0;
-
-    if (
-      ablyService.current &&
+    const hasAuth = !!(
       userStateBiometric.authToken &&
       userStateBiometric.userId &&
-      userStateBiometric.deviceCode &&
-      hr > 0 &&
-      hrvReadyForAbly
-    ) {
+      userStateBiometric.deviceCode
+    );
+    const shouldPublish = shouldPublishLiveHeartRate({
+      latched: ablyHeartRateLatchedRef.current,
+      hasAuth,
+      hr,
+      hrvReady: hrvReadyForAbly,
+    });
+
+    if (ablyService.current && shouldPublish && userStateBiometric.userId) {
       const isMuse = isMuseFamily;
+      const publishHr = heartRateRef.current;
+      const signalStale =
+        ablyHeartRateLatchedRef.current && publishHr <= 0;
+      if (signalStale) {
+        if (signalStaleSinceRef.current <= 0) {
+          signalStaleSinceRef.current = now;
+        }
+      } else {
+        signalStaleSinceRef.current = 0;
+      }
+      const staleSinceMs =
+        signalStale && signalStaleSinceRef.current > 0
+          ? now - signalStaleSinceRef.current
+          : null;
+
+      // Re-read metrics after a possible clear above.
+      const liveHrv = hrvRef.current;
+      const liveLf = lfPowerRef.current;
+      const liveHf = hfPowerRef.current;
+      const liveLfHfValid = lfHfValidRef.current;
+      const liveLfHfStatus = lfHfStatusRef.current;
+      const liveLfHfShown =
+        !signalStale && liveHrv > 0 && isLfHfPublishable(liveLfHfStatus);
+      const liveLfHfRatio = lfHfRatioRef.current;
+      const liveRrMs = rrMsRef.current;
+      const liveRrSource = rrSourceRef.current;
+      const liveLfHfResult = lastLfHfResultRef.current;
+      const liveLfHfSeries = liveLfHfResult?.correctedPpiSeries ?? [];
+      const livePpiWindow = ppiSampleWindowRef.current;
+
       ablyService.current.sendMessage(
         userStateBiometric.userId,
         "heartRate",
@@ -1147,109 +1203,140 @@ export function useMonitorSession() {
           ? {
               deviceId: connectedDeviceIdRef.current,
               deviceFamily: "muse",
-              hr,
-              alpha: bandAlphaRef.current || null,
-              theta: bandThetaRef.current || null,
-              beta: bandBetaRef.current || null,
-              delta: bandDeltaRef.current || null,
-              gamma: bandGammaRef.current || null,
+              hr: signalStale ? 0 : publishHr,
+              alpha: signalStale ? null : bandAlphaRef.current || null,
+              theta: signalStale ? null : bandThetaRef.current || null,
+              beta: signalStale ? null : bandBetaRef.current || null,
+              delta: signalStale ? null : bandDeltaRef.current || null,
+              gamma: signalStale ? null : bandGammaRef.current || null,
+              signalStale,
+              staleSinceMs,
             }
           : buildPolarAblyHeartRatePayload({
               deviceId: connectedDeviceIdRef.current,
               deviceModel: resolvePolarProductId(connectedDeviceNameRef.current),
-              hr,
-              hrv: currentHrv > 0 ? currentHrv : null,
-              lfPower: lfHfShown ? lf : null,
-              hfPower: lfHfShown ? hf : null,
-              lfHfRatio: lfHfShown ? lfHfRatio : null,
-              lfHfValid,
-              lfHfStatus: currentLfHfStatus,
-              lfHfAcceptedRatio: lfHfResult?.acceptedRatio ?? null,
-              lfHfMaxArtifactGapSec: lfHfResult?.maxArtifactGapSec ?? null,
-              lfHfComputedAt: lfHfResult?.lfHfComputedAt ?? null,
-              rrMs: currentRrMs > 0 ? currentRrMs : null,
-              rrSource: currentRrSource,
-              ppiMs: currentRrSource === "ppi" ? currentRrMs : null,
+              hr: signalStale ? 0 : publishHr,
+              signalStale,
+              staleSinceMs,
+              hrv:
+                !signalStale && liveHrv > 0 ? liveHrv : null,
+              lfPower: liveLfHfShown ? liveLf : null,
+              hfPower: liveLfHfShown ? liveHf : null,
+              lfHfRatio: liveLfHfShown ? liveLfHfRatio : null,
+              lfHfValid: signalStale ? null : liveLfHfValid,
+              lfHfStatus: signalStale ? "unavailable" : liveLfHfStatus,
+              lfHfAcceptedRatio: signalStale
+                ? null
+                : liveLfHfResult?.acceptedRatio ?? null,
+              lfHfMaxArtifactGapSec: signalStale
+                ? null
+                : liveLfHfResult?.maxArtifactGapSec ?? null,
+              lfHfComputedAt: signalStale
+                ? null
+                : liveLfHfResult?.lfHfComputedAt ?? null,
+              rrMs:
+                !signalStale && liveRrMs > 0 ? liveRrMs : null,
+              rrSource: signalStale ? null : liveRrSource,
+              ppiMs:
+                !signalStale && liveRrSource === "ppi" ? liveRrMs : null,
               // ppisMs/rrsMs = corrected Y (compat); recompute needs tachogramSamples / ppiTimesSec.
               ppisMs:
-                currentRrSource === "ppi" && lfHfSeries.length > 0
-                  ? lfHfSeries
+                !signalStale &&
+                liveRrSource === "ppi" &&
+                liveLfHfSeries.length > 0
+                  ? liveLfHfSeries
                   : null,
               ppiSamples:
-                currentRrSource === "ppi" && ppiWindow.samples.length > 0
-                  ? ppiSamplesForExport(ppiWindow)
+                !signalStale &&
+                liveRrSource === "ppi" &&
+                livePpiWindow.samples.length > 0
+                  ? ppiSamplesForExport(livePpiWindow)
                   : null,
               tachogramSamples:
-                currentRrSource === "ppi" &&
-                lfHfResult != null &&
-                lfHfResult.tachogramSamples.length > 0
-                  ? lfHfResult.tachogramSamples
+                !signalStale &&
+                liveRrSource === "ppi" &&
+                liveLfHfResult != null &&
+                liveLfHfResult.tachogramSamples.length > 0
+                  ? liveLfHfResult.tachogramSamples
                   : null,
               ppiTimesSec:
-                currentRrSource === "ppi" &&
-                lfHfResult != null &&
-                lfHfResult.ppiTimesSec.length > 0
-                  ? [...lfHfResult.ppiTimesSec]
+                !signalStale &&
+                liveRrSource === "ppi" &&
+                liveLfHfResult != null &&
+                liveLfHfResult.ppiTimesSec.length > 0
+                  ? [...liveLfHfResult.ppiTimesSec]
                   : null,
               rawIncludedPpiMs:
-                currentRrSource === "ppi" &&
-                lfHfResult != null &&
-                lfHfResult.rawIncludedPpiMs.length > 0
-                  ? [...lfHfResult.rawIncludedPpiMs]
+                !signalStale &&
+                liveRrSource === "ppi" &&
+                liveLfHfResult != null &&
+                liveLfHfResult.rawIncludedPpiMs.length > 0
+                  ? [...liveLfHfResult.rawIncludedPpiMs]
                   : null,
               correctedPpiSeries:
-                currentRrSource === "ppi" && lfHfSeries.length > 0
-                  ? lfHfSeries
+                !signalStale &&
+                liveRrSource === "ppi" &&
+                liveLfHfSeries.length > 0
+                  ? liveLfHfSeries
                   : null,
               resampledSeries:
-                currentRrSource === "ppi" &&
-                lfHfResult != null &&
-                lfHfResult.resampledSeries.length > 0
-                  ? [...lfHfResult.resampledSeries]
+                !signalStale &&
+                liveRrSource === "ppi" &&
+                liveLfHfResult != null &&
+                liveLfHfResult.resampledSeries.length > 0
+                  ? [...liveLfHfResult.resampledSeries]
                   : null,
               includedIntervalDurationSec:
-                currentRrSource === "ppi"
-                  ? lfHfResult?.includedIntervalDurationSec ?? null
+                !signalStale && liveRrSource === "ppi"
+                  ? liveLfHfResult?.includedIntervalDurationSec ?? null
                   : null,
               tachogramDomainSec:
-                currentRrSource === "ppi"
-                  ? lfHfResult?.tachogramDomainSec ?? null
+                !signalStale && liveRrSource === "ppi"
+                  ? liveLfHfResult?.tachogramDomainSec ?? null
                   : null,
               resampledDurationSec:
-                currentRrSource === "ppi"
-                  ? lfHfResult?.resampledDurationSec ?? null
+                !signalStale && liveRrSource === "ppi"
+                  ? liveLfHfResult?.resampledDurationSec ?? null
                   : null,
               hrvWindowSeconds:
-                currentRrSource === "ppi"
-                  ? lfHfResult?.includedIntervalDurationSec ?? null
+                !signalStale && liveRrSource === "ppi"
+                  ? liveLfHfResult?.includedIntervalDurationSec ?? null
                   : null,
               hrvIntervalCount:
-                currentRrSource === "ppi" ? lfHfSeries.length : null,
+                !signalStale && liveRrSource === "ppi"
+                  ? liveLfHfSeries.length
+                  : null,
               hrvMethod:
-                currentRrSource === "ppi" ? HRV_PREPROCESSING_EXPORT.method : null,
+                !signalStale && liveRrSource === "ppi"
+                  ? HRV_PREPROCESSING_EXPORT.method
+                  : null,
               hrvSamplingHz:
-                currentRrSource === "ppi"
+                !signalStale && liveRrSource === "ppi"
                   ? HRV_PREPROCESSING_EXPORT.samplingHz
                   : null,
               livePublishHz:
-                currentRrSource === "ppi"
+                !signalStale && liveRrSource === "ppi"
                   ? HRV_PREPROCESSING_EXPORT.livePublishHz
                   : null,
               peakFrequencyHz:
-                currentRrSource === "ppi" && lfHfShown
-                  ? lfHfResult?.peakFrequencyHz ?? null
+                !signalStale && liveRrSource === "ppi" && liveLfHfShown
+                  ? liveLfHfResult?.peakFrequencyHz ?? null
                   : null,
               lfBandHz:
-                currentRrSource === "ppi"
+                !signalStale && liveRrSource === "ppi"
                   ? HRV_PREPROCESSING_EXPORT.lfBandHz
                   : null,
               hfBandHz:
-                currentRrSource === "ppi"
+                !signalStale && liveRrSource === "ppi"
                   ? HRV_PREPROCESSING_EXPORT.hfBandHz
                   : null,
               hrvPreprocessing:
-                currentRrSource === "ppi" ? HRV_PREPROCESSING_EXPORT : null,
-              skinTemperatureC: skinTemperatureCRef.current,
+                !signalStale && liveRrSource === "ppi"
+                  ? HRV_PREPROCESSING_EXPORT
+                  : null,
+              skinTemperatureC: signalStale
+                ? null
+                : skinTemperatureCRef.current,
               ...polarExtrasFromStash(
                 polarPpiExtrasRef.current,
                 polarHrExtrasRef.current
@@ -1257,20 +1344,35 @@ export function useMonitorSession() {
             }),
         userStateBiometric.deviceCode
       );
+      if (!ablyHeartRateLatchedRef.current) {
+        ablyHeartRateLatchedRef.current = true;
+        setAblyHeartRateLatched(true);
+      }
       bumpAblyPulse();
     }
 
     if (connectedDeviceIdRef.current) {
+      const fgHr = heartRateRef.current;
+      const fgHrv = hrvRef.current;
+      const fgLf = lfPowerRef.current;
+      const fgHf = hfPowerRef.current;
       polarSdk
         .updateMonitorForegroundService(
           deviceLabel,
-          hr,
-          currentHrv > 0 ? currentHrv : 0,
-          lf > 0 ? lf : 0,
-          hf > 0 ? hf : 0
+          fgHr,
+          fgHrv > 0 ? fgHrv : 0,
+          fgLf > 0 ? fgLf : 0,
+          fgHf > 0 ? fgHf : 0
         )
         .catch(() => {});
     }
+  };
+
+  const clearAblyHeartRateLatch = () => {
+    ablyHeartRateLatchedRef.current = false;
+    signalStaleSinceRef.current = 0;
+    setAblyHeartRateLatched(false);
+    ablyService.current?.resetSendStats();
   };
 
   const startBiometricSending = () => {
@@ -1437,6 +1539,7 @@ export function useMonitorSession() {
     lastValidPpiAtRef.current = 0;
     lastPpiEventAtRef.current = 0;
     cancelHrZeroClear();
+    clearAblyHeartRateLatch();
     console.log("Monitor: 🔄 Stato del dispositivo resettato");
   };
 
@@ -1628,54 +1731,113 @@ export function useMonitorSession() {
     }
   };
 
+  /**
+   * Dev / re-pair: drop Become session, keep BLE up, request a fresh 4-digit code
+   * via `launchAuthAndStream` (startDeviceAuth + poll).
+   */
+  const restartBecomePairingCode = async (deviceId: string) => {
+    console.log(`Monitor: 🔄 Restart pairing code for ${deviceId}`);
+    await authService.current.clearAuthData(deviceId);
+    // Also wipe any leftover sessions (Settings "clear all" path / legacy keys).
+    await authService.current.clearAuthData();
+    setAuthToken("");
+    setUserId(0);
+    setDeviceCode("");
+    setAuthCode("");
+    setAppId("");
+    clearAblyHeartRateLatch();
+    ablyService.current?.close();
+    if (pollInterval.current) {
+      clearInterval(pollInterval.current);
+      pollInterval.current = null;
+    }
+    launchGenRef.current += 1;
+    authStreamInFlightRef.current = false;
+    streamReadyDeviceRef.current = null;
+    authSessionDeviceRef.current = null;
+
+    const family = connectedFamilyRef.current === "muse" ? "muse" : "polar";
+    await launchAuthAndStream(
+      deviceId,
+      connectedDeviceNameRef.current || undefined,
+      family
+    );
+
+    // launchAuthAndStream sets authCode on success; surface a hard failure if not.
+    const codeAfter = useUserStore.getState().authCode;
+    const tokenAfter = useUserStore.getState().authToken;
+    if (!tokenAfter && !codeAfter) {
+      console.error("Monitor: ❌ Pairing restart produced no authCode");
+      Alert.alert(
+        "Codice non disponibile",
+        "Impossibile ottenere un nuovo codice a 4 cifre dal server. Controlla la rete / Developer Mode (staging) e riprova."
+      );
+    }
+  };
+
+  // Settings → Invalida token: if BLE is still up, fetch a fresh 4-digit code.
+  useEffect(() => {
+    if (authInvalidateNonce <= 0) {
+      return;
+    }
+    const deviceId = connectedDeviceIdRef.current;
+    if (!deviceId) {
+      return;
+    }
+    console.log(
+      `Monitor: 🔔 authInvalidateNonce=${authInvalidateNonce} → restart pairing`
+    );
+    void restartBecomePairingCode(deviceId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authInvalidateNonce]);
+
   const resetAuthSessionForDevice = () => {
+    if (!developerMode) {
+      return;
+    }
     if (!connectedDeviceId) {
+      setDeviceMenuOpen(false);
+      Alert.alert(
+        "Invalida token Become",
+        "Cancellare tutti i token Become salvati su questo telefono? Al prossimo collegamento dovrai inserire di nuovo il codice a 4 cifre.",
+        [
+          { text: "Annulla", style: "cancel" },
+          {
+            text: "Invalida",
+            style: "destructive",
+            onPress: () => {
+              void clearStoredAuth();
+            },
+          },
+        ]
+      );
       return;
     }
     const deviceId = connectedDeviceId;
-    const deviceLabel = connectedProduct?.displayName || connectedDeviceName || deviceId;
+    const deviceLabel =
+      connectedProduct?.displayName || connectedDeviceName || deviceId;
     setDeviceMenuOpen(false);
     Alert.alert(
-      "Reset auth token",
-      `Cancellare il token di autenticazione solo per ${deviceLabel} e disconnettere il dispositivo?`,
+      "Invalida token Become",
+      `Cancellare il token per ${deviceLabel} e mostrare un nuovo codice a 4 cifre? Il Bluetooth resta collegato.`,
       [
         { text: "Annulla", style: "cancel" },
         {
-          text: "Reset",
+          text: "Invalida",
           style: "destructive",
           onPress: async () => {
             try {
-              await authService.current.clearAuthData(deviceId);
-              setAuthToken("");
-              setUserId(0);
-              setDeviceCode("");
-              setAuthCode("");
-              console.log(`Monitor: 🗑️ Auth token resettato per device ${deviceId}`);
-
-              try {
-                await polarSdk.disconnectFromDevice(deviceId);
-              } catch (disconnectError: any) {
-                console.error("Monitor: Errore disconnessione dopo reset auth:", disconnectError?.message);
-              }
-
-              setConnectedDeviceId(null);
-              setConnectedDeviceIdInStore(null);
-              setConnectedDeviceName("");
-              setFoundDeviceName("");
-              setDeviceMenuOpen(false);
-              if (pollInterval.current) {
-                clearInterval(pollInterval.current);
-                pollInterval.current = null;
-              }
-              stopBiometricSending();
-              polarSdk.stopMonitorForegroundService().catch(() => {});
-              ablyService.current?.close();
-              resetDeviceState();
-
-              Alert.alert("Reset completato", `Token cancellato per ${deviceLabel}. Dispositivo disconnesso.`);
+              await restartBecomePairingCode(deviceId);
+              setNotification({
+                type: "success",
+                message: "Token invalidato — inserisci il nuovo codice sul PC",
+              });
             } catch (error: any) {
               console.error("Monitor: Errore reset auth token:", error?.message);
-              Alert.alert("Errore", error?.message || "Impossibile resettare il token");
+              Alert.alert(
+                "Errore",
+                error?.message || "Impossibile resettare il token"
+              );
             }
           },
         },
@@ -1692,7 +1854,10 @@ export function useMonitorSession() {
       return "Disconnesso";
     }
     if (ablyStatus === ConnectionStatus.CONNECTED) {
-      if (heartRate > 0) {
+      if (ablyHeartRateLatched && (isSignalLost || heartRate <= 0)) {
+        return "Connesso · segnale perso";
+      }
+      if (ablyHeartRateLatched || heartRate > 0) {
         return "Connesso";
       }
       return "In attesa dati";
@@ -1711,9 +1876,9 @@ export function useMonitorSession() {
   };
 
   const isStreamingLive =
+    ablyHeartRateLatched &&
     !!connectedDeviceId &&
-    ablyStatus === ConnectionStatus.CONNECTED &&
-    heartRate > 0;
+    ablyStatus === ConnectionStatus.CONNECTED;
 
   const getDisconnectButtonLabel = () => {
     if (isMuseConnected) {
@@ -1745,8 +1910,10 @@ export function useMonitorSession() {
 
     console.log("Monitor: 🔵 AblyService inizializzato:", !!ablyService.current);
 
+    ablyService.current.setSendStatsListener(setAblySendStats);
     ablyService.current.setEndSessionHandler((payload) => {
       console.log("Monitor: 📥 Ably endSession", payload);
+      clearAblyHeartRateLatch();
       handleFlushTrack(payload?.sessionId ?? null);
     });
 
@@ -1932,6 +2099,12 @@ export function useMonitorSession() {
             ? ` contact=${data.contactDetected ? "yes" : "no"}`
             : "")
       );
+
+      // Screen off / app in background: the 1 Hz setInterval is throttled (30 ticks in
+      // ~70 s) while native BLE events keep arriving. Also flush from the HR event
+      // (after this handler's synchronous body); the 1 Hz guard in flush keeps one
+      // publish per second whichever trigger fires first.
+      Promise.resolve().then(flushPolarLiveMetrics);
 
       polarHrExtrasRef.current = stashPolarHrExtras(data);
       syncPolarSignalQualityUi();
@@ -2229,6 +2402,7 @@ export function useMonitorSession() {
     appId,
     ablyStatus,
     ablyPulseTick,
+    ablySendStats,
     isStreamingLive,
 
     // Metrics - Polar
@@ -2292,7 +2466,8 @@ export function useMonitorSession() {
     getDeviceStatusText,
     getDisconnectButtonLabel,
 
-    // Debug mode
+    // Debug / developer
     debugMode,
+    developerMode,
   };
 }
