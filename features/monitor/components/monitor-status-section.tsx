@@ -6,6 +6,8 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useTheme } from "@/contexts/ThemeContext";
+import type { HrvAnalysisMode } from "@/features/monitor/hooks/hrv-analysis-mode";
+import { hrvProgressPercent } from "@/features/monitor/hooks/hrv-analysis-mode";
 import {
   Activity,
   AppWindow,
@@ -14,12 +16,13 @@ import {
   ChevronUp,
   HardDrive,
   Hash,
+  Heart,
   Monitor,
   User,
   Watch,
 } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
-import { Animated, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Animated, TouchableOpacity, View } from "react-native";
 import { monitorStyles } from "./monitor-styles";
 
 interface MonitorStatusSectionProps {
@@ -36,6 +39,14 @@ interface MonitorStatusSectionProps {
   showRawEcgCards: boolean;
   authToken: string;
   authCode: string;
+  /** When Polar metrics are shown and HRV is still filling. */
+  showHrvLoading?: boolean;
+  hrvAnalysisMode?: HrvAnalysisMode;
+  hrvProgressLabel?: string;
+  hrvWallElapsedLabel?: string;
+  ppiWindowLength?: number;
+  hrvAcceptedDurationMs?: number;
+  isH10Connected?: boolean;
 }
 
 function offlineTrackLabel(
@@ -66,12 +77,42 @@ export function MonitorStatusSection({
   showRawEcgCards,
   authToken,
   authCode,
+  showHrvLoading = false,
+  hrvAnalysisMode = "client",
+  hrvProgressLabel = "",
+  hrvWallElapsedLabel = "",
+  ppiWindowLength = 0,
+  hrvAcceptedDurationMs = 0,
+  isH10Connected = false,
 }: MonitorStatusSectionProps) {
   const { theme } = useTheme();
   const tint = Colors[theme].tint;
   const border = Colors[theme].border;
   const [detailsOpen, setDetailsOpen] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const progressPct = hrvProgressPercent(
+    hrvAnalysisMode,
+    ppiWindowLength,
+    hrvAcceptedDurationMs
+  );
+  const hrvLoadingTitle =
+    hrvAnalysisMode === "clinical"
+      ? "Calcolo HRV (estesa)…"
+      : "Calcolo HRV…";
+  const hrvLoadingBody =
+    hrvAnalysisMode === "clinical"
+      ? isH10Connected
+        ? "Attendiamo ~5 minuti di RR ECG puliti per RMSSD e LF/HF. Resta fermo."
+        : "Attendiamo ~5 minuti di battiti puliti (PPI) per RMSSD e LF/HF. Resta fermo, sensore a contatto."
+      : isH10Connected
+        ? "Attendiamo 30 intervalli RR ECG puliti per calcolare RMSSD e LF/HF."
+        : "Attendiamo 30 battiti puliti per calcolare RMSSD e LF/HF. Resta fermo, sensore a contatto.";
+  const hrvLoadingMeta =
+    hrvAnalysisMode === "clinical"
+      ? `Segnale utile ${hrvProgressLabel || "00:00 / 05:00"}${
+          hrvWallElapsedLabel ? ` · trascorsi ${hrvWallElapsedLabel}` : ""
+        }`
+      : `Battiti accettati ${hrvProgressLabel || `${ppiWindowLength}/30`}`;
 
   useEffect(() => {
     if (!isStreamingLive || ablyPulseTick <= 0) {
@@ -129,6 +170,51 @@ export function MonitorStatusSection({
             {streamingStatusText}
           </ThemedText>
         </View>
+
+        {showHrvLoading && (
+          <View
+            style={monitorStyles.hrvLoadingBanner}
+            accessibilityRole="progressbar"
+            accessibilityValue={{ min: 0, max: 100, now: progressPct }}
+          >
+            <View style={monitorStyles.hrvLoadingHeader}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}
+              >
+                <Heart size={16} color={tint} />
+                <ActivityIndicator size="small" color={tint} />
+                <ThemedText style={monitorStyles.hrvLoadingTitle} numberOfLines={1}>
+                  {hrvLoadingTitle}
+                </ThemedText>
+              </View>
+              <ThemedText style={[monitorStyles.hrvLoadingPercent, { color: tint }]}>
+                {progressPct}%
+              </ThemedText>
+            </View>
+            <ThemedText style={monitorStyles.hrvLoadingBody}>
+              {hrvLoadingBody}
+            </ThemedText>
+            <ThemedText style={monitorStyles.hrvLoadingMeta}>
+              {hrvLoadingMeta}
+            </ThemedText>
+            <View
+              style={[
+                monitorStyles.hrvProgressTrack,
+                { backgroundColor: tint + "22" },
+              ]}
+            >
+              <View
+                style={[
+                  monitorStyles.hrvProgressFill,
+                  {
+                    width: `${progressPct}%`,
+                    backgroundColor: tint,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+        )}
 
         <TouchableOpacity
           style={monitorStyles.statusAccordionHeader}

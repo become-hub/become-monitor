@@ -160,6 +160,15 @@ export interface LocaleStrings {
         light: string;
         dark: string;
         system: string;
+        hrvMode: string;
+        hrvModeDescription: string;
+        hrvModeLive: string;
+        hrvModeLiveHint: string;
+        hrvModeExtended: string;
+        hrvModeExtendedHint: string;
+        hrvModeExtendedUnavailable: string;
+        hrvModeFootnote: string;
+        hrvModeLockedHint: string;
         notifications: string;
         notificationsDescription: string;
         enableNotifications: string;
@@ -334,6 +343,18 @@ export const translations: Record<Language, LocaleStrings> = {
             light: 'Chiaro',
             dark: 'Scuro',
             system: 'Sistema',
+            hrvMode: 'Analisi HRV',
+            hrvModeDescription:
+                'Scegli quanto velocemente vedere le metriche di variabilità cardiaca.',
+            hrvModeLive: 'Live',
+            hrvModeLiveHint: 'Risultati subito',
+            hrvModeExtended: 'Estesa',
+            hrvModeExtendedHint: 'Più stabile, ~5 min',
+            hrvModeExtendedUnavailable: 'Compatibile solo con H10',
+            hrvModeFootnote:
+                'Oggi è disponibile solo Live. Estesa arriverà con Polar H10.',
+            hrvModeLockedHint:
+                'Sensore collegato: per cambiare modalità, scollegalo prima.',
             notifications: 'Notifiche',
             notificationsDescription: 'Gestisci le notifiche dell\'app',
             enableNotifications: 'Abilita Notifiche',
@@ -506,6 +527,18 @@ export const translations: Record<Language, LocaleStrings> = {
             light: 'Light',
             dark: 'Dark',
             system: 'System',
+            hrvMode: 'HRV analysis',
+            hrvModeDescription:
+                'Choose how quickly heart-rate variability metrics appear.',
+            hrvModeLive: 'Live',
+            hrvModeLiveHint: 'Results right away',
+            hrvModeExtended: 'Extended',
+            hrvModeExtendedHint: 'More stable, ~5 min',
+            hrvModeExtendedUnavailable: 'H10 only',
+            hrvModeFootnote:
+                'Only Live is available today. Extended will come with Polar H10.',
+            hrvModeLockedHint:
+                'Sensor connected: disconnect first to change mode.',
             notifications: 'Notifications',
             notificationsDescription: 'Manage app notifications',
             enableNotifications: 'Enable Notifications',

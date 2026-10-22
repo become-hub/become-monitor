@@ -7,10 +7,12 @@ import { useLocale } from "@/hooks/use-locale";
 import { polarSdk } from "@/features/devices/polar/polar-ble-sdk";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
+  Activity,
   Bluetooth,
   CheckCircle,
   Globe,
   Info,
+  Lock,
   Monitor,
   Moon,
   Sun,
@@ -31,8 +33,12 @@ import { APP_VERSION } from "@/constants/app-version";
 export default function SettingsScreen() {
   const { theme, themePreference, updateThemePreference } = useTheme();
   const { strings } = useLocale();
-  const { debugMode, setDebugMode, developerMode, setDeveloperMode } =
-    useSettingsStore();
+  const {
+    debugMode,
+    setDebugMode,
+    developerMode,
+    setDeveloperMode,
+  } = useSettingsStore();
   const [autoConnect, setAutoConnect] = useState(true);
   const [dataSync, setDataSync] = useState(true);
   const [localDebugMode, setLocalDebugMode] = useState(debugMode);
@@ -374,6 +380,103 @@ export default function SettingsScreen() {
           </ThemedView>
         </ThemedView>
 
+        {/* HRV analysis mode */}
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle" style={styles.sectionTitle}>
+            {strings.settings.hrvMode}
+          </ThemedText>
+
+          <ThemedView
+            style={[
+              styles.liveRateCard,
+              { borderColor: Colors[theme].border },
+            ]}
+          >
+            <View style={styles.liveRateHeader}>
+              <View
+                style={[
+                  styles.liveRateIconWrap,
+                  {
+                    backgroundColor:
+                      theme === "dark"
+                        ? "rgba(255,255,255,0.08)"
+                        : "rgba(10,126,164,0.1)",
+                  },
+                ]}
+              >
+                <Activity size={18} color={Colors[theme].tint} />
+              </View>
+              <ThemedText style={[styles.settingDescription, { flex: 1 }]}>
+                {strings.settings.hrvModeDescription}
+              </ThemedText>
+            </View>
+
+            <View
+              style={[
+                styles.liveRateSegmentTrack,
+                {
+                  backgroundColor:
+                    theme === "dark"
+                      ? "rgba(255,255,255,0.06)"
+                      : "rgba(0,0,0,0.04)",
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.liveRateSegment,
+                  styles.liveRateSegmentSelected,
+                  {
+                    backgroundColor:
+                      theme === "dark" ? "#1f2933" : "#ffffff",
+                    borderColor: Colors[theme].tint,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: true }}
+                accessibilityLabel={strings.settings.hrvModeLive}
+              >
+                <ThemedText
+                  style={[
+                    styles.hrvModeTitle,
+                    { color: Colors[theme].tint },
+                  ]}
+                >
+                  {strings.settings.hrvModeLive}
+                </ThemedText>
+                <ThemedText style={styles.liveRateHint}>
+                  {strings.settings.hrvModeLiveHint}
+                </ThemedText>
+              </View>
+
+              <View
+                style={[styles.liveRateSegment, styles.hrvModeSegmentDisabled]}
+                accessibilityState={{ disabled: true }}
+                accessibilityLabel={`${strings.settings.hrvModeExtended}, ${strings.settings.hrvModeExtendedUnavailable}`}
+              >
+                <View style={styles.hrvModeUnavailableBadge}>
+                  <Lock size={11} color={Colors[theme].icon} />
+                  <ThemedText style={styles.hrvModeUnavailableText}>
+                    {strings.settings.hrvModeExtendedUnavailable}
+                  </ThemedText>
+                </View>
+                <ThemedText
+                  style={[styles.hrvModeTitle, styles.hrvModeTitleMuted]}
+                >
+                  {strings.settings.hrvModeExtended}
+                </ThemedText>
+                <ThemedText style={[styles.liveRateHint, styles.hrvModeTitleMuted]}>
+                  {strings.settings.hrvModeExtendedHint}
+                </ThemedText>
+              </View>
+            </View>
+
+            <ThemedText style={styles.hrvModeFootnote}>
+              {strings.settings.hrvModeFootnote}
+            </ThemedText>
+          </ThemedView>
+        </ThemedView>
+
         {/* Theme Settings */}
         <ThemedView style={styles.section}>
           <ThemedText type="subtitle" style={styles.sectionTitle}>
@@ -705,6 +808,86 @@ const styles = StyleSheet.create({
   },
   themeOptionTextSelected: {
     fontWeight: "600",
+  },
+  liveRateCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    gap: 16,
+  },
+  liveRateHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  liveRateIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveRateSegmentTrack: {
+    flexDirection: "row",
+    borderRadius: 14,
+    padding: 4,
+    gap: 4,
+  },
+  liveRateSegment: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "transparent",
+    minHeight: 96,
+  },
+  liveRateSegmentSelected: {
+    shadowColor: "#0a7ea4",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  liveRateHint: {
+    fontSize: 12,
+    opacity: 0.65,
+    marginTop: 8,
+    textAlign: "center",
+  },
+  hrvModeTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  hrvModeFootnote: {
+    fontSize: 12,
+    opacity: 0.65,
+    lineHeight: 17,
+  },
+  hrvModeSegmentDisabled: {
+    opacity: 0.55,
+  },
+  hrvModeTitleMuted: {
+    opacity: 0.75,
+  },
+  hrvModeUnavailableBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: "rgba(127,127,127,0.16)",
+    marginBottom: 6,
+  },
+  hrvModeUnavailableText: {
+    fontSize: 11,
+    fontWeight: "600",
+    opacity: 0.85,
+    textAlign: "center",
   },
   currentThemeText: {
     fontSize: 14,

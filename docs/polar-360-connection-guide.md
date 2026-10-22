@@ -69,7 +69,17 @@ Se i LED mostrano l'animazione di "Waiting for First time use", è normale: Augm
 
 ### Live vs flush a fine sessione (spike)
 
-- **Live**: HR / PPI / RR / HRV (e skin temp su Loop) restano in streaming verso Ably (`heartRate`) per la visibilità in Hub.
+- **Live**: le card Monitor (HR / RR / HRV / LF / HF, skin temp su Loop) si aggiornano a **1 Hz** appena parte lo streaming locale, anche **prima** del login Become. Ably (`heartRate`) parte solo dopo auth **e** quando HRV è pronta (Live: finestra da 30 campioni; finché è in caricamento non si pubblica). I campioni PPI grezzi restano sul device/track; Contatto / Errore PPI / Movimento restano live.
+- **Analisi HRV (Settings)**: **Live** (unica modalità selezionabile oggi) e **Estesa** (disabilitata: compatibile solo con Polar H10, non selezionabile). Estesa resta nel codice per epoch da 5 min / H10; non è certificazione medicale.
+
+| | Live | Estesa |
+|---|---|---|
+| Finestra | 30 intervalli RR/PPI (rolling) | epoch **5 minuti** di intervalli accettati |
+| Pubblicazione HRV/LF/HF | a finestra piena, continua | solo a epoch valida; poi riparte una nuova epoch |
+| 360 / Loop (PPI) | `errorEstimate` ≤ 10 ms | come Live **e** senza `blocker` (movimento) |
+| H10 (RR ECG) | tutti gli RR in 300–2000 ms | stessa accettazione, epoch 5 min |
+| Fallback `hr_derived` (60000/HR) | solo se lo stream PPI è morto | **mai** |
+| Timeout | — | se in **8 min** wall-clock non si completa l’epoch pulita → epoch non valida e ripartenza |
 - **Tracciato intero**: a fine sessione Hub pubblica su `private:{userId}` l’evento Ably **`endSession`** (payload opzionale `{ "sessionId": "..." }`). L’app:
   1. ferma l’offline recording PPI, scarica il record dal Polar (o usa il buffer live)
   2. costruisce un payload grezzo `ppiTrack` (sample con `ppiMs`/`hr`, `rrMs`, `rrSource`)
@@ -92,6 +102,15 @@ Esempio payload Ably live `heartRate` (360 / Loop):
   "rrSource": "ppi",
   "ppiMs": 812,
   "skinTemperatureC": 33.4,
+  "contactStatus": true,
+  "contactStatusSupported": true,
+  "errorEstimate": 5,
+  "blocker": false,
+  "ppgQuality": null,
+  "correctedHr": null,
+  "rrAvailable": false,
+  "rrsMs": null,
+  "appVersion": "v1.2.2",
   "type": "heartRate",
   "code": "deviceCode",
   "timestamp": "ISO"
@@ -105,7 +124,15 @@ Note:
 - `rrSource` è `"ppi"` (preferito), `"hr_derived"` in fallback, o `"ecg_rr"` su dispositivi ECG.
 - `ppiMs` è valorizzato solo quando `rrSource === "ppi"`, altrimenti `null`.
 - `skinTemperatureC` è valorizzato **solo su Loop Gen 2** (stream SDK); su Polar 360 è sempre `null`.
-- `hrv` / `lfPower` / `hfPower` restano `null` finché non ci sono 30 campioni RR/PPI.
+- Finché HRV non è pronta non parte alcun `heartRate` su Ably. Quando pubbica, `hrv` / `lfPower` / `hfPower` sono valorizzati (Live: dopo 30 campioni; Estesa: dopo epoch da 5 min).
+- Salti successivi ≥ 200 ms tra intervalli RR/PPI non entrano in LF/HF (stesso limite dell’RMSSD): il posto in finestra viene interpolato, altrimenti lo spettro salirebbe a migliaia di ms² con un HRV ancora normale.
+- Su **360 / Loop**, HRV / `lfPower` / `hfPower` usano solo PPI con `errorEstimate` ≤ 10 ms (in Estesa anche senza `blocker`). Sopra 10 ms il campione non entra e restano all’ultimo valore sano (Live) o l’epoch non avanza (Estesa). La card **Errore PPI** diventa rossa solo con `errorEstimate` > 30 ms.
+- Su **H10**, la sorgente è RR ECG (`rrSource: "ecg_rr"`); non c’è gate `errorEstimate` / `blocker`.
+- `contactStatus` / `contactStatusSupported` preferiscono il skin contact dello stream **PPI**; se il PPI non lo supporta, usano la notifica BLE Heart Rate.
+- `errorEstimate` (ms) e `blocker` arrivano dal campione PPI (qualità ottica utile su 360/Loop).
+- `ppgQuality`, `correctedHr`, `rrAvailable`, `rrsMs` arrivano dalla notifica BLE Heart Rate. Su 360/Loop con PPI attivo sono spesso `null` / `false` / vuoti: il servizio HR standard non porta qualità PPG né HR corretto, e gli RR nativi restano sul canale PPI. L’app **non** avvia `startHrStreaming` in parallelo al PPI.
+- `appVersion` è la versione marketing dell’app (`v` + valore da `app.json` / Expo config).
+- In Monitor, sotto le card principali, compaiono card compatte **Contatto** / **Errore PPI** / **Movimento**. Senza contatto pelle (o con `errorEstimate` > 30 ms) compare l’alert rosso **«Sistema bene il bracciale»**; con `blocker` (movimento) compare un alert distinto ambra **«Resta fermo»**.
 
 Esempio payload POST:
 
@@ -190,7 +217,7 @@ Fonte: profilo Polar BLE SDK (360 / Loop). Tabella allineata all’accordion in-
 | PPI / PP interval | Sì (da PPG) | Sì | Base HRV time-domain | Sì |
 | RR (ms) | Da PPI o `60000/HR` fallback | Idem | `rrSource`: `ppi`, `hr_derived` | Sì |
 | HRV (RMSSD) | Derivata da RR/PPI | Derivata da RR/PPI | Calcolo in-app | Sì |
-| LF / HF | Da finestra RR | Da finestra RR | Spettrale RR | Sì |
+| LF / HF | Da finestra RR | Da finestra RR | Spettrale RR; salti ≥ 200 ms interpolati | Sì |
 | PPG grezzo | Sì (SDK) | Stesso profilo SDK | Offline / live track | Sì |
 | Accelerometro | Sì | Sì | Fuori scope UI | No |
 | Temperatura cute | No | Sì | Solo Loop Gen 2 | Sì (solo Loop) |

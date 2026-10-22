@@ -2,8 +2,29 @@
  * Contract tests for Polar Ably heartRate live payload (360 / Loop).
  */
 
+import { APP_VERSION } from "@/constants/app-version";
 import { resolveRrInterval } from "../rr-interval";
-import { buildPolarAblyHeartRatePayload } from "../polar-ably-payload";
+import {
+  buildPolarAblyHeartRatePayload,
+  polarExtrasFromStash,
+  resolvePolarContact,
+  stashPolarHrExtras,
+  stashPolarPpiExtras,
+} from "../polar-ably-payload";
+
+const expectedAppVersion = `v${APP_VERSION}`;
+
+const nullExtras = {
+  contactStatus: null,
+  contactStatusSupported: null,
+  errorEstimate: null,
+  blocker: null,
+  ppgQuality: null,
+  correctedHr: null,
+  rrAvailable: null,
+  rrsMs: null,
+  appVersion: expectedAppVersion,
+} as const;
 
 describe("buildPolarAblyHeartRatePayload", () => {
   describe("PPI path (Polar 360 / Loop)", () => {
@@ -35,6 +56,7 @@ describe("buildPolarAblyHeartRatePayload", () => {
         rrSource: "ppi",
         ppiMs: 812,
         skinTemperatureC: null,
+        ...nullExtras,
       });
       expect(payload).not.toHaveProperty("heartRate");
       expect(payload).not.toHaveProperty("date");
@@ -253,8 +275,77 @@ describe("buildPolarAblyHeartRatePayload", () => {
     });
   });
 
+  describe("segnali extra (contatto, qualità, appVersion)", () => {
+    it("propaga campi PPI + HR e appVersion", () => {
+      const payload = buildPolarAblyHeartRatePayload({
+        deviceId: "360",
+        deviceModel: "polar_360",
+        hr: 74,
+        rrMs: 812,
+        rrSource: "ppi",
+        ppiMs: 812,
+        contactStatus: true,
+        contactStatusSupported: true,
+        errorEstimate: 8,
+        blocker: false,
+        ppgQuality: 90,
+        correctedHr: 73,
+        rrAvailable: false,
+        rrsMs: null,
+      });
+
+      expect(payload.contactStatus).toBe(true);
+      expect(payload.contactStatusSupported).toBe(true);
+      expect(payload.errorEstimate).toBe(8);
+      expect(payload.blocker).toBe(false);
+      expect(payload.ppgQuality).toBe(90);
+      expect(payload.correctedHr).toBe(73);
+      expect(payload.rrAvailable).toBe(false);
+      expect(payload.rrsMs).toBeNull();
+      expect(payload.appVersion).toBe(expectedAppVersion);
+    });
+
+    it("azzera ppgQuality/correctedHr a 0 e rrsMs vuoto", () => {
+      const payload = buildPolarAblyHeartRatePayload({
+        deviceId: "360",
+        deviceModel: "polar_360",
+        hr: 70,
+        ppgQuality: 0,
+        correctedHr: 0,
+        rrsMs: [],
+      });
+
+      expect(payload.ppgQuality).toBeNull();
+      expect(payload.correctedHr).toBeNull();
+      expect(payload.rrsMs).toBeNull();
+    });
+
+    it("mantiene errorEstimate=0 (qualità PPI ottima)", () => {
+      expect(
+        buildPolarAblyHeartRatePayload({
+          deviceId: "360",
+          deviceModel: "polar_360",
+          hr: 70,
+          errorEstimate: 0,
+        }).errorEstimate
+      ).toBe(0);
+    });
+
+    it("copia rrsMs senza mutare l'input", () => {
+      const rrsMs = [820, 810];
+      const payload = buildPolarAblyHeartRatePayload({
+        deviceId: "h10",
+        deviceModel: "polar_h10",
+        hr: 72,
+        rrsMs,
+      });
+      expect(payload.rrsMs).toEqual([820, 810]);
+      expect(payload.rrsMs).not.toBe(rrsMs);
+    });
+  });
+
   describe("contratto live completo Loop", () => {
-    it("produce il shape documentato per Hub (Loop + PPI + skin, senza date)", () => {
+    it("produce il shape documentato per Hub (Loop + PPI + skin + extras, senza date)", () => {
       const payload = buildPolarAblyHeartRatePayload({
         deviceId: "loop-1",
         deviceModel: "polar_loop",
@@ -266,19 +357,36 @@ describe("buildPolarAblyHeartRatePayload", () => {
         rrSource: "ppi",
         ppiMs: 812,
         skinTemperatureC: 33.4,
+        contactStatus: true,
+        contactStatusSupported: true,
+        errorEstimate: 5,
+        blocker: false,
+        ppgQuality: null,
+        correctedHr: null,
+        rrAvailable: false,
+        rrsMs: null,
       });
 
       expect(Object.keys(payload).sort()).toEqual(
         [
+          "appVersion",
+          "blocker",
+          "contactStatus",
+          "contactStatusSupported",
+          "correctedHr",
           "deviceId",
           "deviceModel",
+          "errorEstimate",
           "hfPower",
           "hr",
           "hrv",
           "lfPower",
+          "ppgQuality",
           "ppiMs",
+          "rrAvailable",
           "rrMs",
           "rrSource",
+          "rrsMs",
           "skinTemperatureC",
         ].sort()
       );
@@ -294,8 +402,109 @@ describe("buildPolarAblyHeartRatePayload", () => {
         rrSource: "ppi",
         ppiMs: 812,
         skinTemperatureC: 33.4,
+        contactStatus: true,
+        contactStatusSupported: true,
+        errorEstimate: 5,
+        blocker: false,
+        ppgQuality: null,
+        correctedHr: null,
+        rrAvailable: false,
+        rrsMs: null,
+        appVersion: expectedAppVersion,
       });
       expect(payload).not.toHaveProperty("date");
+    });
+  });
+});
+
+describe("resolvePolarContact", () => {
+  it("preferisce contatto PPI quando skinContactSupported", () => {
+    expect(
+      resolvePolarContact(
+        { skinContactStatus: false, skinContactSupported: true },
+        { contactDetected: true, contactSupported: true }
+      )
+    ).toEqual({
+      contactStatus: false,
+      contactStatusSupported: true,
+    });
+  });
+
+  it("usa contatto HR se PPI non supporta skin contact", () => {
+    expect(
+      resolvePolarContact(
+        { skinContactStatus: null, skinContactSupported: false },
+        { contactDetected: true, contactSupported: true }
+      )
+    ).toEqual({
+      contactStatus: true,
+      contactStatusSupported: true,
+    });
+  });
+});
+
+describe("stash + polarExtrasFromStash", () => {
+  it("stashPolarPpiExtras e stashPolarHrExtras normalizzano i valori", () => {
+    expect(
+      stashPolarPpiExtras({
+        errorEstimate: 12,
+        blocker: true,
+        skinContactStatus: true,
+        skinContactSupported: true,
+      })
+    ).toEqual({
+      errorEstimate: 12,
+      blocker: true,
+      skinContactStatus: true,
+      skinContactSupported: true,
+    });
+
+    expect(
+      stashPolarHrExtras({
+        ppgQuality: 0,
+        correctedHr: 71,
+        rrAvailable: true,
+        rrsMs: [800],
+        contactDetected: true,
+        contactSupported: true,
+      })
+    ).toEqual({
+      ppgQuality: null,
+      correctedHr: 71,
+      rrAvailable: true,
+      rrsMs: [800],
+      contactDetected: true,
+      contactSupported: true,
+    });
+  });
+
+  it("polarExtrasFromStash unisce PPI + HR con priorità contatto PPI", () => {
+    const extras = polarExtrasFromStash(
+      stashPolarPpiExtras({
+        errorEstimate: 4,
+        blocker: false,
+        skinContactStatus: true,
+        skinContactSupported: true,
+      }),
+      stashPolarHrExtras({
+        ppgQuality: 88,
+        correctedHr: 0,
+        rrAvailable: false,
+        rrsMs: [],
+        contactDetected: false,
+        contactSupported: true,
+      })
+    );
+
+    expect(extras).toEqual({
+      contactStatus: true,
+      contactStatusSupported: true,
+      errorEstimate: 4,
+      blocker: false,
+      ppgQuality: 88,
+      correctedHr: null,
+      rrAvailable: false,
+      rrsMs: null,
     });
   });
 });

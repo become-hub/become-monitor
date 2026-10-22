@@ -4,6 +4,21 @@ Tutte le modifiche rilevanti a Augmented Monitor.
 
 Il formato si ispira a [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [1.2.3] — Qualità segnale Polar e HRV Live/Estesa
+
+### Added
+- Qualità segnale Polar in Monitor: contatto pelle, stima errore PPI e movimento (blocker)
+- Banner indosso sotto le card (contatto debole / resta fermo)
+- Modalità analisi HRV in Settings: **Live** (30 battiti) e **Estesa** (epoch ~5 min; UI solo H10, bloccata a dispositivo connesso)
+- Progress HRV nel pannello Streaming: spiegazione, barra e % mentre si riempie la finestra
+- Versione app nel payload Ably
+
+### Changed
+- Calcolo HRV: gate qualità PPI e sostituzione salti anomali prima di RMSSD e LF/HF
+- Pubblicazione Ably `heartRate` solo dopo autenticazione e HRV pronto (`hrv > 0`)
+- Griglia metriche Polar con note PPI e feedback progresso Live/Estesa
+- Rimossi i toggle live rate 1 Hz / 4 Hz dalla UI Settings
+
 ## [1.2.2] — Polar live PPI/HRV
 
 ### Fixed

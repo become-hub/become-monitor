@@ -16,9 +16,15 @@ export interface PolarDeviceInfo {
 export interface PolarHrData {
   deviceId: string;
   hr: number;
+  /** Corrected real-time HR; 0 if unavailable from the BLE HR frame. */
+  correctedHr?: number;
+  /** PPG signal quality of real-time HR (0–100); 0 if unavailable. */
+  ppgQuality?: number;
+  /** True when RR data is present in this HR sample. */
+  rrAvailable?: boolean;
   contactDetected: boolean;
   contactSupported: boolean;
-  /** Native RR intervals (ms) from ECG — H10 via startHrStreaming. */
+  /** Native RR intervals (ms) — H10 via startHrStreaming; often empty on 360/Loop. */
   rrsMs?: number[];
 }
 
@@ -37,6 +43,10 @@ export interface PolarPpiSample {
     hr: number;
     blocker: boolean;
     errorEstimate: number;
+    /** False when the device detects poor or no skin contact. */
+    skinContactStatus?: boolean;
+    /** True when the skin-contact feature is supported on this sample. */
+    skinContactSupported?: boolean;
 }
 
 export interface PolarPpiData {

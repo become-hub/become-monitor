@@ -138,6 +138,47 @@ export const monitorStyles = StyleSheet.create({
     fontWeight: "500",
     textAlign: "right",
   },
+  hrvLoadingBanner: {
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(0,0,0,0.12)",
+    gap: 8,
+  },
+  hrvLoadingHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  hrvLoadingTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  hrvLoadingPercent: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  hrvLoadingBody: {
+    fontSize: 12,
+    opacity: 0.7,
+    lineHeight: 17,
+  },
+  hrvLoadingMeta: {
+    fontSize: 12,
+    fontWeight: "500",
+    opacity: 0.85,
+  },
+  hrvProgressTrack: {
+    height: 6,
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  hrvProgressFill: {
+    height: "100%",
+    borderRadius: 3,
+  },
   authCodeContainer: {
     marginTop: 12,
     padding: 14,
@@ -263,11 +304,19 @@ export const monitorStyles = StyleSheet.create({
     borderWidth: 1,
     alignItems: "center",
   },
+  metricCardCompact: {
+    padding: 10,
+    borderRadius: 8,
+  },
   metricCardFull: {
     flex: 1,
   },
   metricCardHighlight: {
     borderWidth: 2,
+  },
+  metricCardDanger: {
+    borderWidth: 1.5,
+    backgroundColor: "rgba(239, 68, 68, 0.06)",
   },
   metricIconContainer: {
     marginBottom: 8,
@@ -275,6 +324,45 @@ export const monitorStyles = StyleSheet.create({
     height: 40,
     alignItems: "center",
     justifyContent: "center",
+  },
+  metricIconContainerCompact: {
+    marginBottom: 4,
+    width: 28,
+    height: 28,
+  },
+  wearWarningBanner: {
+    borderWidth: 1.5,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 6,
+    marginBottom: 12,
+  },
+  wearWarningBannerContact: {
+    borderColor: "#EF4444",
+    backgroundColor: "rgba(239, 68, 68, 0.08)",
+  },
+  wearWarningBannerMotion: {
+    borderColor: "#F59E0B",
+    backgroundColor: "rgba(245, 158, 11, 0.12)",
+  },
+  wearWarningTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  wearWarningTitleContact: {
+    color: "#EF4444",
+  },
+  wearWarningTitleMotion: {
+    color: "#D97706",
+  },
+  wearWarningBody: {
+    fontSize: 13,
+    lineHeight: 18,
+    opacity: 0.85,
+  },
+  wearWarningStack: {
+    gap: 0,
   },
   metricIconPulseHalo: {
     position: "absolute",
@@ -295,16 +383,33 @@ export const monitorStyles = StyleSheet.create({
     fontWeight: "500",
     textAlign: "center",
   },
+  metricLabelCompact: {
+    fontSize: 11,
+    marginBottom: 4,
+  },
   metricValue: {
     fontSize: 32,
     fontWeight: "600",
     marginBottom: 4,
     textAlign: "center",
   },
+  metricValueCompact: {
+    fontSize: 18,
+    marginBottom: 2,
+  },
   metricUnit: {
     fontSize: 14,
     opacity: 0.6,
     fontWeight: "400",
+    textAlign: "center",
+  },
+  metricUnitCompact: {
+    fontSize: 11,
+  },
+  metricFootnote: {
+    fontSize: 12,
+    lineHeight: 16,
+    opacity: 0.65,
     textAlign: "center",
   },
   controlsSection: {

@@ -311,6 +311,8 @@ class PolarBleModule @JvmOverloads constructor(
                     putInt("hr", sample.hr)
                     putBoolean("blocker", sample.blockerBit)
                     putInt("errorEstimate", sample.errorEstimate)
+                    putBoolean("skinContactStatus", sample.skinContactStatus)
+                    putBoolean("skinContactSupported", sample.skinContactSupported)
                 }
                 samples.pushMap(sampleMap)
             }
@@ -558,6 +560,9 @@ class PolarBleModule @JvmOverloads constructor(
         return Arguments.createMap().apply {
             putString("deviceId", deviceId)
             putInt("hr", sample.hr)
+            putInt("correctedHr", sample.correctedHr)
+            putInt("ppgQuality", sample.ppgQuality)
+            putBoolean("rrAvailable", sample.rrAvailable)
             putBoolean("contactDetected", sample.contactStatus)
             putBoolean("contactSupported", sample.contactStatusSupported)
             val rrs = sample.rrsMs

@@ -62,6 +62,18 @@ export default function MonitorScreen() {
           showRawEcgCards={session.showRawEcgCards}
           authToken={session.authToken}
           authCode={session.authCode}
+          showHrvLoading={
+            !!session.connectedDeviceId &&
+            !session.isMuseConnected &&
+            session.hrv <= 0 &&
+            (session.isStreamingLive || session.heartRate > 0)
+          }
+          hrvAnalysisMode={session.hrvAnalysisMode}
+          hrvProgressLabel={session.hrvProgressLabel}
+          hrvWallElapsedLabel={session.hrvWallElapsedLabel}
+          ppiWindowLength={session.ppiWindowLength}
+          hrvAcceptedDurationMs={session.hrvAcceptedDurationMs}
+          isH10Connected={session.isH10Connected}
         />
 
         {session.connectedDeviceId ? (
@@ -101,10 +113,15 @@ export default function MonitorScreen() {
                 ecgMicroVolts={session.ecgMicroVolts}
                 skinTemperatureC={session.skinTemperatureC}
                 ppiWindowLength={session.ppiWindowLength}
+                hrvProgressLabel={session.hrvProgressLabel}
+                hrvWallElapsedLabel={session.hrvWallElapsedLabel}
+                hrvAnalysisMode={session.hrvAnalysisMode}
+                hrvEpochInvalid={session.hrvEpochInvalid}
                 isSignalLost={session.isSignalLost}
                 isH10Connected={session.isH10Connected}
                 showRawEcgCards={session.showRawEcgCards}
                 isSkinTemperatureSupported={session.isSkinTemperatureSupported}
+                polarSignalQuality={session.polarSignalQuality}
               />
             )}
           </ThemedView>
